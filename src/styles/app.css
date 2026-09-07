@@ -1152,3 +1152,13 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
 }
+
+/* The outline of the path being point-edited. Drawn over the artwork, because
+   the anchors alone leave nothing joining them on a filled shape — and no
+   visible edge at all when the fill matches what is behind it. */
+.edit-outline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  pointer-events: none;
+}

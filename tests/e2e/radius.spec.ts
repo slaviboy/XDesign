@@ -213,3 +213,55 @@ test('W does not jump when a scaled node is resized', async ({ page }) => {
 
   expect(during).toBeCloseTo(after, 1)
 })
+
+test('the radius field has a draggable R label, like every other field', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 500, y: 380 })
+
+  const field = page.locator('.field[title="Corner radius"]')
+  const label = field.locator('.field-label')
+  await expect(label).toHaveText('R')
+  expect(Number(await field.locator('input').inputValue())).toBe(0)
+
+  // Scrubbing the label is how the rest of the inspector edits numbers; the
+  // radius used to be the one value you could only type. Scrolled into view
+  // first: raw mouse coordinates do not scroll the inspector the way a click would.
+  await label.scrollIntoViewIfNeeded()
+  const box = (await label.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2, { steps: 10 })
+  const during = Number(await field.locator('input').inputValue())
+  await page.mouse.up()
+
+  expect(during).toBeGreaterThan(0)
+  // The shape followed, and the value stuck on release.
+  expect(Number(await field.locator('input').inputValue())).toBe(during)
+  const d = (await page.locator('.document-layer [data-node-type="rect"] path').first().getAttribute('d'))!
+  expect((d.match(/A/g) ?? []).length).toBe(4)
+})
+
+test('each independent corner gets its own scrub handle', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 500, y: 380 })
+  await page.locator('[data-testid="corners-independent"]').click()
+
+  const corners = page.locator('.corner-fields .field')
+  await expect(corners).toHaveCount(4)
+  await expect(corners.locator('.field-label')).toHaveCount(4)
+
+  const label = corners.first().locator('.field-label')
+  await label.scrollIntoViewIfNeeded()
+  const box = (await label.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 25, box.y + box.height / 2, { steps: 8 })
+  await page.mouse.up()
+
+  const values = await corners.locator('input').evaluateAll((els) =>
+    els.map((e) => Number((e as HTMLInputElement).value)),
+  )
+  expect(values[0]).toBeGreaterThan(0)
+  // Only the corner whose label was dragged.
+  expect(values.slice(1)).toEqual([0, 0, 0])
+})

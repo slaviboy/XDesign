@@ -25,10 +25,12 @@ import { docToScreen } from './Viewport'
 import { angleBetween, rotationCursor } from './cursors'
 import { getDragMode, getLiveMatrix, getLiveRotation, getLiveSize, isDragging } from '../tools/DragSession'
 import { getEditingSubpaths } from '../tools/PathEditing'
+import { subpathsToPath } from '../geometry/PathPoints'
+import { transformPath } from '../geometry/PathUtils'
 import { getLiveRadius, radiusHandlePosition, type RadiusCorner } from '../tools/RadiusSession'
 import { getLiveStarRatio } from '../tools/StarRatioSession'
 import { starRatioHandlePoint } from '../geometry/ShapeGeometry'
-import { toSvgMatrix } from '../geometry/Matrix'
+import { multiply, toSvgMatrix } from '../geometry/Matrix'
 import { isGradient, sortedStops } from './paint'
 import { ANGULAR_RING, stopPointOnAxis } from '../tools/GradientSession'
 import { toCss } from '../document/color'
@@ -666,8 +668,21 @@ function PathPointOverlay({ viewport, tick }: { viewport: Viewport; tick: number
   const toScreen = (x: number, y: number): Vec2 =>
     docToScreen(viewport, applyToXY(editing.world, x, y))
 
+  // The outline being edited, drawn on top of the artwork.
+  //
+  // Without it the points float over a filled shape with nothing joining them,
+  // and on a shape whose fill matches its surroundings there is no visible edge
+  // at all. Screen space, so the hairline stays a hairline at any zoom, and it
+  // is drawn from the LIVE point model rather than the document so it tracks a
+  // drag frame by frame.
+  const outline = transformPath(
+    subpathsToPath(editing.subs),
+    multiply([viewport.zoom, 0, 0, viewport.zoom, viewport.x, viewport.y], editing.world),
+  )
+
   return (
     <g className="path-points">
+      <path className="edit-outline" d={outline} />
       {editing.subs.map((sub, si) =>
         sub.points.map((p, i) => {
           const a = toScreen(p.x, p.y)

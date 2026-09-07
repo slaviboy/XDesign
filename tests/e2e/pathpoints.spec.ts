@@ -171,3 +171,71 @@ test('handing points between the two pointers keeps them on screen', async ({ pa
   await selectTool(page, 'rect')
   await expect(page.locator('.anchor-point')).toHaveCount(0)
 })
+
+// ---------------------------------------------------------------- outline --
+
+test('the edited path is outlined in blue, over the fill', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 220, y: 200 }, { x: 440, y: 350 })
+  // Nothing to outline until the points are shown.
+  await expect(page.locator('.edit-outline')).toHaveCount(0)
+
+  await enterPoints(page, { x: 330, y: 275 })
+  await expect(page.locator('.edit-outline')).toHaveCount(1)
+
+  // A real trace of the shape, not a placeholder: closed, and covering exactly
+  // the same screen box as the artwork it is drawn over. A hairline stroke sits
+  // astride the path, so the outline's box is the wider by that stroke.
+  const d = (await page.locator('.edit-outline').getAttribute('d'))!
+  expect(d).toMatch(/^M/)
+  expect(d.trimEnd().endsWith('Z')).toBe(true)
+
+  const boxes = await page.evaluate(() => {
+    const box = (sel: string) => {
+      const r = document.querySelector(sel)!.getBoundingClientRect()
+      return [r.x, r.y, r.width, r.height]
+    }
+    return {
+      outline: box('.edit-outline'),
+      shape: box('.document-layer [data-node-type="rect"] path'),
+    }
+  })
+  for (let i = 0; i < 4; i++) {
+    expect(Math.abs(boxes.outline[i] - boxes.shape[i]), `component ${i}`).toBeLessThanOrEqual(2)
+  }
+
+  // It is drawn AFTER the document layer, so it lands on top of the fill.
+  const order = await page.evaluate(() => {
+    const outline = document.querySelector('.edit-outline')!
+    const shape = document.querySelector('.document-layer')!
+    return outline.compareDocumentPosition(shape) & Node.DOCUMENT_POSITION_PRECEDING ? 'above' : 'below'
+  })
+  expect(order).toBe('above')
+
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.edit-outline')).toHaveCount(0)
+})
+
+test('the outline follows a point while it is being dragged', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 220, y: 200 }, { x: 440, y: 350 })
+  await enterPoints(page, { x: 330, y: 275 })
+
+  const before = await page.locator('.edit-outline').getAttribute('d')
+  const corner = await pt(page, 220, 200)
+  await page.mouse.move(corner.x, corner.y)
+  await page.mouse.down()
+  await page.mouse.move(corner.x + 50, corner.y + 40, { steps: 8 })
+  // Mid-drag, from the live point model rather than the document.
+  expect(await page.locator('.edit-outline').getAttribute('d')).not.toBe(before)
+  await page.mouse.up()
+})
+
+test('the direct pointer shows the outline too', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'polygon', { x: 600, y: 200 }, { x: 780, y: 370 })
+  await selectTool(page, 'direct-select')
+  const at = await pt(page, 690, 300)
+  await page.mouse.click(at.x, at.y)
+  await expect(page.locator('.edit-outline')).toHaveCount(1)
+})

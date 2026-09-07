@@ -38,7 +38,10 @@ closing curve. `Enter`, `Escape` or a double-click ends an open path.
 (**Direct Selection**, `D`) goes straight to the leaf and shows its points. A single click on
 a rectangle puts its four corners on screen, on a line its two ends. Looking costs nothing:
 the shape stays a live rectangle, with its Corners and Radius fields, until you actually move
-a point — at which moment it becomes an editable path, as Illustrator does.
+a point — at which moment it becomes an editable path, as Illustrator does. The path being
+edited is traced in a blue hairline drawn over the artwork, so the edges read even on a shape
+whose fill matches what is behind it, and the trace comes from the live point model, not the
+document, so it follows a point through the drag rather than snapping on release.
 
 **Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
 snapping and smart guides, per-point Bézier editing, boolean operations, alignment and
@@ -66,8 +69,11 @@ including images and gradients, and a document palette that starts empty and fil
 save colours with (+).
 
 **Corner radius** — draggable handles inside rectangles, polygons and stars.
-Drag inward to round, outward to sharpen. A rectangle's corners can be edited together
-(one field) or independently (four), and the handle follows whichever mode is selected.
+Drag inward to round, outward to sharpen. Each handle keeps a constant gap inside the corner
+it rounds, so it stays reachable at any radius without drifting toward the centre. A
+rectangle's corners can be edited together (one field) or independently (four), and the handle
+follows whichever mode is selected. Every radius field carries an `R` label you can drag to
+scrub the value, like every other number in the inspector.
 
 **Repeat Grid** — repeat a selection in a grid. Edit any cell and every cell follows,
 because the grid holds one source rather than N copies. Expand turns it into independent

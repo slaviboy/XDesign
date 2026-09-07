@@ -52,7 +52,7 @@ import {
   AlignBottomIcon, AlignCenterHIcon, AlignCenterVIcon, AlignLeftIcon, AlignRightIcon,
   AlignTopIcon, DistributeHIcon, DistributeVIcon, FlipHIcon, FlipVIcon,
   CornersIndependentIcon, CornersUniformIcon, EyedropperIcon,
-  LinkBracket, MatchHeightIcon, MatchSizeIcon, MatchWidthIcon, RadiusIcon,
+  LinkBracket, MatchHeightIcon, MatchSizeIcon, MatchWidthIcon,
   RotateIcon, TextAlignCenterIcon, TextAlignLeftIcon, TextAlignRightIcon,
 } from './icons'
 import {
@@ -810,6 +810,9 @@ function CornerRadiusRow({ nodes }: { nodes: DesignNode[] }) {
             <NumberField
               key={corner}
               className={`tf-corner tf-corner-${corner}`}
+              // Labelled so each corner gets a scrub handle of its own; which
+              // corner it is lives in the title, and in where it sits.
+              label="R"
               title={CORNER_LABELS[corner]}
               value={common(boxes, (n) =>
                 round2(getLiveRadius(n.id, corner) ?? cornerRadiusOf(n, corner)),
@@ -824,7 +827,10 @@ function CornerRadiusRow({ nodes }: { nodes: DesignNode[] }) {
       ) : (
         <NumberField
           className="tf-corner-all"
-          label={canSplit ? undefined : <RadiusIcon size={13} />}
+          // A label, not the bare field it used to be: dragging the label is how
+          // every other numeric field in the inspector is scrubbed, and without
+          // one the radius was the only value you had to type.
+          label="R"
           title="Corner radius"
           value={uniformValue}
           min={0}
