@@ -7,7 +7,7 @@ import { parseHex, toHex, parseCssColor, rgbToHsv, hsvToRgb, rgbToHsl, hslToRgb,
 import { boundsFromPoints, contains, intersects, transformBounds, union, roundOut, fitInto, inflate, containsPoint } from '@/geometry/Bounds'
 import { rotation, translation, compose } from '@/geometry/Matrix'
 import { rectPath, ellipsePath, polygonStarPath, simplifyPoints, smoothPolylineToPath } from '@/geometry/ShapeGeometry'
-import { pathBounds, pathRenderBounds, strokeInflate, pathLength, pointAtLength, reversePath, splitSubpaths, toCubicSegments, distanceToPath } from '@/geometry/PathUtils'
+import { pathBounds, pathRenderBounds, strokeInflate, pathLength, pointAtLength, reversePath, splitSubpaths, toCubicSegments, distanceToPath, pathOverlapsBounds } from '@/geometry/PathUtils'
 import { pathToSubpaths, subpathsToPath, insertPointAt, deletePoint, togglePointType, isSmooth, closestSegment, corner, clearHandle } from '@/geometry/PathPoints'
 import { computeSnap, candidatesFromBounds, snapToGrid, snapValue } from '@/geometry/Snapping'
 
@@ -342,5 +342,44 @@ describe('snapping', () => {
   it('snaps a scalar', () => {
     expect(snapValue(103, [100, 200], 5)).toBe(100)
     expect(snapValue(150, [100, 200], 5)).toBe(150)
+  })
+})
+
+// --------------------------------------------------- crossing selection --
+
+describe('pathOverlapsBounds', () => {
+  const RECT = 'M0 0L100 0L100 100L0 100Z'
+
+  it('a band swept across the middle touches the shape', () => {
+    // No vertex of the rectangle is inside the band, and no vertex of the band
+    // is a path vertex at all: only the crossed EDGES say these overlap.
+    expect(pathOverlapsBounds(RECT, { x: -50, y: 45, width: 200, height: 10 })).toBe(true)
+  })
+
+  it('a box wholly inside the shape touches it', () => {
+    // Nothing is crossed here either — the box meets no edge at all.
+    expect(pathOverlapsBounds(RECT, { x: 40, y: 40, width: 10, height: 10 })).toBe(true)
+  })
+
+  it('a box holding one corner touches it', () => {
+    expect(pathOverlapsBounds(RECT, { x: -10, y: -10, width: 30, height: 30 })).toBe(true)
+  })
+
+  it('a box clear of the shape does not', () => {
+    expect(pathOverlapsBounds(RECT, { x: 200, y: 200, width: 50, height: 50 })).toBe(false)
+    // Alongside, sharing a span but never overlapping.
+    expect(pathOverlapsBounds(RECT, { x: 120, y: 0, width: 40, height: 100 })).toBe(false)
+  })
+
+  it('the hole in a donut is not part of the shape', () => {
+    const donut = 'M0 0L100 0L100 100L0 100ZM30 30L30 70L70 70L70 30Z'
+    expect(pathOverlapsBounds(donut, { x: 45, y: 45, width: 8, height: 8 }, 'evenodd')).toBe(false)
+    // The ring itself still is.
+    expect(pathOverlapsBounds(donut, { x: 5, y: 45, width: 8, height: 8 }, 'evenodd')).toBe(true)
+  })
+
+  it('an open path is touched by a box its line passes through', () => {
+    expect(pathOverlapsBounds('M0 0L100 100', { x: 40, y: 40, width: 10, height: 10 })).toBe(true)
+    expect(pathOverlapsBounds('M0 0L100 100', { x: 80, y: 10, width: 10, height: 10 })).toBe(false)
   })
 })

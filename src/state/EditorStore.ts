@@ -34,6 +34,30 @@ export type ToolId =
 
 export type WorkspaceTab = 'design' | 'prototype' | 'share'
 
+/**
+ * What a marquee has to do to an object before it counts as selected.
+ *
+ * 'enclose'  the whole object must be inside the rectangle. Precise, and the
+ *            default, because it is the only mode where dragging across a busy
+ *            canvas cannot pick up things you did not mean.
+ * 'touch'    anything the rectangle so much as clips is selected — dragging a
+ *            line through a row of objects takes all of them.
+ *
+ * Alt inverts whichever is chosen, so both are always one key away.
+ */
+export type MarqueeMode = 'enclose' | 'touch'
+
+export const MARQUEE_MODE_STORAGE_KEY = 'xdesign.marqueeMode'
+
+function readStoredMarqueeMode(): MarqueeMode {
+  try {
+    return localStorage.getItem(MARQUEE_MODE_STORAGE_KEY) === 'touch' ? 'touch' : 'enclose'
+  } catch {
+    // Private mode, or storage blocked. The default is the safe one.
+    return 'enclose'
+  }
+}
+
 export interface Viewport {
   /** Screen-space translation of the document origin, in CSS pixels. */
   x: number
@@ -81,6 +105,8 @@ export interface EditorState {
    * clicks select its direct children rather than resolving to the outermost group.
    */
   editingContext: NodeId | null
+  /** How much of an object a marquee must cover to select it. */
+  marqueeMode: MarqueeMode
   /** Text node currently being edited inline. */
   editingTextId: NodeId | null
   /** Artboard whose on-canvas name label is being renamed inline. */
@@ -143,6 +169,7 @@ export const editorStore = createStore<EditorState>()(
     selection: [],
     hoverId: null,
     editingContext: null,
+    marqueeMode: readStoredMarqueeMode(),
     editingTextId: null,
     renamingArtboardId: null,
     penTargetId: null,
@@ -185,6 +212,16 @@ let deactivateHandler: ((outgoing: ToolId) => void) | null = null
 
 export function setToolDeactivateHandler(fn: ((outgoing: ToolId) => void) | null): void {
   deactivateHandler = fn
+}
+
+/** Persisted, because a selection habit should outlive the tab. */
+export function setMarqueeMode(mode: MarqueeMode): void {
+  editorStore.setState({ marqueeMode: mode })
+  try {
+    localStorage.setItem(MARQUEE_MODE_STORAGE_KEY, mode)
+  } catch {
+    // Storage blocked: the choice still applies for this session.
+  }
 }
 
 export const getEditor = () => editorStore.getState()

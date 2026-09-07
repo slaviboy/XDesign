@@ -7,11 +7,11 @@ import { ARTBOARD_PRESETS, createDocument } from '../document/NodeFactory'
 import { updateSettings } from '../history/Commands'
 import { createArtboardCommand } from '../history/Commands'
 import { replaceDocument } from '../state/DocumentStore'
-import { closeDialog, setEditor, setViewport } from '../state/EditorStore'
+import { closeDialog, setEditor, setMarqueeMode, setViewport, type MarqueeMode } from '../state/EditorStore'
 import { useDocument, useEditorStore } from '../state/hooks'
 import { getStorageEstimate, clearRecent } from '../persistence/IndexedDbStore'
 import { supportsFileSystemAccess } from '../persistence/FileSystem'
-import { shortcutGroups } from '../shortcuts/bindings'
+import { ALT_LABEL, shortcutGroups } from '../shortcuts/bindings'
 import { NumberField, Select, TextField } from './primitives'
 import type { RecoveryOffer } from '../persistence/Autosave'
 
@@ -188,6 +188,7 @@ export function ArtboardPresetDialog() {
 export function PreferencesDialog() {
   const doc = useDocument()
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
+  const marqueeMode = useEditorStore((s) => s.marqueeMode)
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
 
   useEffect(() => {
@@ -224,6 +225,26 @@ export function PreferencesDialog() {
       <div className="dialog-row" style={{ marginTop: 10 }}>
         <label>Grid size</label>
         <NumberField value={doc.settings.gridSize} min={1} max={500} precision={0} onChange={(v) => updateSettings({ gridSize: Math.round(v) })} />
+      </div>
+
+      <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>Selection</h4>
+      <div className="dialog-row">
+        <label>Marquee selects</label>
+        <Select
+          value={marqueeMode}
+          options={[
+            { value: 'enclose', label: 'Objects fully inside' },
+            { value: 'touch', label: 'Anything it touches' },
+          ]}
+          onChange={(v) => setMarqueeMode(v as MarqueeMode)}
+          title="What a drag-selection has to cover before an object counts as selected"
+        />
+      </div>
+      <div className="multi-note" style={{ marginTop: 6 }}>
+        Dragging a rectangle over the canvas selects whatever falls inside it. “Anything it
+        touches” selects an object the moment the rectangle clips any part of it, so a single
+        stroke through a row picks up the whole row. Holding {ALT_LABEL} while you drag uses the
+        other mode for that one selection.
       </div>
 
       <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>Storage</h4>

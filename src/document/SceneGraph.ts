@@ -40,7 +40,7 @@ import {
   pointInPath,
   pointOnStroke,
   strokeInflate,
-  pathIntersectsBounds,
+  pathOverlapsBounds,
 } from '../geometry/PathUtils'
 import {
   isContainer,
@@ -602,7 +602,11 @@ export function nodesInBounds(
     const ly = Math.min(...localBoxPts.map((p) => p.y))
     const lw = Math.max(...localBoxPts.map((p) => p.x)) - lx
     const lh = Math.max(...localBoxPts.map((p) => p.y)) - ly
-    return pathIntersectsBounds(d, { x: lx, y: ly, width: lw, height: lh })
+    return pathOverlapsBounds(
+      d,
+      { x: lx, y: ly, width: lw, height: lh },
+      hasStyle(node) ? node.style.fillRule : 'nonzero',
+    )
   }
 
   const visit = (id: NodeId): void => {

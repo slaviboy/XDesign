@@ -411,8 +411,11 @@ export const selectionTool: Tool = {
     if (state.phase === 'marquee') {
       const box = editor.marquee
       if (box && (box.width > 1 || box.height > 1)) {
+        // Alt inverts the preference rather than turning crossing on, so
+        // whichever mode is set, the other one is still one key away.
+        const touch = editor.marqueeMode === 'touch'
         const found = nodesInBounds(ctx.doc(), box, {
-          crossing: e.altKey,
+          crossing: e.altKey ? !touch : touch,
           within: editor.editingContext ?? undefined,
         })
         if (e.shiftKey) addToSelection(found)

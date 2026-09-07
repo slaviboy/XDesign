@@ -53,6 +53,11 @@ the name moves the artboard whatever tool is selected: the label is chrome rathe
 so it takes the pointer itself and no tool ever sees the press. It is positioned from the live
 matrix, so it travels with the artboard instead of jumping to it on release.
 
+**Marquee selection, two ways** — Preferences > Selection chooses what a drag-selection has to
+cover: *Objects fully inside* (the default) or *Anything it touches*, where one stroke through a
+row picks up the whole row. `⌥` uses the other mode for a single selection, whichever is set, and
+the choice is remembered between sessions.
+
 **Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
 snapping and smart guides, per-point Bézier editing, boolean operations, alignment and
 distribution, z-ordering, grouping, locking, hiding, guides and a grid. Corners carry a
@@ -467,6 +472,26 @@ and moving the panel left its blur region behind: the canvas the panel had left 
 and the canvas it had arrived at did not. The clip therefore registers under two LiveTransform
 keys — the node's own, which carries the matrix, and its geometry key, which carries `d` — so a
 move and a resize both reach it in the frame they happen.
+
+### "Does the marquee touch this?" is three questions, not one
+
+Crossing selection existed behind `⌥` before it had a setting, and it did not work for the case
+people actually reach for: sweeping a thin band through a row of objects selected none of them.
+The test underneath asked only whether any *vertex of the path* fell inside the rectangle, and
+sweeping across the middle of a rectangle catches none of its corners.
+
+Overlap needs all three of:
+
+1. a vertex inside the box — a corner of the shape caught by the marquee;
+2. an **edge crossing** the box, with no vertex in it — the band across the middle touches two
+   sides and no corners;
+3. the box entirely **inside** the shape — the same band, once short enough to fit within the
+   rectangle, meets no edge at all.
+
+`pathOverlapsBounds` answers 1 and 2 with a Liang-Barsky segment clip against the box, which is
+exact and needs no intersection points, and 3 with a point-in-path test of the box's centre under
+the shape's own fill rule — so the hole in a donut is correctly not part of it. The old function
+is gone rather than kept beside the new one: there was never a case that wanted the weaker answer.
 
 ### Live resize reaches three kinds of geometry, not one
 

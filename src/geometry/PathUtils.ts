@@ -545,18 +545,75 @@ export function pointOnStroke(d: string, p: Vec2, strokeWidth: number, tolerance
 }
 
 /** True when any part of the path falls inside `box` — used by marquee selection. */
-export function pathIntersectsBounds(d: string, box: Bounds): boolean {
+/**
+ * Does the region a path covers overlap `box` at all?
+ *
+ * Three things have to be true for this to answer a crossing selection
+ * correctly, and checking only the first — which is what "is any vertex inside
+ * the box" amounts to — gets the two common cases wrong:
+ *
+ *   1. a vertex inside the box (a corner of the shape caught by the marquee);
+ *   2. an EDGE crossing the box, even with no vertex in it — dragging a narrow
+ *      band across the middle of a rectangle touches two of its sides and none
+ *      of its corners;
+ *   3. the box entirely INSIDE the shape — the same narrow band, once it is
+ *      short enough to fit within the rectangle, meets no edge at all.
+ */
+export function pathOverlapsBounds(
+  d: string,
+  box: Bounds,
+  fillRule: FillRule = 'nonzero',
+): boolean {
   const polys = pathToPolylines(d)
-  const x0 = box.x
-  const y0 = box.y
-  const x1 = box.x + box.width
-  const y1 = box.y + box.height
+  if (polys.length === 0) return false
+
   for (const poly of polys) {
-    for (const pt of poly.points) {
-      if (pt.x >= x0 && pt.x <= x1 && pt.y >= y0 && pt.y <= y1) return true
+    const points = poly.points
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i]!
+      // A closed subpath's last segment runs back to its first point.
+      const b = points[i + 1] ?? (poly.closed ? points[0]! : null)
+      if (!b) break
+      if (segmentOverlapsBounds(a, b, box)) return true
     }
   }
-  return false
+
+  // Nothing crossed, so the only way left to overlap is for the box to sit
+  // wholly within the shape.
+  return pointInPath(d, { x: box.x + box.width / 2, y: box.y + box.height / 2 }, fillRule)
+}
+
+/**
+ * Segment against an axis-aligned box, by the Liang-Barsky clip.
+ *
+ * True when any part of the segment lies in the box, a segment entirely inside
+ * it included — which is case 2 above, and is why this is not just a bounding
+ * box comparison.
+ */
+function segmentOverlapsBounds(a: Vec2, b: Vec2, box: Bounds): boolean {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const p = [-dx, dx, -dy, dy]
+  const q = [a.x - box.x, box.x + box.width - a.x, a.y - box.y, box.y + box.height - a.y]
+
+  let t0 = 0
+  let t1 = 1
+  for (let i = 0; i < 4; i++) {
+    if (p[i] === 0) {
+      // Parallel to this edge: outside it means outside the box entirely.
+      if (q[i]! < 0) return false
+      continue
+    }
+    const r = q[i]! / p[i]!
+    if (p[i]! < 0) {
+      if (r > t1) return false
+      if (r > t0) t0 = r
+    } else {
+      if (r < t0) return false
+      if (r < t1) t1 = r
+    }
+  }
+  return true
 }
 
 // ---------------------------------------------------------------------------

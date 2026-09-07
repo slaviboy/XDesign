@@ -6,9 +6,9 @@
 
 import { test, expect } from '@playwright/test'
 import {
-  CANVAS, RED_PNG_BASE64, captureDownload, clickCanvas, dragOnCanvas, drawShape,
-  dropFiles, modifier, nodesOfType, openApp, openExportDialog, press, readField,
-  selectTool, setField,
+  CANVAS, RED_PNG_BASE64, captureDownload, clickCanvas, dismissRecovery, dragOnCanvas,
+  drawShape, dropFiles, modifier, nodesOfType, openApp, openExportDialog, press,
+  readField, selectTool, setField,
 } from './helpers'
 
 /** Draw a shallow arc freehand, so the simplifier has real curvature to keep. */
@@ -908,4 +908,97 @@ test('Escape during a label drag puts the artboard back', async ({ page }) => {
   await page.mouse.up()
 
   expect(await readField(page, 'X')).toBeCloseTo(0, 0)
+})
+
+// -------------------------------------------------------- marquee modes --
+
+/** Drag a selection rectangle across the canvas. */
+async function marquee(
+  page: import('@playwright/test').Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  alt = false,
+) {
+  const box = (await page.locator(CANVAS).boundingBox())!
+  if (alt) await page.keyboard.down('Alt')
+  await page.mouse.move(box.x + from.x, box.y + from.y)
+  await page.mouse.down()
+  await page.mouse.move(box.x + to.x, box.y + to.y, { steps: 8 })
+  await page.mouse.up()
+  if (alt) await page.keyboard.up('Alt')
+}
+
+async function setMarqueeMode(page: import('@playwright/test').Page, mode: 'enclose' | 'touch') {
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('.menu-item', { hasText: 'Preferences' }).click()
+  await page.locator('.dialog select[title^="What a drag-selection"]').selectOption(mode)
+  await page.locator('.dialog button', { hasText: 'Done' }).click()
+}
+
+/** Three rectangles in a row, with gaps between them. */
+async function threeInARow(page: import('@playwright/test').Page) {
+  await drawShape(page, 'rect', { x: 240, y: 200 }, { x: 340, y: 300 })
+  await drawShape(page, 'rect', { x: 380, y: 200 }, { x: 480, y: 300 })
+  await drawShape(page, 'rect', { x: 520, y: 200 }, { x: 620, y: 300 })
+  await selectTool(page, 'select')
+}
+
+test('a marquee selects only what it encloses, by default', async ({ page }) => {
+  await openApp(page)
+  await threeInARow(page)
+
+  // A thin sweep through all three encloses none of them.
+  await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 })
+  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
+
+  // A rectangle round the first two takes exactly those.
+  await marquee(page, { x: 210, y: 170 }, { x: 500, y: 330 })
+  await expect(page.locator('.layer-row.selected')).toHaveCount(2)
+})
+
+test('the Touch mode selects everything the marquee crosses', async ({ page }) => {
+  await openApp(page)
+  await threeInARow(page)
+  await setMarqueeMode(page, 'touch')
+
+  // One stroke through the row now takes the whole row — no vertex of any
+  // rectangle is inside the band, so this only works if crossed EDGES count.
+  await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 })
+  await expect(page.locator('.layer-row.selected')).toHaveCount(3)
+
+  // Even a marquee wholly inside one shape, touching none of its edges.
+  await page.keyboard.press('Escape')
+  await marquee(page, { x: 260, y: 230 }, { x: 300, y: 270 })
+  await expect(page.locator('.layer-row.selected')).toHaveCount(1)
+})
+
+test('Alt uses the other mode for one selection, whichever is set', async ({ page }) => {
+  await openApp(page)
+  await threeInARow(page)
+
+  // Enclose is set: Alt crosses.
+  await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 }, true)
+  await expect(page.locator('.layer-row.selected')).toHaveCount(3)
+
+  await page.keyboard.press('Escape')
+  await setMarqueeMode(page, 'touch')
+  // Touch is set: Alt encloses.
+  await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 }, true)
+  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
+})
+
+test('the marquee mode outlives the tab', async ({ page }) => {
+  await openApp(page)
+  await setMarqueeMode(page, 'touch')
+
+  await page.reload()
+  await page.waitForSelector(CANVAS)
+  await page.waitForTimeout(300)
+  await dismissRecovery(page)
+  // Drawn after the reload: dismissing the recovery offer starts a fresh
+  // document, and the point here is the preference, not the artwork.
+  await threeInARow(page)
+
+  await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 })
+  await expect(page.locator('.layer-row.selected')).toHaveCount(3)
 })
