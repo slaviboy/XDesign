@@ -454,105 +454,6 @@ export function GradientEditor({
         }
       }}
     >
-      <div
-        ref={barRef}
-        className="gradient-bar"
-        style={{ background: gradientCss }}
-        onPointerDown={(e) => {
-          // Adobe: "Click anywhere on the gradient editor to add new color
-          // stops." The new stop takes the colour the ramp actually shows there,
-          // which is what makes clicking mid-ramp leave the gradient unchanged.
-          if ((e.target as HTMLElement).closest('.gradient-stop')) return
-          const offset = offsetFromEvent(e.clientX)
-          const stop = createStop(offset, sampleGradientAt(paint.stops, offset))
-          setActiveId(stop.id)
-          updateStops([...paint.stops, stop], true)
-        }}
-      >
-        {sorted.map((stop) => (
-          <div
-            key={stop.id}
-            className={`gradient-stop${stop.id === active?.id ? ' active' : ''}`}
-            style={{ left: `${stop.offset * 100}%` }}
-            onPointerDown={(e) => {
-              e.stopPropagation()
-              setActiveId(stop.id)
-              draggingStop.current = stop.id
-              ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-            }}
-            onPointerMove={(e) => {
-              if (draggingStop.current !== stop.id) return
-              const offset = offsetFromEvent(e.clientX)
-              updateStops(
-                paint.stops.map((s) => (s.id === stop.id ? { ...s, offset } : s)),
-                false,
-              )
-            }}
-            onPointerUp={(e) => {
-              if (draggingStop.current !== stop.id) return
-              draggingStop.current = null
-              try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* released */ }
-              // Adobe: delete a stop "by dragging it away from the gradient
-              // editor". Far enough vertically and it goes, subject to the two
-              // stops every gradient needs.
-              const rect = barRef.current?.getBoundingClientRect()
-              const away = rect ? Math.abs(e.clientY - (rect.top + rect.height / 2)) > DRAG_AWAY_PX : false
-              if (away && paint.stops.length > 2) {
-                const next = paint.stops.filter((s) => s.id !== stop.id)
-                setActiveId(next[0]?.id ?? '')
-                updateStops(next, true)
-                return
-              }
-              updateStops(paint.stops, true)
-            }}
-          >
-            <span className="gradient-stop-fill" style={{ background: toCss(stop.color) }} />
-          </div>
-        ))}
-      </div>
-
-      <div className="hstack">
-        <NumberField
-          label="Pos"
-          value={active ? Math.round(active.offset * 100) : null}
-          min={0}
-          max={100}
-          suffix="%"
-          precision={0}
-          onChange={(v, committing) => {
-            if (!active) return
-            updateStops(
-              paint.stops.map((s) => (s.id === active.id ? { ...s, offset: v / 100 } : s)),
-              committing,
-            )
-          }}
-        />
-        <button
-          type="button"
-          className="icon-button"
-          title="Add stop"
-          onClick={() => {
-            // Midway along the widest gap, so pressing it repeatedly keeps
-            // producing usable stops instead of stacking them all at 0.5.
-            const offset = widestGapMidpoint(sorted)
-            const stop = createStop(offset, sampleGradientAt(paint.stops, offset))
-            setActiveId(stop.id)
-            updateStops([...paint.stops, stop], true)
-          }}
-        >
-          <PlusIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          title="Remove stop"
-          disabled={paint.stops.length <= 2 || !active}
-          onClick={removeActive}
-        >
-          <TrashIcon />
-        </button>
-      </div>
-
       {active && (
         <ColorPicker
           // Keyed by stop: the picker holds local HSV and resyncs by comparing
@@ -568,29 +469,139 @@ export function GradientEditor({
         />
       )}
 
-      <div className="field-row">
-        {paint.type === 'linear' && (
-          <>
-            <NumberField label="X1" value={paint.x1} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, x1: v }, c)} />
-            <NumberField label="Y1" value={paint.y1} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, y1: v }, c)} />
-            <NumberField label="X2" value={paint.x2} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, x2: v }, c)} />
-            <NumberField label="Y2" value={paint.y2} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, y2: v }, c)} />
-          </>
-        )}
-        {paint.type === 'radial' && (
-          <>
-            <NumberField label="X" value={paint.cx} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, cx: v }, c)} />
-            <NumberField label="Y" value={paint.cy} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, cy: v }, c)} />
-            <NumberField label="R" value={paint.r} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, r: v }, c)} />
-          </>
-        )}
-        {paint.type === 'angular' && (
-          <>
-            <NumberField label="X" value={paint.cx} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, cx: v }, c)} />
-            <NumberField label="Y" value={paint.cy} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, cy: v }, c)} />
-            <NumberField label="Angle" value={paint.rotation} min={-360} max={360} precision={0} suffix="°" onChange={(v, c) => onChange({ ...paint, rotation: v }, c)} />
-          </>
-        )}
+      {/* The picker above edits ONE stop; everything below edits the
+          gradient as a whole. */}
+      <div className="gradient-divider" />
+
+      <div className="gradient-section">
+        <span className="gradient-section-label">Color stops</span>
+        <div className="gradient-section-body">
+        <div
+          ref={barRef}
+          className="gradient-bar"
+          style={{ background: gradientCss }}
+          onPointerDown={(e) => {
+            // Adobe: "Click anywhere on the gradient editor to add new color
+            // stops." The new stop takes the colour the ramp actually shows there,
+            // which is what makes clicking mid-ramp leave the gradient unchanged.
+            if ((e.target as HTMLElement).closest('.gradient-stop')) return
+            const offset = offsetFromEvent(e.clientX)
+            const stop = createStop(offset, sampleGradientAt(paint.stops, offset))
+            setActiveId(stop.id)
+            updateStops([...paint.stops, stop], true)
+          }}
+        >
+          {sorted.map((stop) => (
+            <div
+              key={stop.id}
+              className={`gradient-stop${stop.id === active?.id ? ' active' : ''}`}
+              style={{ left: `${stop.offset * 100}%` }}
+              onPointerDown={(e) => {
+                e.stopPropagation()
+                setActiveId(stop.id)
+                draggingStop.current = stop.id
+                ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+              }}
+              onPointerMove={(e) => {
+                if (draggingStop.current !== stop.id) return
+                const offset = offsetFromEvent(e.clientX)
+                updateStops(
+                  paint.stops.map((s) => (s.id === stop.id ? { ...s, offset } : s)),
+                  false,
+                )
+              }}
+              onPointerUp={(e) => {
+                if (draggingStop.current !== stop.id) return
+                draggingStop.current = null
+                try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* released */ }
+                // Adobe: delete a stop "by dragging it away from the gradient
+                // editor". Far enough vertically and it goes, subject to the two
+                // stops every gradient needs.
+                const rect = barRef.current?.getBoundingClientRect()
+                const away = rect ? Math.abs(e.clientY - (rect.top + rect.height / 2)) > DRAG_AWAY_PX : false
+                if (away && paint.stops.length > 2) {
+                  const next = paint.stops.filter((s) => s.id !== stop.id)
+                  setActiveId(next[0]?.id ?? '')
+                  updateStops(next, true)
+                  return
+                }
+                updateStops(paint.stops, true)
+              }}
+            >
+              <span className="gradient-stop-fill" style={{ background: toCss(stop.color) }} />
+            </div>
+          ))}
+        </div>
+        <div className="hstack">
+          <NumberField
+            label="Pos"
+            value={active ? Math.round(active.offset * 100) : null}
+            min={0}
+            max={100}
+            suffix="%"
+            precision={0}
+            onChange={(v, committing) => {
+              if (!active) return
+              updateStops(
+                paint.stops.map((s) => (s.id === active.id ? { ...s, offset: v / 100 } : s)),
+                committing,
+              )
+            }}
+          />
+          <button
+            type="button"
+            className="icon-button"
+            title="Add stop"
+            onClick={() => {
+              // Midway along the widest gap, so pressing it repeatedly keeps
+              // producing usable stops instead of stacking them all at 0.5.
+              const offset = widestGapMidpoint(sorted)
+              const stop = createStop(offset, sampleGradientAt(paint.stops, offset))
+              setActiveId(stop.id)
+              updateStops([...paint.stops, stop], true)
+            }}
+          >
+            <PlusIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            title="Remove stop"
+            disabled={paint.stops.length <= 2 || !active}
+            onClick={removeActive}
+          >
+            <TrashIcon />
+          </button>
+        </div>
+        </div>
+      </div>
+
+      <div className="gradient-section">
+        <span className="gradient-section-label">Position</span>
+        <div className="gradient-geometry">
+          {paint.type === 'linear' && (
+            <>
+              <NumberField label="X1" value={paint.x1} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, x1: v }, c)} />
+              <NumberField label="Y1" value={paint.y1} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, y1: v }, c)} />
+              <NumberField label="X2" value={paint.x2} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, x2: v }, c)} />
+              <NumberField label="Y2" value={paint.y2} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, y2: v }, c)} />
+            </>
+          )}
+          {paint.type === 'radial' && (
+            <>
+              <NumberField label="X" value={paint.cx} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, cx: v }, c)} />
+              <NumberField label="Y" value={paint.cy} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, cy: v }, c)} />
+              <NumberField label="R" value={paint.r} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, r: v }, c)} />
+            </>
+          )}
+          {paint.type === 'angular' && (
+            <>
+              <NumberField label="X" value={paint.cx} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, cx: v }, c)} />
+              <NumberField label="Y" value={paint.cy} step={0.05} scrubStep={0.005} onChange={(v, c) => onChange({ ...paint, cy: v }, c)} />
+              <NumberField label="Angle" value={paint.rotation} min={-360} max={360} precision={0} suffix="°" onChange={(v, c) => onChange({ ...paint, rotation: v }, c)} />
+            </>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -768,7 +779,7 @@ export function PaintPopover({
 }
 
 /** The popover's width, shared so the inspector's left-flip cannot drift from it. */
-export const PAINT_POPOVER_WIDTH = 296
+export const PAINT_POPOVER_WIDTH = 300
 
 /**
  * Convert between paint types, carrying the colour across.

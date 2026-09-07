@@ -701,7 +701,9 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .sv-square {
   position: relative;
   width: 100%;
-  height: 140px;
+  /* Deliberately wider than tall: a square reads as a colour swatch, a
+     rectangle reads as a field you sweep across. */
+  height: 156px;
   border-radius: var(--radius);
   cursor: crosshair;
   touch-action: none;
@@ -721,15 +723,18 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .slider-track {
   position: relative;
   height: 12px;
-  border-radius: 6px;
+  /* The same corner as the field above, not a pill: the two sit side by side and
+     a different radius on each reads as two unrelated controls. */
+  border-radius: var(--radius);
   cursor: pointer;
   touch-action: none;
 }
 /* Beside the square rather than under it: the ramp runs top to bottom, and the
-   thumb travels on the other axis. */
+   thumb travels on the other axis. Wide enough that the hue under the thumb is
+   still readable through it. */
 .slider-track.vertical {
   height: auto;
-  width: 12px;
+  width: 20px;
   flex: none;
 }
 .hue-track {
@@ -748,18 +753,22 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   background-size: 8px 8px;
   background-position: 0 0, 0 4px, 4px -4px, -4px 0;
 }
-.alpha-overlay { position: absolute; inset: 0; border-radius: 6px; }
+.alpha-overlay { position: absolute; inset: 0; border-radius: var(--radius); }
+/* Hollow, like the cursor on the square above: the colour it is pointing at
+   shows through instead of being hidden by the thumb. */
 .slider-thumb {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 14px; height: 14px;
-  background: var(--thumb-bg);
-  border: 1px solid var(--border-strong);
+  /* Exactly the cursor on the field above — same size, same ring, same shadow —
+     because they are the same kind of control pointing at the same kind of value. */
+  width: 12px; height: 12px;
+  background: transparent;
+  border: 2px solid var(--thumb-bg);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
 }
 
 .gradient-bar {
@@ -1087,3 +1096,36 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   stroke-dasharray: 4 3;
 }
 .gradient-stop-base { fill: var(--handle-fill); stroke: none; }
+
+/* ---------------------------------------------------- gradient sections -- */
+
+/* The colour picker edits ONE stop; everything below it edits the gradient as a
+   whole. The rule says so, and the labels say which is which. */
+.gradient-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
+.gradient-section {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.gradient-section-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  /* Aligned to the first row of controls, not to the top of the block. */
+  padding-top: 6px;
+}
+.gradient-section-body { display: flex; flex-direction: column; gap: 6px; }
+/* Inset the ramp by half a marker, so the stops at 0% and 100% sit fully on it
+   instead of hanging over the panel's edge. */
+.gradient-section-body .gradient-bar { margin: 0 9px; }
+/* Two columns for every gradient type, so linear's four fields and radial's and
+   angular's three line up in the same grid instead of each finding its own. */
+.gradient-geometry {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}

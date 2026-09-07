@@ -299,6 +299,14 @@ to red the moment value hits zero. HSL is derived from that same HSV through exa
 `hslToHsv` rather than through RGB, which would quantise every value through 8 bits and collapse the
 hue while you drag lightness to zero.
 
+The panel is ordered by what each control edits: the wheel, sliders and value
+fields change ONE stop, so they sit together at the top; below a rule, **Color stops** edits the
+ramp as a whole and **Position** edits where the gradient sits. The two labels are what stop those
+last two rows reading as more colour controls. The saturation field is deliberately wider than tall
+— a square reads as a swatch, a rectangle reads as something you sweep across — and both sliders'
+thumbs are hollow rings rather than filled dots, so the value they are pointing at shows through
+instead of being hidden underneath.
+
 The palette is document data, alongside `guides` — it travels with the artwork rather than living in
 one browser's storage, and adding a swatch is an ordinary undoable edit. The file-format field is
 purely additive, so `FORMAT_VERSION` stays at 2: an older build ignores the key, and a file without
