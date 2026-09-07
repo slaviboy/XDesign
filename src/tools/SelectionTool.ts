@@ -77,6 +77,7 @@ import {
   removeFromSelection,
   setEditor,
   setSelection,
+  setTool,
 } from '../state/EditorStore'
 import { getDoc } from '../state/DocumentStore'
 import { isUniformCornerRadius } from '../document/types'
@@ -457,6 +458,12 @@ export const selectionTool: Tool = {
       setSelection([deep])
       setEditor({ nodeEditingId: deep })
       beginPathEditing(deep)
+      // The rail has to name the mode the canvas is actually in. A double-click
+      // puts you on the points, which is Direct Selection's job, so light that
+      // button up rather than leaving the arrow claiming to be in charge.
+      // setTool carries `nodeEditingId` across between the two pointers, which
+      // is what makes this handover free.
+      setTool('direct-select')
       return
     }
 

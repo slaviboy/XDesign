@@ -229,6 +229,22 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 }
 .artboard-label.selected { fill: var(--accent); }
 
+/* Renaming an artboard in place. Matched to the label's font so the name keeps
+   its size and position when the input takes over from the <text>. */
+.artboard-rename {
+  position: absolute;
+  height: 18px;
+  padding: 0 3px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  outline: none;
+  min-width: 80px;
+}
+
 .drop-indicator {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -892,8 +908,12 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
 .zoom-value {
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
-  min-width: 42px;
-  text-align: right;
+  /* An <input> with no width is about twenty characters wide by default, which
+     made the zoom control the widest thing in the bar. "1000%" is the longest
+     value it can ever hold. */
+  width: 44px;
+  flex: none;
+  text-align: center;
   border: none;
   background: transparent;
   outline: none;

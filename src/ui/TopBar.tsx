@@ -1,9 +1,9 @@
 /**
  * The application bar.
  *
- * Left: mark, editable document name, save status.
+ * Left: application menu, mark, editable document name, save status.
  * Center: Design / Prototype / Share.
- * Right: preview, zoom control, application menu.
+ * Right: theme, grid, snapping, preview, zoom control.
  *
  * Prototype and Share render their real tab chrome but are explicitly marked as
  * not yet implemented rather than faked with dead controls — a disabled tab that
@@ -132,6 +132,23 @@ export const TopBar = memo(function TopBar() {
   return (
     <header className="topbar">
       <div className="topbar-left">
+        <Tooltip label="Menu">
+          <button
+            ref={menuButtonRef}
+            type="button"
+            className="icon-button"
+            aria-label="Application menu"
+            data-testid="app-menu"
+            onClick={() => {
+              const rect = menuButtonRef.current?.getBoundingClientRect()
+              // Anchored to the button's LEFT edge now that it opens from the
+              // left of the bar; right-anchoring would run the panel off screen.
+              menu.open(rect?.left ?? 0, (rect?.bottom ?? 0) + 4, buildMenu())
+            }}
+          >
+            <MenuIcon />
+          </button>
+        </Tooltip>
         <span className="app-mark" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 32 32">
             <path d="M9 9l14 14M23 9L9 23" strokeWidth="3.4" strokeLinecap="round" />
@@ -188,21 +205,6 @@ export const TopBar = memo(function TopBar() {
 
         <ZoomControl />
 
-        <Tooltip label="Menu">
-          <button
-            ref={menuButtonRef}
-            type="button"
-            className="icon-button"
-            aria-label="Application menu"
-            data-testid="app-menu"
-            onClick={() => {
-              const rect = menuButtonRef.current?.getBoundingClientRect()
-              menu.open((rect?.right ?? 0) - 200, (rect?.bottom ?? 0) + 4, buildMenu())
-            }}
-          >
-            <MenuIcon />
-          </button>
-        </Tooltip>
       </div>
 
       <MenuHost menu={menu.menu} onClose={menu.close} />
@@ -317,18 +319,20 @@ function ZoomControl() {
         onBlur={() => setDraft(null)}
       />
       <button type="button" className="icon-button" aria-label="Zoom in" onClick={() => stepZoom(1)}>+</button>
-      <button
-        ref={ref}
-        type="button"
-        className="icon-button"
-        aria-label="Zoom presets"
-        onClick={() => {
-          const rect = ref.current?.getBoundingClientRect()
-          menu.open((rect?.right ?? 0) - 160, (rect?.bottom ?? 0) + 4, items)
-        }}
-      >
-        ▾
-      </button>
+      <Tooltip label="Zoom presets">
+        <button
+          ref={ref}
+          type="button"
+          className="icon-button"
+          aria-label="Zoom presets"
+          onClick={() => {
+            const rect = ref.current?.getBoundingClientRect()
+            menu.open((rect?.right ?? 0) - 160, (rect?.bottom ?? 0) + 4, items)
+          }}
+        >
+          ▾
+        </button>
+      </Tooltip>
       <MenuHost menu={menu.menu} onClose={menu.close} />
     </div>
   )

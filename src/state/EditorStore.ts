@@ -83,6 +83,8 @@ export interface EditorState {
   editingContext: NodeId | null
   /** Text node currently being edited inline. */
   editingTextId: NodeId | null
+  /** Artboard whose on-canvas name label is being renamed inline. */
+  renamingArtboardId: NodeId | null
   /** Path node the pen tool is currently building or editing. */
   penTargetId: NodeId | null
   /** Node whose gradient handles are shown on canvas, while the picker is open. */
@@ -142,6 +144,7 @@ export const editorStore = createStore<EditorState>()(
     hoverId: null,
     editingContext: null,
     editingTextId: null,
+    renamingArtboardId: null,
     penTargetId: null,
     gradientEditing: null,
     activeGradientStop: null,

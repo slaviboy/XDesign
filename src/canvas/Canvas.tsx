@@ -28,7 +28,7 @@ import { SelectionOverlay } from './SelectionOverlay'
 import { GridOverlay } from './GridOverlay'
 import { GuidesOverlay } from './GuidesOverlay'
 import { ToolOverlay } from './ToolOverlay'
-import { ArtboardLabels } from './ArtboardLabels'
+import { ArtboardLabels, ArtboardNameEditor } from './ArtboardLabels'
 import { TextEditor } from './TextEditor'
 import { screenDistanceToDoc, screenToDoc, docToScreen } from './Viewport'
 import { getTool } from '../tools/ToolRegistry'
@@ -359,6 +359,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
       </svg>
 
       {editingTextId && <TextEditor nodeId={editingTextId} />}
+      <ArtboardNameEditor />
       <DropIndicator />
     </div>
   )

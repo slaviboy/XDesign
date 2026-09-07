@@ -239,3 +239,24 @@ test('the direct pointer shows the outline too', async ({ page }) => {
   await page.mouse.click(at.x, at.y)
   await expect(page.locator('.edit-outline')).toHaveCount(1)
 })
+
+test('double-clicking a shape lights up the Direct Selection tool', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 220, y: 200 }, { x: 420, y: 340 })
+  await expect(page.locator('.tool-button.active')).toHaveAttribute('data-tool', 'select')
+
+  await enterPoints(page, { x: 320, y: 270 })
+  // The rail has to name the mode the canvas is in: the points belong to the
+  // second pointer, so that is the button that lights up.
+  await expect(page.locator('.tool-button.active')).toHaveAttribute('data-tool', 'direct-select')
+  await expect(page.locator('.anchor-point')).toHaveCount(4)
+
+  // And the handover kept the points alive — a tool change that dropped them
+  // would leave the overlay showing anchors that no longer edit anything.
+  const corner = await pt(page, 220, 200)
+  await page.mouse.move(corner.x, corner.y)
+  await page.mouse.down()
+  await page.mouse.move(corner.x + 40, corner.y + 30, { steps: 6 })
+  await page.mouse.up()
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+})

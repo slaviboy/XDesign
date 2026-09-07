@@ -42,6 +42,13 @@ a point — at which moment it becomes an editable path, as Illustrator does. Th
 edited is traced in a blue hairline drawn over the artwork, so the edges read even on a shape
 whose fill matches what is behind it, and the trace comes from the live point model, not the
 document, so it follows a point through the drag rather than snapping on release.
+Double-clicking a shape with the arrow does the same thing, and lights up the Direct Selection
+button while it is doing it — the rail names the mode the canvas is actually in, and the two
+pointers hand the points back and forth without dropping them.
+
+**Artboards** — double-click a name label on the canvas to rename it in place, with the whole
+name selected so typing replaces it. `Enter` or clicking away commits, `Escape` abandons, and
+an empty name keeps the old one rather than leaving an artboard with no name at all.
 
 **Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
 snapping and smart guides, per-point Bézier editing, boolean operations, alignment and

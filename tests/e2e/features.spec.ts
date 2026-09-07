@@ -609,8 +609,9 @@ test('tooltips appear next to the control they describe', async ({ page }) => {
 test('tooltips near the right edge flip inside the window', async ({ page }) => {
   await openApp(page)
 
-  // The top-bar menu sits hard against the right edge.
-  const button = page.locator('[data-testid="app-menu"]')
+  // The zoom presets button sits hard against the right edge, now that the
+  // application menu has moved to the left of the bar.
+  const button = page.locator('button[aria-label="Zoom presets"]')
   await button.hover()
 
   const tip = page.locator('.tooltip')
@@ -677,4 +678,123 @@ test('dropping an image onto the canvas imports it', async ({ page }) => {
   await expect(page.locator('.layer-row', { hasText: 'photo' })).toHaveCount(1)
   // Placed where it was dropped, not at the origin.
   expect(await readField(page, 'X')).toBeGreaterThan(0)
+})
+
+// -------------------------------------------------------------- the top bar --
+
+test('the application menu sits at the left of the bar and opens under itself', async ({ page }) => {
+  await openApp(page)
+  const button = page.locator('[data-testid="app-menu"]')
+
+  const where = await page.evaluate(() => {
+    const btn = document.querySelector('[data-testid="app-menu"]')!
+    const mark = document.querySelector('.app-mark')!
+    return {
+      inLeftGroup: !!btn.closest('.topbar-left'),
+      beforeTheMark:
+        (btn.compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    }
+  })
+  expect(where).toEqual({ inLeftGroup: true, beforeTheMark: true })
+
+  // Anchored to the button's left edge — right-anchoring it here would have put
+  // the panel off the left of the window.
+  await button.click()
+  const menu = page.locator('.menu').first()
+  await expect(menu).toBeVisible()
+  const panel = (await menu.boundingBox())!
+  const anchor = (await button.boundingBox())!
+  expect(panel.x).toBeGreaterThanOrEqual(0)
+  expect(Math.abs(panel.x - anchor.x)).toBeLessThan(4)
+  expect(panel.y).toBeGreaterThan(anchor.y)
+})
+
+test('the zoom control is only as wide as the value it holds', async ({ page }) => {
+  await openApp(page)
+  const value = page.locator('[data-testid="zoom-value"]')
+
+  // An <input> with no width is about twenty characters wide by default, which
+  // is what made this section span a fifth of the bar.
+  const box = (await value.boundingBox())!
+  expect(box.width).toBeLessThanOrEqual(50)
+  expect((await page.locator('.zoom-control').boundingBox())!.width).toBeLessThanOrEqual(150)
+
+  // Narrow, but not so narrow that the value is clipped — including the longest
+  // one it can show.
+  await value.fill('800')
+  await value.press('Enter')
+  await expect(value).toHaveValue('800%')
+  const clipped = await value.evaluate((el) => (el as HTMLInputElement).scrollWidth > el.clientWidth + 1)
+  expect(clipped).toBe(false)
+})
+
+// ------------------------------------------------------- artboard renaming --
+
+/** Double-click the first artboard's on-canvas name label. */
+async function openRename(page: import('@playwright/test').Page) {
+  const label = page.locator('.artboard-label').first()
+  const name = (await label.textContent())!
+  const box = (await label.boundingBox())!
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2)
+  return name
+}
+
+test('double-clicking an artboard name renames it on the canvas', async ({ page }) => {
+  await openApp(page)
+  const before = await openRename(page)
+
+  const input = page.locator('[data-testid="artboard-rename"]')
+  await expect(input).toBeVisible()
+  // Focused with the whole name selected, so typing replaces it outright.
+  expect(
+    await input.evaluate((el) => {
+      const i = el as HTMLInputElement
+      return `${i.selectionStart}-${i.selectionEnd}|${document.activeElement === i}`
+    }),
+  ).toBe(`0-${before.length}|true`)
+  // The label it stands in for is hidden, so the name is never drawn twice.
+  await expect(page.locator('.artboard-label', { hasText: before })).toHaveCount(0)
+
+  await page.keyboard.type('Home Screen')
+  await page.keyboard.press('Enter')
+  await expect(input).toHaveCount(0)
+  await expect(page.locator('.artboard-label').first()).toHaveText('Home Screen')
+  // A real document edit: the layer list follows, and it undoes.
+  await expect(page.locator('.layer-row', { hasText: 'Home Screen' })).toHaveCount(1)
+  await press(page, 'z')
+  await expect(page.locator('.artboard-label').first()).toHaveText(before)
+})
+
+test('Escape abandons the rename, and clicking away keeps it', async ({ page }) => {
+  await openApp(page)
+  const before = await openRename(page)
+  await page.keyboard.type('Discarded')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-testid="artboard-rename"]')).toHaveCount(0)
+  await expect(page.locator('.artboard-label').first()).toHaveText(before)
+
+  // Blur commits, the way the layer list's rename does.
+  await openRename(page)
+  await page.keyboard.type('Committed')
+  await clickCanvas(page, { x: 700, y: 520 })
+  await expect(page.locator('[data-testid="artboard-rename"]')).toHaveCount(0)
+  await expect(page.locator('.artboard-label').first()).toHaveText('Committed')
+})
+
+test('an empty artboard name is a slip, not an instruction', async ({ page }) => {
+  await openApp(page)
+  const before = await openRename(page)
+  await page.keyboard.press('Backspace')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.artboard-label').first()).toHaveText(before)
+})
+
+test('typing an artboard name does not reach the tool shortcuts', async ({ page }) => {
+  await openApp(page)
+  await openRename(page)
+  // "r", "t" and "e" are the rectangle, text and ellipse bindings.
+  await page.keyboard.type('Rate')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.tool-button.active')).toHaveAttribute('data-tool', 'select')
+  await expect(page.locator('.artboard-label').first()).toHaveText('Rate')
 })
