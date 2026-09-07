@@ -334,9 +334,8 @@ function GuideChip({
 
 // ------------------------------------------------------------- the handle --
 
-/** The grab tab on a selected guide, in px. */
-const HANDLE_LENGTH = 26
-const HANDLE_THICKNESS = 10
+/** Radius of the grab knob on a selected guide, in px. */
+const HANDLE_RADIUS = 6
 
 /**
  * The drag handle on the selected guide.
@@ -379,27 +378,23 @@ export const GuideHandle = memo(function GuideHandle() {
   const vertical = guide.axis === 'x'
   const at = (vertical ? origin.x : origin.y) + position * viewport.zoom
 
-  const rect = vertical
-    ? {
-        x: at - HANDLE_LENGTH / 2,
-        y: origin.y - HANDLE_THICKNESS,
-        width: HANDLE_LENGTH,
-        height: HANDLE_THICKNESS,
-      }
-    : {
-        x: origin.x - HANDLE_THICKNESS,
-        y: at - HANDLE_LENGTH / 2,
-        width: HANDLE_THICKNESS,
-        height: HANDLE_LENGTH,
-      }
+  // Centred ON the artboard's border, straddling it, so the knob reads as
+  // belonging to the edge the guide is measured from rather than floating
+  // beside it.
+  const cx = vertical ? at : origin.x
+  const cy = vertical ? origin.y : at
 
   return (
-    <rect
-      {...rect}
-      rx={2}
+    <circle
+      cx={cx}
+      cy={cy}
+      r={HANDLE_RADIUS}
       className="guide-handle"
       data-guide-handle={guide.id}
-      style={{ fill: toCss(color), cursor: vertical ? 'ew-resize' : 'ns-resize' }}
+      // White fill with the guide's own colour as the stroke: it has to read
+      // against both the artboard and the pasteboard it sits between, and the
+      // stroke is what ties it to the guide it belongs to.
+      style={{ stroke: toCss(color), cursor: vertical ? 'ew-resize' : 'ns-resize' }}
       onPointerDown={(e) => startDrag(e, board.id, guide.axis, guide.id)}
     />
   )

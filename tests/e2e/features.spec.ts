@@ -1085,3 +1085,110 @@ test('cap, join and alignment each show the option they name', async ({ page }) 
   // Outside alignment is drawn by masking the shape out of a doubled stroke.
   await expect(page.locator('.document-layer mask[id^="sa-mask-"]')).toHaveCount(1)
 })
+
+// ------------------------------------------------- reaching a blocked object --
+
+/** Right-click the canvas and read back the menu, then dismiss it. */
+async function menuAt(page: import('@playwright/test').Page, x: number, y: number) {
+  await page.locator('.canvas-svg').click({ button: 'right', position: { x, y } })
+  const items = await page.locator('.menu-item').allTextContents()
+  await page.keyboard.press('Escape')
+  return items
+}
+
+const unblockItems = (items: string[]) => items.filter((t) => /Unlock “|Show “/.test(t))
+
+test('a locked object can be unlocked from the canvas it is sitting on', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 300, y: 200 }, { x: 500, y: 380 })
+  await selectTool(page, 'select')
+  await page.locator('.canvas-svg').click({ position: { x: 400, y: 300 } })
+  await press(page, 'l')
+  await page.keyboard.press('Escape')
+
+  // A locked object takes no pointer events, so a right-click over it used to
+  // find bare canvas and the Layers panel was the only way back.
+  expect(unblockItems(await menuAt(page, 400, 300))).toEqual(['Unlock “Rectangle”'])
+
+  await page.locator('.canvas-svg').click({ button: 'right', position: { x: 400, y: 300 } })
+  await page.locator('.menu-item', { hasText: /Unlock “/ }).click()
+
+  // Unlocked, so it is clickable again and no longer offered.
+  expect(unblockItems(await menuAt(page, 400, 300))).toEqual([])
+  await page.locator('.canvas-svg').click({ position: { x: 400, y: 300 } })
+  await expect(page.locator('.layer-row.selected')).toHaveCount(1)
+})
+
+test('a hidden object can be shown from where it used to be', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'ellipse', { x: 300, y: 200 }, { x: 500, y: 380 })
+  await selectTool(page, 'select')
+  await page.locator('.canvas-svg').click({ position: { x: 400, y: 300 } })
+  await press(page, 'h', true)
+  await page.keyboard.press('Escape')
+  await expect(nodesOfType(page, 'ellipse')).toHaveCount(0)
+
+  expect(unblockItems(await menuAt(page, 400, 300))).toEqual(['Show “Ellipse”'])
+  await page.locator('.canvas-svg').click({ button: 'right', position: { x: 400, y: 300 } })
+  await page.locator('.menu-item', { hasText: /Show “/ }).click()
+  await expect(nodesOfType(page, 'ellipse')).toHaveCount(1)
+})
+
+test('a locked group is offered by name, not the child inside it', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 300, y: 200 }, { x: 400, y: 300 })
+  await drawShape(page, 'rect', { x: 420, y: 200 }, { x: 520, y: 300 })
+  await selectTool(page, 'select')
+  await page.keyboard.press('Meta+a')
+  await press(page, 'g')
+  await press(page, 'l')
+  await page.keyboard.press('Escape')
+
+  // Locking a group locks its children by inheritance, so offering to unlock a
+  // child would do nothing visible — the flag lives on the group.
+  expect(unblockItems(await menuAt(page, 350, 250))).toEqual(['Unlock “Group”'])
+})
+
+test('it works for every kind of object, and only over one', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'line', { x: 300, y: 200 }, { x: 500, y: 380 })
+  await selectTool(page, 'select')
+  await page.locator('.layer-row', { hasText: 'Line' }).click()
+  await press(page, 'l')
+  await page.keyboard.press('Escape')
+
+  // A hairline is a fair target: the hit test carries the same slack a click has.
+  expect(unblockItems(await menuAt(page, 400, 290))).toEqual(['Unlock “Line”'])
+  // And nothing is offered over bare canvas.
+  expect(unblockItems(await menuAt(page, 750, 520))).toEqual([])
+})
+
+test('an object that is both locked and hidden offers both ways back', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 300, y: 200 }, { x: 500, y: 380 })
+  await selectTool(page, 'select')
+  await page.locator('.canvas-svg').click({ position: { x: 400, y: 300 } })
+  await press(page, 'l')
+  await page.locator('.layer-row', { hasText: 'Rectangle' }).click()
+  await press(page, 'h', true)
+  await page.keyboard.press('Escape')
+
+  expect(unblockItems(await menuAt(page, 400, 300)).sort()).toEqual([
+    'Show “Rectangle”',
+    'Unlock “Rectangle”',
+  ])
+})
+
+test('the selected object is not offered twice', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 300, y: 200 }, { x: 500, y: 380 })
+  await selectTool(page, 'select')
+  await page.locator('.canvas-svg').click({ position: { x: 400, y: 300 } })
+  await press(page, 'l')
+
+  // Still selected, so the menu's own Lock entry already covers it. Two ways to
+  // do one thing in a single menu is worse than one.
+  const items = await menuAt(page, 400, 300)
+  expect(unblockItems(items)).toEqual([])
+  expect(items.some((t) => t.startsWith('Unlock'))).toBe(true)
+})

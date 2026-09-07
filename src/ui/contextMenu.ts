@@ -17,7 +17,7 @@ import { copySelection, cutSelection, duplicateInPlace, hasClipboardContent, pas
 import { getDoc } from '../state/DocumentStore'
 import { editorStore, openDialog } from '../state/EditorStore'
 import { isMaskGroup, isShape, type DesignDocument, type NodeId } from '../document/types'
-import { artboardIds, geometryBounds } from '../document/SceneGraph'
+import { artboardIds, blockedNodesAt, geometryBounds } from '../document/SceneGraph'
 import { containsPoint } from '../geometry/Bounds'
 import { MOD_LABEL } from '../shortcuts/bindings'
 import type { MenuItemSpec } from './Menu'
@@ -76,6 +76,47 @@ function guidesSubmenu(doc: DesignDocument, targets: readonly NodeId[]): MenuIte
   }
 }
 
+/**
+ * Offers a way back to something the pointer cannot otherwise reach.
+ *
+ * A locked object takes no pointer events; a hidden one is not drawn. Either
+ * way a right-click over it finds bare canvas, and the Layers panel is the only
+ * route back — which is no help at all when the layer tree is long and you are
+ * looking straight at the thing you want. This puts the object's own name in
+ * the menu wherever it happens to be, including when it is the topmost thing
+ * there and nothing else is competing for the click.
+ */
+function unblockItems(
+  doc: DesignDocument,
+  at: Vec2,
+  selection: readonly NodeId[],
+): MenuItemSpec[] {
+  const blocked = blockedNodesAt(doc, at, { tolerance: HIT_SLACK })
+  if (blocked.length === 0) return []
+
+  const items: MenuItemSpec[] = []
+  for (const entry of blocked.slice(0, MAX_UNBLOCK_ITEMS)) {
+    const node = doc.nodes[entry.id]
+    if (!node) continue
+    // Already selected: the Lock and Hide entries above act on it, and two ways
+    // to do the same thing in one menu is worse than one.
+    if (selection.includes(entry.id)) continue
+    if (entry.locked) {
+      items.push({ label: `Unlock “${node.name}”`, onSelect: () => setLocked([entry.id], false) })
+    }
+    if (entry.hidden) {
+      items.push({ label: `Show “${node.name}”`, onSelect: () => setVisibility([entry.id], true) })
+    }
+  }
+  return items.length ? [{ kind: 'separator' }, ...items] : []
+}
+
+/** Enough to reach a hairline, in document units at 100%. */
+const HIT_SLACK = 4
+
+/** More than a few names turns the menu into a layer panel. */
+const MAX_UNBLOCK_ITEMS = 5
+
 export function buildContextMenu(at: Vec2): MenuItemSpec[] {
   const doc = getDoc()
   const selection = editorStore.getState().selection
@@ -95,6 +136,7 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
       { label: 'Select All', shortcut: `${MOD}A`, onSelect: () => import('../history/Commands').then((m) => m.selectAll()) },
       { label: 'New Artboard…', onSelect: () => openDialog('artboard-preset') },
       ...(guideBoards.length ? [guidesSubmenu(doc, guideBoards)] : []),
+      ...unblockItems(doc, at, selection),
       { kind: 'separator' },
       { label: 'Export…', shortcut: `${MOD}E`, onSelect: () => openDialog('export') },
     ]
@@ -134,6 +176,7 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
       onSelect: () => outlineStrokeSelection(),
     },
     ...(guideBoards.length ? [guidesSubmenu(doc, guideBoards)] : []),
+    ...unblockItems(doc, at, selection),
     { kind: 'separator' },
     {
       kind: 'submenu',

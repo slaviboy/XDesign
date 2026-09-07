@@ -176,8 +176,8 @@ input, textarea { -webkit-user-select: text; user-select: text; }
    the colour is the user's setting and has to stay recognisable. */
 .artboard-guides .guide.selected { stroke-width: 2; opacity: 1; }
 
-/* The tab at the artboard's edge: what a selected guide is dragged by. */
-.guide-handle { stroke: #fff; stroke-width: 1; }
+/* The knob at the artboard's edge: what a selected guide is dragged by. */
+.guide-handle { fill: #fff; stroke-width: 2; }
 
 /* The readout that accompanies a guide being dragged: a rule along the edge
    with the distance to each side of the guide, and a chip at the cursor. */

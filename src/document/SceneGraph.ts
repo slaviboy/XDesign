@@ -505,6 +505,72 @@ export function hitTest(
   return hits.length ? hits[hits.length - 1]! : null
 }
 
+/**
+ * Locked or hidden nodes under a point, topmost first.
+ *
+ * Deliberately the one hit test that ignores both filters, because it exists to
+ * answer the question those filters make unanswerable: a locked object takes no
+ * pointer events and a hidden one is not drawn at all, so right-clicking either
+ * finds bare canvas and there is no way back to it except the Layers panel.
+ *
+ * What comes back is the OUTERMOST node actually carrying the flag — locking a
+ * group locks its children by inheritance, and offering to unlock a child that
+ * is not itself locked would do nothing visible.
+ */
+export function blockedNodesAt(
+  doc: DesignDocument,
+  worldPoint: Vec2,
+  options: { tolerance?: number } = {},
+): Array<{ id: NodeId; locked: boolean; hidden: boolean }> {
+  const cache = createMatrixCache()
+  const out: Array<{ id: NodeId; locked: boolean; hidden: boolean }> = []
+  const seen = new Set<NodeId>()
+
+  const visit = (id: NodeId): void => {
+    const node = doc.nodes[id]
+    if (!node) return
+
+    if (isContainer(node) && node.type !== 'repeat-grid') {
+      for (const child of node.children) visit(child)
+      // A container is a candidate in its own right when the point is inside
+      // it: a hidden group has no children on screen to hit.
+      if (node.type === 'artboard') return
+    }
+
+    const hit =
+      isContainer(node) && node.type !== 'repeat-grid'
+        ? containsPoint(geometryBounds(doc, id, cache), worldPoint, options.tolerance ?? 0)
+        : hitTestNode(doc, id, worldPoint, { ...options, includeArtboards: true }, cache)
+    if (!hit) return
+
+    // Walk out to whatever is actually carrying the flag.
+    const chain = [id, ...ancestorIds(doc, id)]
+    const lockedAt = chain.find((a) => doc.nodes[a]?.locked)
+    const hiddenAt = chain.find((a) => doc.nodes[a]?.visible === false)
+    for (const [owner, locked] of [
+      [lockedAt, true],
+      [hiddenAt, false],
+    ] as const) {
+      if (!owner || doc.nodes[owner]?.type === 'document') continue
+      const key = `${owner}:${locked}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const existing = out.find((o) => o.id === owner)
+      if (existing) {
+        if (locked) existing.locked = true
+        else existing.hidden = true
+      } else {
+        out.push({ id: owner, locked, hidden: !locked })
+      }
+    }
+  }
+
+  const root = doc.nodes[doc.rootId]
+  if (isContainer(root)) for (const child of root.children) visit(child)
+  // Topmost first: paint order, reversed.
+  return out.reverse()
+}
+
 /** Every node under the point, bottom-to-top. Backs alt-click cycling. */
 export function hitTestAll(
   doc: DesignDocument,

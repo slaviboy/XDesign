@@ -82,6 +82,10 @@ between sessions. Every preference carries an **(i)** that opens a sentence or t
 actually does — behind a press rather than a hover, because six notes stacked permanently would
 bury the settings they describe, and a hover tooltip is unreadable at that length.
 
+**Getting back to a locked or hidden object** — right-clicking where one sits offers to unlock or
+show it by name. A locked object takes no pointer events and a hidden one is not drawn, so
+either way the click finds bare canvas and the Layers panel used to be the only route back.
+
 **Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
 snapping and smart guides, per-point Bézier editing, boolean operations, alignment and
 distribution, z-ordering, grouping, locking, hiding, guides and a grid. Corners carry a
@@ -542,6 +546,18 @@ is dropped: keeping it would mean keeping the document-level list alive for the 
 longer serves. Where two artboards overlap the **topmost** claims it, which is the same artboard
 a click would have resolved to.
 
+### A right-click has to reach what the pointer cannot
+
+`blockedNodesAt` is the one hit test that deliberately ignores both the locked and the hidden
+filter, because it exists to answer the question those filters make unanswerable. Everywhere
+else, skipping them is the point.
+
+It reports the **outermost node actually carrying the flag**, not the one under the cursor:
+locking a group locks its children by inheritance, so offering to unlock a child that is not
+itself locked would be an entry that does nothing. And a node already in the selection is left
+out, because the menu's own Lock and Hide entries already act on it — two routes to one action
+in a single menu is worse than one.
+
 ### The line and the handle answer different problems
 
 A guide's line lies right across the artwork, which makes it easy to grab when you meant a shape
@@ -826,7 +842,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 283 unit tests (Vitest)
-npm run test:e2e   # 211 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 217 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

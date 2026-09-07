@@ -472,7 +472,9 @@ test('clicking a guide selects it and gives it a handle', async ({ page }) => {
   const handle = page.locator('.guide-handle')
   await expect(handle).toHaveCount(1)
   const artboard = (await nodesOfType(page, 'artboard').first().boundingBox())!
-  expect(Math.abs((await handle.boundingBox())!.y + 10 - artboard.y)).toBeLessThan(4)
+  const knob = (await handle.boundingBox())!
+  // Centred ON the border, straddling it, rather than sitting beside it.
+  expect(Math.abs(knob.y + knob.height / 2 - artboard.y)).toBeLessThan(2)
 
   // Selecting artwork puts it down again: the panel shows one thing at a time.
   await drawShape(page, 'rect', { x: 500, y: 200 }, { x: 600, y: 300 })
