@@ -17,6 +17,8 @@
 import {
   deleteSelection,
   groupSelection,
+  maskWithShape,
+  outlineStrokeSelection,
   moveSelection,
   orderCommand,
   selectAll,
@@ -140,7 +142,16 @@ export function installKeyboard(ctx: ToolContext, handlers: KeyboardHandlers): (
           return
         case 'o':
           e.preventDefault()
-          handlers.onOpen()
+          // Adobe puts Outline Stroke on the shifted form of the same key.
+          if (e.shiftKey) outlineStrokeSelection()
+          else handlers.onOpen()
+          return
+        case 'm':
+          // ⇧⌘M is Adobe's Mask With Shape. Unshifted ⌘M is the OS window
+          // command, so it is left alone.
+          if (!e.shiftKey) return
+          e.preventDefault()
+          maskWithShape()
           return
         case 'n':
           e.preventDefault()

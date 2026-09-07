@@ -156,8 +156,8 @@ export function modifier(): 'Meta' | 'Control' {
   return process.platform === 'darwin' ? 'Meta' : 'Control'
 }
 
-export async function press(page: Page, key: string): Promise<void> {
-  await page.keyboard.press(`${modifier()}+${key}`)
+export async function press(page: Page, key: string, shift = false): Promise<void> {
+  await page.keyboard.press(`${shift ? 'Shift+' : ''}${modifier()}+${key}`)
 }
 
 // ---------------------------------------------------------------------------

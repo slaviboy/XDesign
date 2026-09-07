@@ -45,6 +45,7 @@ import {
 import {
   isContainer,
   hasStyle,
+  isMaskGroup,
   usesOwnBox,
   type DesignDocument,
   type DesignNode,
@@ -210,6 +211,12 @@ export function geometryBounds(
   const m = cache ? cache.world(doc, id) : worldMatrix(doc, id)
 
   if (isContainer(node) && !usesOwnBox(node)) {
+    // A mask group only shows what its mask lets through, so its bounds are the
+    // mask's. The union of the content would frame artwork that is hidden, and
+    // the selection rectangle would not match anything visible on screen.
+    if (isMaskGroup(node) && doc.nodes[node.maskId]) {
+      return geometryBounds(doc, node.maskId, cache)
+    }
     // A group's bounds are its children's, not its own nominal box. An artboard
     // or repeat grid uses its own box instead — see usesOwnBox.
     const kids = node.children
@@ -497,6 +504,10 @@ export function hitTestAll(
 
     if (isContainer(node)) {
       const before = out.length
+      // Nothing outside a mask is on screen, so nothing outside it is
+      // clickable either — otherwise a shape would still be pickable in the
+      // region the mask hides it.
+      if (isMaskGroup(node) && !hitTestNode(doc, node.maskId, worldPoint, options, mc)) return
       // Clicking a shape should select the outermost GROUP that contains it —
       // that is what makes a group behave like one object. An artboard is not a
       // group though: it is a frame, and clicking artwork on it must select the
@@ -507,6 +518,9 @@ export function hitTestAll(
         return topLevelAncestor ?? child
       }
       for (const child of node.children) {
+        // The mask itself is not painted, so it is not a target: clicking
+        // inside a mask group selects what it reveals, not the mask.
+        if (isMaskGroup(node) && child === node.maskId) continue
         visit(child, childAncestor(child))
       }
       // An artboard is only a hit when nothing inside it was hit. Adding it

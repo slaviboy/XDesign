@@ -19,6 +19,7 @@ import {
   createMatrixCache,
   geometryBounds,
   localGeometryBounds,
+  localMatrix,
   worldMatrix,
 } from '../document/SceneGraph'
 import { docToScreen } from './Viewport'
@@ -34,7 +35,7 @@ import { multiply, toSvgMatrix } from '../geometry/Matrix'
 import { isGradient, sortedStops } from './paint'
 import { ANGULAR_RING, stopPointOnAxis } from '../tools/GradientSession'
 import { toCss } from '../document/color'
-import { cornerRadiusOf, supportsCornerRadius, type BoxCorner } from '../document/types'
+import { cornerRadiusOf, isMaskGroup, supportsCornerRadius, type BoxCorner } from '../document/types'
 import {
   ancestorIds,
   isEffectivelyLocked,
@@ -179,11 +180,21 @@ function computeFrame(
     const node = doc.nodes[id]
     if (!node) return null
     // Live matrices win during a drag; the document has not been written yet.
-    const world = getLiveMatrix(id) ?? cache.world(doc, id)
+    let world = getLiveMatrix(id) ?? cache.world(doc, id)
     const liveSize = getLiveSize(id)
-    const local = liveSize
+    let local = liveSize
       ? { x: 0, y: 0, width: liveSize.width, height: liveSize.height }
       : localGeometryBounds(node)
+
+    // A mask group shows only what its mask reveals, so the frame is the
+    // mask's — framing the union would draw a rectangle round artwork that is
+    // hidden. Composed from the group's live matrix rather than read off the
+    // mask directly, so it still tracks a drag.
+    const mask = isMaskGroup(node) ? doc.nodes[node.maskId] : undefined
+    if (mask && !liveSize) {
+      world = multiply(world, localMatrix(mask.transform))
+      local = localGeometryBounds(mask)
+    }
 
     const cornersDoc = [
       applyToXY(world, local.x, local.y),

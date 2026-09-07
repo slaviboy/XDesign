@@ -15,13 +15,19 @@
 import { toSvgMatrix, multiply, type Mat2D } from '../geometry/Matrix'
 import type { Bounds } from '../geometry/Bounds'
 import { polygonStarPath, rectPath } from '../geometry/ShapeGeometry'
-import { localMatrix, worldMatrix } from '../document/SceneGraph'
+import { localMatrix, nodePathData, worldMatrix } from '../document/SceneGraph'
 import { toHex } from '../document/color'
 import { ANGULAR_TILE, angularWedges, gradientId, isGradient, sortedStops } from '../canvas/paint'
 import { layoutText, lineOffsetX } from '../text/TextLayout'
 import { fontStack } from '../text/FontRegistry'
 import { canEmbed, embedFontCss } from '../text/FontEmbedder'
-import { hasStyle, repeatGridOffsets, repeatGridSize } from '../document/types'
+import { hasStyle, isMaskGroup, repeatGridOffsets, repeatGridSize } from '../document/types'
+import {
+  activeBlur,
+  backgroundFillOpacity,
+  blurStdDeviation,
+  effectFilter,
+} from '../canvas/effects'
 import type {
   DesignDocument,
   DesignNode,
@@ -195,38 +201,126 @@ function emitNode(ctx: EmitContext, id: NodeId, isRoot: boolean): string {
     styled && styled.blendMode !== 'normal' ? ` style="mix-blend-mode:${styled.blendMode}"` : ''
   const name = ` id="${escapeAttr(safeId(node.id))}" data-name="${escapeAttr(node.name)}"`
 
+  // Shadows and object blur are the same filter the canvas builds, from the
+  // same code — see effects.ts.
+  const fx = styled ? effectFilter(safeId(node.id), styled, node.transform) : null
+  let filter = ''
+  if (fx) {
+    ctx.defs.push(
+      `<filter id="${fx.id}" filterUnits="userSpaceOnUse" x="${round(fx.x, 3)}" y="${round(fx.y, 3)}"` +
+        ` width="${round(fx.width, 3)}" height="${round(fx.height, 3)}">${fx.primitives}</filter>`,
+    )
+    filter = ` filter="url(#${fx.id})"`
+  }
+
   const body = emitBody(ctx, node)
   if (!body) return ''
-  return `<g${name}${transform}${opacity}${blend}>${body}</g>`
+  return `<g${name}${transform}${opacity}${blend}${filter}>${body}</g>`
+}
+
+/**
+ * Children in paint order, with background blur resolved.
+ *
+ * Background blur is the one effect with no SVG filter behind it: the
+ * `BackgroundImage` input that would have read what is underneath was dropped
+ * from the spec and shipped in no browser. So the backdrop is re-drawn instead
+ * — the markup painted so far is put in <defs> and referenced twice, once as
+ * itself and once blurred and clipped to the shape. It is real vector, it
+ * rasterises, and it does not need the browser to support anything unusual.
+ *
+ * `prefix` is markup painted before the children that is part of the backdrop
+ * too, which is how an artboard's own background ends up inside the blur.
+ */
+function emitChildren(ctx: EmitContext, children: readonly NodeId[], prefix = ''): string {
+  let out = prefix
+  for (const id of children) {
+    const child = ctx.doc.nodes[id]
+    const blur = child && child.visible && hasStyle(child) ? activeBlur(child.style, 'background') : null
+    // Nothing painted yet means nothing to blur, and a <use> of an empty group
+    // would be dead markup.
+    if (blur && child && out.trim()) out = emitBackdropBlur(ctx, out, child, blur)
+    out += emitNode(ctx, id, false)
+  }
+  return out
+}
+
+function emitBackdropBlur(
+  ctx: EmitContext,
+  backdrop: string,
+  child: DesignNode,
+  blur: { amount: number; brightness: number },
+): string {
+  const key = safeId(child.id)
+  const groupId = `bd-${key}`
+  const clipId = `bdclip-${key}`
+  const filterId = `bdblur-${key}`
+  const d = nodePathData(child) ?? rectPath(child.transform.width, child.transform.height, 0)
+
+  const primitives = [`<feGaussianBlur stdDeviation="${round(blurStdDeviation(blur.amount), 3)}"/>`]
+  if (blur.brightness !== 0) {
+    // The same -50..50 -> 0..2 multiplier the canvas gets from CSS brightness().
+    const slope = round(1 + blur.brightness / 50, 3)
+    const func = `type="linear" slope="${slope}"`
+    primitives.push(
+      `<feComponentTransfer><feFuncR ${func}/><feFuncG ${func}/><feFuncB ${func}/></feComponentTransfer>`,
+    )
+  }
+
+  ctx.defs.push(`<g id="${groupId}">${backdrop}</g>`)
+  ctx.defs.push(
+    `<clipPath id="${clipId}" clipPathUnits="userSpaceOnUse">` +
+      `<path d="${d}" transform="${toSvgMatrix(localMatrix(child.transform))}"/></clipPath>`,
+  )
+  ctx.defs.push(
+    `<filter id="${filterId}" x="-20%" y="-20%" width="140%" height="140%">${primitives.join('')}</filter>`,
+  )
+
+  // Both href forms: SVG 2 reads the first, older renderers the second.
+  const use = `<use href="#${groupId}" xlink:href="#${groupId}"`
+  return `${use}/><g clip-path="url(#${clipId})">${use} filter="url(#${filterId})"/></g>`
 }
 
 function emitBody(ctx: EmitContext, node: DesignNode): string {
   switch (node.type) {
     case 'document':
-      return node.children.map((c) => emitNode(ctx, c, false)).join('')
+      return emitChildren(ctx, node.children)
 
     case 'artboard': {
       const { width, height } = node.transform
       const clipId = `clip-${safeId(node.id)}`
       const bg = emitArtboardBackground(ctx, node.background, node.id, width, height)
-      const kids = node.children.map((c) => emitNode(ctx, c, false)).join('')
+      // The background is part of the backdrop a blurred child sees.
+      const kids = emitChildren(ctx, node.children, node.clipContent ? '' : bg)
       if (node.clipContent) {
         ctx.defs.push(
           `<clipPath id="${clipId}"><rect width="${round(width, 3)}" height="${round(height, 3)}"/></clipPath>`,
         )
-        return `${bg}<g clip-path="url(#${clipId})">${kids}</g>`
+        return `${bg}<g clip-path="url(#${clipId})">${emitChildren(ctx, node.children, bg)}</g>`
       }
-      return bg + kids
+      return kids
     }
 
-    case 'group':
-      return node.children.map((c) => emitNode(ctx, c, false)).join('')
+    case 'group': {
+      if (!isMaskGroup(node) || !ctx.doc.nodes[node.maskId]) {
+        return emitChildren(ctx, node.children)
+      }
+      // Adobe's mask: the topmost child clips the rest and is not itself drawn.
+      const mask = ctx.doc.nodes[node.maskId]!
+      const clipId = `maskclip-${safeId(node.id)}`
+      const d = nodePathData(mask) ?? rectPath(mask.transform.width, mask.transform.height, 0)
+      ctx.defs.push(
+        `<clipPath id="${clipId}" clipPathUnits="userSpaceOnUse">` +
+          `<path d="${d}" transform="${toSvgMatrix(localMatrix(mask.transform))}"/></clipPath>`,
+      )
+      const kids = emitChildren(ctx, node.children.filter((c) => c !== node.maskId))
+      return `<g clip-path="url(#${clipId})">${kids}</g>`
+    }
 
     case 'repeat-grid': {
       // Emitted as real repeated vector, one <g> per cell. The source markup is
       // built once and reused, so a 10x10 grid does not serialise its contents
       // a hundred times over.
-      const cellMarkup = node.children.map((c) => emitNode(ctx, c, false)).join('')
+      const cellMarkup = emitChildren(ctx, node.children)
       if (!cellMarkup) return ''
       const size = repeatGridSize(node)
       const clipId = `rgclip-${safeId(node.id)}`
@@ -401,7 +495,9 @@ function styleAttrs(
 
   const fill = paintAttrs(ctx, style.fill, nodeId, 'fill')
   parts.push(` fill="${fill.value}"`)
-  const fo = fill.opacity * style.fillOpacity
+  // A background blur draws the shape "with its fill modulated by fillOpacity",
+  // which is what lets the blurred backdrop show through it.
+  const fo = fill.opacity * style.fillOpacity * backgroundFillOpacity(style)
   if (fo < 1) parts.push(` fill-opacity="${round(fo, 3)}"`)
   if (style.fillRule !== 'nonzero' && !isText) parts.push(` fill-rule="${style.fillRule}"`)
 

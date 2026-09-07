@@ -36,9 +36,19 @@ import {
   sortedStops,
 } from './paint'
 import { toHex } from '../document/color'
-import { hasStyle, repeatGridOffsets, repeatGridSize } from '../document/types'
+import { hasStyle, isMaskGroup, repeatGridOffsets, repeatGridSize } from '../document/types'
+import {
+  activeBlur,
+  backdropClipId,
+  backdropFilterId,
+  backgroundBlurPrimitives,
+  backgroundFillOpacity,
+  effectFilter,
+  effectFilterId,
+} from './effects'
 import type {
   ArtboardNode,
+  BlurEffect,
   RepeatGridNode,
   DesignNode,
   GroupNode,
@@ -148,6 +158,9 @@ interface PaintedProps {
  */
 function PaintedPath({ nodeId, style, d, width, height, geomRef }: PaintedProps): ReactNode {
   const fill = paintToAttrs(style.fill, nodeId, 'fill')
+  // Adobe: a background blur draws the shape "with its fill modulated by
+  // fillOpacity" — the blurred backdrop is meant to show through it.
+  const fillAlpha = fill.opacity * style.fillOpacity * backgroundFillOpacity(style)
   const stroke = paintToAttrs(style.stroke.paint, nodeId, 'stroke')
   const hasStroke = style.stroke.paint.type !== 'none' && style.stroke.width > 0
   const aligned = hasStroke && style.stroke.align !== 'center'
@@ -198,7 +211,7 @@ function PaintedPath({ nodeId, style, d, width, height, geomRef }: PaintedProps)
           ref={geomRef}
           d={d}
           fill={fill.value}
-          fillOpacity={fill.opacity * style.fillOpacity}
+          fillOpacity={fillAlpha}
           fillRule={style.fillRule}
           {...(hasStroke ? strokeProps : { stroke: 'none' })}
         />
@@ -213,7 +226,7 @@ function PaintedPath({ nodeId, style, d, width, height, geomRef }: PaintedProps)
         ref={geomRef}
         d={d}
         fill={fill.value}
-        fillOpacity={fill.opacity * style.fillOpacity}
+        fillOpacity={fillAlpha}
         fillRule={style.fillRule}
         stroke="none"
       />
@@ -408,12 +421,106 @@ function RepeatGridBody({ node }: { node: RepeatGridNode }): ReactNode {
   )
 }
 
-function GroupBody({ node }: { node: GroupNode }): ReactNode {
+/**
+ * Children in paint order, with background blur resolved.
+ *
+ * Under any child that asks for one, the artwork already painted in this
+ * container is drawn a SECOND time — blurred and clipped to that child's
+ * outline. That is the whole trick, and it is the only one available: no SVG
+ * filter can read the backdrop, and CSS backdrop-filter is silently ignored on
+ * SVG elements. The exporter builds the identical thing out of a <use>, so the
+ * file matches the canvas.
+ *
+ * The copies mount with `repeat`, which is the same flag repeat grids use to
+ * keep duplicate artwork from registering itself with LiveTransform — only the
+ * real child may own a node's live element.
+ */
+function Children({ ids }: { ids: readonly NodeId[] }): ReactNode {
+  const doc = useDocumentStore((s) => s.doc)
+  const out: ReactNode[] = []
+
+  ids.forEach((id, i) => {
+    const node = doc.nodes[id]
+    const blur = node && node.visible && hasStyle(node) ? activeBlur(node.style, 'background') : null
+    // Nothing painted yet is nothing to blur.
+    if (blur && node && i > 0) {
+      out.push(<Backdrop key={`bd-${id}`} node={node} before={ids.slice(0, i)} blur={blur} />)
+    }
+    out.push(<NodeRenderer key={id} id={id} />)
+  })
+
+  return <>{out}</>
+}
+
+function Backdrop({
+  node,
+  before,
+  blur,
+}: {
+  node: DesignNode
+  before: readonly NodeId[]
+  blur: BlurEffect
+}): ReactNode {
+  const clipId = backdropClipId(node.id)
+  const filterId = backdropFilterId(node.id)
+
   return (
     <>
-      {node.children.map((childId) => (
-        <NodeRenderer key={childId} id={childId} />
-      ))}
+      <defs>
+        <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+          <path d={shapePathData(node)} transform={toSvgMatrix(localMatrix(node.transform))} />
+        </clipPath>
+        <filter
+          id={filterId}
+          x="-20%"
+          y="-20%"
+          width="140%"
+          height="140%"
+          dangerouslySetInnerHTML={{ __html: backgroundBlurPrimitives(blur) }}
+        />
+      </defs>
+      <g clipPath={`url(#${clipId})`} filter={`url(#${filterId})`} pointerEvents="none">
+        {before.map((id) => (
+          <NodeRenderer key={id} id={id} repeat />
+        ))}
+      </g>
+    </>
+  )
+}
+
+/**
+ * A group, and — when it carries a `maskId` — a mask group.
+ *
+ * Adobe: "the object on top of the stack acts as a mask". The mask child is not
+ * painted itself; its outline becomes a clip path over everything below it, so
+ * the masked content is hidden rather than deleted and can be brought back by
+ * releasing the mask.
+ *
+ * A <clipPath> rather than a <mask>: XD's masks have hard edges, and a
+ * luminance mask would make a shape's own fill and opacity leak into the
+ * result, so a mask filled with 50% grey would half-hide what it masks.
+ */
+function GroupBody({ node }: { node: GroupNode }): ReactNode {
+  const mask = useNode(node.maskId ?? '')
+  const clipId = `mask-clip-${node.id}`
+  const masked = isMaskGroup(node) && !!mask
+
+  const content = (
+    <Children ids={node.children.filter((childId) => !masked || childId !== node.maskId)} />
+  )
+
+  if (!masked) return content
+
+  return (
+    <>
+      <defs>
+        <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+          {/* Transformed by the mask's own matrix, because the clip lives in
+              the GROUP's space while the outline is authored in the mask's. */}
+          <path d={shapePathData(mask)} transform={toSvgMatrix(localMatrix(mask.transform))} />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${clipId})`}>{content}</g>
     </>
   )
 }
@@ -437,9 +544,7 @@ function ArtboardBody({ node }: { node: ArtboardNode }): ReactNode {
         <rect width={width} height={height} fill={bg.value} fillOpacity={bg.opacity} />
       )}
       <g clipPath={node.clipContent ? `url(#${clipId})` : undefined}>
-        {node.children.map((childId) => (
-          <NodeRenderer key={childId} id={childId} />
-        ))}
+        <Children ids={node.children} />
       </g>
     </>
   )
@@ -469,10 +574,11 @@ export const NodeRenderer = memo(function NodeRenderer({
   const transform = toSvgMatrix(localMatrix(node.transform))
   const styled = hasStyle(node) ? node.style : null
   const opacity = styled?.opacity ?? 1
-  const blend =
+  const groupStyle: CSSProperties | undefined =
     styled && styled.blendMode !== 'normal'
       ? ({ mixBlendMode: styled.blendMode } as CSSProperties)
       : undefined
+  const filter = styled ? effectFilter(id, styled, node.transform) : null
 
   let body: ReactNode
   switch (node.type) {
@@ -495,13 +601,7 @@ export const NodeRenderer = memo(function NodeRenderer({
       body = <SvgBody node={node} />
       break
     case 'document':
-      body = (
-        <>
-          {node.children.map((c) => (
-            <NodeRenderer key={c} id={c} />
-          ))}
-        </>
-      )
+      body = <Children ids={node.children} />
       break
     default:
       body = (
@@ -521,12 +621,26 @@ export const NodeRenderer = memo(function NodeRenderer({
       ref={groupRef}
       transform={transform}
       opacity={opacity === 1 ? undefined : opacity}
-      style={blend}
+      style={groupStyle}
+      filter={filter ? `url(#${effectFilterId(id)})` : undefined}
       data-node-id={repeat ? undefined : id}
       data-node-type={repeat ? undefined : node.type}
       // Locked nodes stay visible but must not swallow pointer events on canvas.
       pointerEvents={node.locked ? 'none' : undefined}
     >
+      {filter && (
+        <defs>
+          <filter
+            id={filter.id}
+            filterUnits="userSpaceOnUse"
+            x={filter.x}
+            y={filter.y}
+            width={filter.width}
+            height={filter.height}
+            dangerouslySetInnerHTML={{ __html: filter.primitives }}
+          />
+        </defs>
+      )}
       {body}
     </g>
   )
@@ -541,9 +655,7 @@ export const DocumentLayer = memo(function DocumentLayer(): ReactNode {
   if (!rootChildren) return null
   return (
     <g className="document-layer">
-      {rootChildren.map((id) => (
-        <NodeRenderer key={id} id={id} />
-      ))}
+      <Children ids={rootChildren} />
     </g>
   )
 })

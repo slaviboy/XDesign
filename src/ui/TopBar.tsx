@@ -17,7 +17,8 @@ import {
 import { redo, undo } from '../state/DocumentStore'
 import {
   alignSelection, deleteSelection, distributeSelection, flipSelection, groupSelection,
-  orderCommand, renameDocument, selectAll, ungroupSelection, updateSettings,
+  maskWithShape, orderCommand, outlineStrokeSelection, renameDocument, selectAll,
+  ungroupMask, ungroupSelection, updateSettings,
 } from '../history/Commands'
 import { copySelection, cutSelection, duplicateInPlace, paste } from '../state/Clipboard'
 import { stepZoom, zoomTo, zoomToFit, zoomToSelection } from '../shortcuts/KeyboardManager'
@@ -77,6 +78,29 @@ export const TopBar = memo(function TopBar() {
         items: [
           { label: 'Group', shortcut: `${MOD}G`, disabled: selectionCount < 2, onSelect: () => groupSelection() },
           { label: 'Ungroup', shortcut: `⇧${MOD}G`, disabled: !hasSelection, onSelect: () => ungroupSelection() },
+          { kind: 'separator' },
+          // Adobe's own placement: Object > Mask With Shape, with Ungroup Mask
+          // as the way back.
+          {
+            label: 'Mask With Shape',
+            shortcut: `⇧${MOD}M`,
+            disabled: selectionCount < 2,
+            onSelect: () => maskWithShape(),
+          },
+          { label: 'Ungroup Mask', disabled: !hasSelection, onSelect: () => ungroupMask() },
+          { kind: 'separator' },
+          {
+            kind: 'submenu',
+            label: 'Path',
+            items: [
+              {
+                label: 'Outline Stroke',
+                shortcut: `⇧${MOD}O`,
+                disabled: !hasSelection,
+                onSelect: () => outlineStrokeSelection(),
+              },
+            ],
+          },
           { kind: 'separator' },
           { label: 'Bring to Front', shortcut: `⇧${MOD}]`, disabled: !hasSelection, onSelect: () => orderCommand('front') },
           { label: 'Bring Forward', shortcut: `${MOD}]`, disabled: !hasSelection, onSelect: () => orderCommand('forward') },

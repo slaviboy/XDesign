@@ -211,6 +211,71 @@ export type BlendMode =
   | 'color-dodge' | 'color-burn' | 'hard-light' | 'soft-light'
   | 'difference' | 'exclusion' | 'hue' | 'saturation' | 'color' | 'luminosity'
 
+// ---------------------------------------------------------------------------
+// Effects
+// ---------------------------------------------------------------------------
+
+/**
+ * A shadow cast by an object, in the shape of XD's own
+ * `Shadow(x, y, blur, color, visible)`.
+ *
+ * Offsets are in the node's LOCAL units and may be negative; blur may not be.
+ * `visible` is the checkbox in the Properties panel: it turns the effect off
+ * without discarding the settings, exactly as Adobe describes.
+ */
+export interface ShadowEffect {
+  /** Drop shadow (outside the shape) or inner shadow (inside it). */
+  kind: 'drop' | 'inner'
+  x: number
+  y: number
+  blur: number
+  color: RGBA
+  visible: boolean
+}
+
+export const DEFAULT_SHADOW: ShadowEffect = {
+  kind: 'drop',
+  x: 0,
+  y: 4,
+  blur: 8,
+  color: { r: 0, g: 0, b: 0, a: 0.25 },
+  visible: true,
+}
+
+/**
+ * Blur, in the shape of XD's
+ * `Blur(blurAmount, brightnessAmount, fillOpacity, visible, isBackgroundEffect)`
+ * — including its ranges, which Adobe states outright.
+ *
+ * Object blur blurs the shape and leaves what is behind it alone. Background
+ * blur is the reverse: everything beneath the shape is blurred and modulated by
+ * `brightness`, while the shape itself stays crisp with its fill scaled by
+ * `fillOpacity`. `brightness` and `fillOpacity` are ignored for an object blur,
+ * as Adobe's own reference says.
+ */
+export interface BlurEffect {
+  kind: 'object' | 'background'
+  /** 0..50. */
+  amount: number
+  /** -50..50. Background blur only. */
+  brightness: number
+  /** 0..1, a multiplier on the shape's own fill. Background blur only. */
+  fillOpacity: number
+  visible: boolean
+}
+
+export const DEFAULT_BLUR: BlurEffect = {
+  kind: 'background',
+  amount: 10,
+  brightness: 0,
+  fillOpacity: 0.5,
+  visible: true,
+}
+
+/** Adobe's stated ranges, shared by the inspector and the clamps in Commands. */
+export const BLUR_AMOUNT_MAX = 50
+export const BLUR_BRIGHTNESS_MAX = 50
+
 export interface Style {
   fill: Paint
   fillOpacity: number
@@ -220,6 +285,16 @@ export interface Style {
   /** Node-level alpha, multiplied with fill/stroke opacity. */
   opacity: number
   blendMode: BlendMode
+  /**
+   * One shadow, drop or inner. Absent means none.
+   *
+   * Optional rather than always-present so a document saved before effects
+   * existed still loads unchanged, and so a shape with no shadow costs nothing
+   * in the file.
+   */
+  shadow?: ShadowEffect
+  /** One blur, object or background. Absent means none. */
+  blur?: BlurEffect
 }
 
 export const DEFAULT_STYLE: Style = {
@@ -306,6 +381,23 @@ export interface ArtboardNode extends BaseNode {
 export interface GroupNode extends StyledNode {
   type: 'group'
   children: NodeId[]
+  /**
+   * The child that masks the rest, making this a MASK GROUP.
+   *
+   * Adobe: "the object on top of the stack acts as a mask", so this is always
+   * the last entry in `children` — the topmost in paint order. Modelled as a
+   * flag on a plain group rather than a node type of its own, so everything
+   * that already understands groups (bounds, transforms, ungroup, the layer
+   * tree) keeps working on a mask group without a single new branch.
+   */
+  maskId?: NodeId
+}
+
+/** A group whose topmost child clips the rest. */
+export function isMaskGroup(
+  node: DesignNode | undefined | null,
+): node is GroupNode & { maskId: NodeId } {
+  return !!node && node.type === 'group' && typeof node.maskId === 'string'
 }
 
 /**

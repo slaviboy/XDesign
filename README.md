@@ -78,6 +78,20 @@ numeric modes, an opacity field, an eyedropper that samples any rendered pixel o
 including images and gradients, and a document palette that starts empty and fills up as you
 save colours with (+).
 
+**Masking** — select the objects and the shape on top of them, then **Mask With Shape**
+(`⇧⌘M`, or the context menu). The topmost object becomes the mask, as Adobe specifies: what it
+covers shows, the rest is hidden rather than deleted. Double-click to step inside and readjust
+either the mask or what it holds; **Ungroup Mask** hands both back untouched.
+
+**Effects** — a **Drop Shadow** or **Inner Shadow** with X, Y, blur and colour, and a
+**Background Blur** or **Object Blur**. The controls and their ranges are Adobe's: Amount 0–50,
+Brightness −50–+50, Opacity 0–100%, with brightness and opacity belonging to the background blur
+alone. The checkbox on each turns the effect off without discarding its settings.
+
+**Outline Stroke** (`⇧⌘O`, or Object > Path) — turns a border into a filled shape, so an icon
+drawn with strokes becomes solid vector that scales, takes a gradient and joins a boolean. A
+shape with both a fill and a border is separated into two objects, as Adobe describes.
+
 **Corner radius** — draggable handles inside rectangles, polygons and stars.
 Drag inward to round, outward to sharpen. Each handle keeps a constant gap inside the corner
 it rounds, so it stays reachable at any radius without drifting toward the centre. A
@@ -415,6 +429,62 @@ unit space as the other two — so only the rendering is generated, and the gene
 between the live renderer and the exporter exactly as the other gradients' is. The cost is real and
 one-way: an exported angular gradient is a pattern of paths, so re-importing that SVG gives back a
 pattern, not an angular gradient. `.xdesign` round-trips it exactly.
+
+### Background blur has no SVG filter, so the backdrop is drawn twice
+
+There is no way to ask an SVG filter what is behind an element. `BackgroundImage`, the filter
+input that would have done it, was dropped from the spec and shipped in no browser. CSS
+`backdrop-filter` is not a way out either, and fails in the most annoying way possible: it is
+*accepted* on an SVG element, reads back from `getComputedStyle` exactly as set, and then does
+nothing. That was verified directly here before it was abandoned — a panel over three coloured
+stripes lightened correctly and did not blur at all.
+
+So the backdrop is re-drawn. Whatever is already painted in the container is drawn a second
+time, blurred, and clipped to the shape's own outline. The canvas mounts those copies with the
+same `repeat` flag repeat grids use, so a duplicate never registers itself with LiveTransform
+and steals a node's live element. The exporter builds the identical construction out of a
+`<use>` pointing at a `<defs>` copy of the same markup — which means an exported SVG carries a
+real background blur, and PNG and JPEG do too, since both rasterise the exported SVG.
+
+The cost is honest and bounded: the backdrop is rendered twice per blurred shape. Object blur
+has none of this, being a plain `feGaussianBlur` on the shape itself.
+
+### A mask group is a group with a flag, not a node type of its own
+
+Adobe's model is a `MaskGroup` whose topmost child is the mask. That could have been a new node
+type; it is a `maskId` on `GroupNode` instead, and the difference is worth the paragraph.
+
+Everything that already understands groups keeps working with no new branch: bounds, world
+matrices, ungroup, duplicate, the layer tree, reparenting, the file format. What masking adds
+is three specific overrides, each for a stated reason — the mask child is not painted (it is the
+clip, not artwork), the group's bounds are the mask's rather than the union (framing the union
+would draw a selection rectangle around artwork that is not on screen), and a point outside the
+mask is not a hit (nothing is drawn there, so nothing should be clickable there).
+
+The mask is drawn as a `<clipPath>` rather than a `<mask>`. A luminance mask would let the
+shape's own fill and opacity leak into the result, so masking with a 50%-grey rectangle would
+half-hide what it masks. XD's masks have hard edges; a clip is what hard edges are.
+
+### Outlining a stroke means flattening first, and that is not a shortcut
+
+`outlineStroke` walks each subpath offset by half the stroke width, inserting a join at every
+vertex and a cap at every end: one ring per open subpath, and an outer plus a *reversed* inner
+ring per closed one, so the nonzero rule reads the middle as a hole rather than as solid.
+
+It flattens to polylines first, and every tool does, because the exact offset of a cubic is a
+curve of higher degree that cubics cannot represent. The tolerance is PathUtils' own, so an
+outlined stroke is exactly as smooth as everything else drawn here.
+
+Two details that are easy to get wrong and are tested for it. **Which way is "outward" depends
+on how the subpath is wound** — the left normal points out of a counter-clockwise ring and into
+a clockwise one — so without checking the signed area, Inside and Outside swap over on half of
+all shapes, decided by nothing more than how the path happened to be authored. And **a round
+cap is a half turn, where "the shorter way round" does not pick a direction**: the arc has to
+bulge past the end of the path, and the other choice carves the same half-disc *out* of the
+stroke instead of adding it.
+
+Self-intersections at tight corners are left in place rather than trimmed. The nonzero rule
+fills them correctly, and trimming them is what makes naive outliners grow spikes.
 
 ### Corner rounding is geometry, not a filter
 

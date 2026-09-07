@@ -6,15 +6,16 @@
  */
 
 import {
-  alignSelection, deleteSelection, distributeSelection, flipSelection, groupSelection,
-  orderCommand, rotateSelection, setLocked, setMarkedForExport, setVisibility,
-  ungroupSelection,
+  alignSelection, canMaskSelection, canOutlineStrokeSelection, deleteSelection,
+  distributeSelection, flipSelection, groupSelection, maskWithShape, orderCommand,
+  outlineStrokeSelection, rotateSelection, setLocked, setMarkedForExport,
+  setVisibility, ungroupMask, ungroupSelection,
 } from '../history/Commands'
 import { runBooleanOperation } from '../history/BooleanCommands'
 import { copySelection, cutSelection, duplicateInPlace, hasClipboardContent, paste } from '../state/Clipboard'
 import { getDoc } from '../state/DocumentStore'
 import { editorStore, openDialog } from '../state/EditorStore'
-import { isShape } from '../document/types'
+import { isMaskGroup, isShape } from '../document/types'
 import { MOD_LABEL } from '../shortcuts/bindings'
 import type { MenuItemSpec } from './Menu'
 import type { Vec2 } from '../geometry/Matrix'
@@ -56,6 +57,25 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
       shortcut: `⇧${MOD}G`,
       disabled: !nodes.some((n) => n!.type === 'group'),
       onSelect: () => ungroupSelection(),
+    },
+    {
+      label: 'Mask With Shape',
+      shortcut: `⇧${MOD}M`,
+      disabled: !canMaskSelection(),
+      onSelect: () => maskWithShape(),
+    },
+    // Adobe: "select the object and right-click ... and select Ungroup Mask
+    // from the context menu."
+    {
+      label: 'Ungroup Mask',
+      disabled: !nodes.some((n) => isMaskGroup(n)),
+      onSelect: () => ungroupMask(),
+    },
+    {
+      label: 'Outline Stroke',
+      shortcut: `⇧${MOD}O`,
+      disabled: !canOutlineStrokeSelection(),
+      onSelect: () => outlineStrokeSelection(),
     },
     { kind: 'separator' },
     {

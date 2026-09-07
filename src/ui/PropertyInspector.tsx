@@ -17,7 +17,9 @@ import {
   distributeSelection,
   flipSelection,
   setCornerRadius,
+  setBlur,
   setFill,
+  setShadow,
   setMarkedForExport,
   setNodeTransform,
   setOpacity,
@@ -56,17 +58,23 @@ import {
   RotateIcon, TextAlignCenterIcon, TextAlignLeftIcon, TextAlignRightIcon,
 } from './icons'
 import {
+  BLUR_AMOUNT_MAX,
+  BLUR_BRIGHTNESS_MAX,
   CORNER_ORDER,
+  DEFAULT_BLUR,
+  DEFAULT_SHADOW,
   cornerRadiusOf,
   hasStyle,
   isContainer,
   isUniformCornerRadius,
   supportsCornerRadius,
   usesOwnBox,
+  type BlurEffect,
   type DesignDocument,
   type DesignNode,
   type Paint,
   type RGBA,
+  type ShadowEffect,
   type Style,
 } from '../document/types'
 
@@ -462,7 +470,11 @@ function liveEffectiveSize(
 // ---------------------------------------------------------------------------
 
 function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style }> }) {
-  const [popover, setPopover] = useState<{ target: 'fill' | 'stroke'; x: number; y: number } | null>(null)
+  const [popover, setPopover] = useState<{
+    target: 'fill' | 'stroke' | 'shadow'
+    x: number
+    y: number
+  } | null>(null)
 
   const fill = common(nodes, (n) => paintKey(n.style.fill))
   const strokePaint = common(nodes, (n) => paintKey(n.style.stroke.paint))
@@ -475,13 +487,22 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
   const dash = common(nodes, (n) => n.style.stroke.dashArray.join(' '))
 
   const first = nodes[0]!
-  const currentPaint: Paint = popover?.target === 'stroke' ? first.style.stroke.paint : first.style.fill
+  const shadow = first.style.shadow
+  const blur = first.style.blur
+  const currentPaint: Paint =
+    popover?.target === 'stroke'
+      ? first.style.stroke.paint
+      : popover?.target === 'shadow'
+        ? { type: 'solid', color: shadow?.color ?? DEFAULT_SHADOW.color }
+        : first.style.fill
 
   // The on-canvas gradient handles are part of the picker, as Adobe lists them:
   // they appear when it opens and go when it closes, and this is also what tells
   // the overlay whether it is editing the fill's gradient or the stroke's.
   const gradientNodeId = popover && isGradientPaint(currentPaint) ? first.id : null
-  const gradientTarget = popover?.target ?? 'fill'
+  // A shadow's colour is never a gradient, so the widget only ever edits the
+  // fill's or the stroke's.
+  const gradientTarget = popover?.target === 'stroke' ? 'stroke' : 'fill'
   useEffect(() => {
     setEditor({
       gradientEditing: gradientNodeId ? { nodeId: gradientNodeId, target: gradientTarget } : null,
@@ -524,7 +545,7 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
     }, []),
   )
 
-  const openPicker = useCallback((target: 'fill' | 'stroke', e: React.MouseEvent) => {
+  const openPicker = useCallback((target: 'fill' | 'stroke' | 'shadow', e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     // Flip left of the swatch; the width comes from the popover itself so the
     // two cannot drift apart.
@@ -643,19 +664,170 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
         )}
       </Section>
 
+
+      {/* Adobe: "click Drop Shadow or Inner Shadow in the Property Inspector",
+          and the checkbox next to it turns the effect off without losing it. */}
+      <Section title="Shadow">
+        <div className="paint-row">
+          <PaintToggle
+            on={!!shadow?.visible}
+            label="Shadow"
+            onChange={(on) =>
+              shadow ? setShadow({ visible: on }) : setShadow({ ...DEFAULT_SHADOW, visible: on })
+            }
+          />
+          <Select
+            value={shadow?.kind ?? 'drop'}
+            options={[
+              { value: 'drop', label: 'Drop Shadow' },
+              { value: 'inner', label: 'Inner Shadow' },
+            ]}
+            onChange={(v) => setShadow({ kind: v as ShadowEffect['kind'], visible: true })}
+            title="Shadow type"
+          />
+          <Swatch
+            paint={{ type: 'solid', color: shadow?.color ?? DEFAULT_SHADOW.color }}
+            onClick={(e) => openPicker('shadow', e)}
+          />
+        </div>
+        {shadow?.visible && (
+          <div className="field-row cols-3">
+            <NumberField
+              label="X"
+              value={common(nodes, (n) => n.style.shadow?.x ?? 0)}
+              onChange={(v, committing) => setShadow({ x: v }, committing ? undefined : 'shadow-x')}
+            />
+            <NumberField
+              label="Y"
+              value={common(nodes, (n) => n.style.shadow?.y ?? 0)}
+              onChange={(v, committing) => setShadow({ y: v }, committing ? undefined : 'shadow-y')}
+            />
+            <NumberField
+              label="B"
+              title="Blur"
+              min={0}
+              value={common(nodes, (n) => n.style.shadow?.blur ?? 0)}
+              onChange={(v, committing) => setShadow({ blur: v }, committing ? undefined : 'shadow-b')}
+            />
+          </div>
+        )}
+      </Section>
+
+      {/* Adobe's two blurs share one section, as they share one dropdown in XD:
+          an object blur blurs the shape, a background blur blurs what is behind
+          it. Brightness and Opacity belong to the background one alone — Adobe:
+          "Ignored for object blur effects." */}
+      <Section title="Blur">
+        <div className="paint-row">
+          <PaintToggle
+            on={!!blur?.visible}
+            label="Blur"
+            onChange={(on) =>
+              blur ? setBlur({ visible: on }) : setBlur({ ...DEFAULT_BLUR, visible: on })
+            }
+          />
+          <Select
+            value={blur?.kind ?? DEFAULT_BLUR.kind}
+            options={[
+              { value: 'background', label: 'Background Blur' },
+              { value: 'object', label: 'Object Blur' },
+            ]}
+            onChange={(v) => setBlur({ kind: v as BlurEffect['kind'], visible: true })}
+            title="Blur type"
+          />
+        </div>
+        {blur?.visible && (
+          <>
+            <SliderRow
+              label="Amount"
+              value={common(nodes, (n) => n.style.blur?.amount ?? 0)}
+              min={0}
+              max={BLUR_AMOUNT_MAX}
+              onChange={(v, committing) => setBlur({ amount: v }, committing ? undefined : 'blur-a')}
+            />
+            {blur.kind === 'background' && (
+              <>
+                <SliderRow
+                  label="Brightness"
+                  value={common(nodes, (n) => n.style.blur?.brightness ?? 0)}
+                  min={-BLUR_BRIGHTNESS_MAX}
+                  max={BLUR_BRIGHTNESS_MAX}
+                  onChange={(v, committing) =>
+                    setBlur({ brightness: v }, committing ? undefined : 'blur-br')
+                  }
+                />
+                <SliderRow
+                  label="Opacity"
+                  value={common(nodes, (n) => Math.round((n.style.blur?.fillOpacity ?? 1) * 100))}
+                  min={0}
+                  max={100}
+                  onChange={(v, committing) =>
+                    setBlur({ fillOpacity: v / 100 }, committing ? undefined : 'blur-o')
+                  }
+                />
+              </>
+            )}
+          </>
+        )}
+      </Section>
+
       {popover && (
         <PaintPopover
           paint={currentPaint}
           anchor={{ x: popover.x, y: popover.y }}
+          // A shadow has a colour, not a paint: Adobe's Shadow takes a Color,
+          // and a gradient shadow is not a thing in XD or in SVG's feDropShadow.
+          allowGradient={popover.target !== 'shadow'}
           onChange={(paint, committing) => {
             const key = committing ? undefined : `paint:${popover.target}`
             if (popover.target === 'fill') setFill(paint, key)
-            else setStroke({ paint }, key)
+            else if (popover.target === 'stroke') setStroke({ paint }, key)
+            else if (paint.type === 'solid') setShadow({ color: paint.color }, key)
           }}
           onClose={() => setPopover(null)}
         />
       )}
     </>
+  )
+}
+
+/**
+ * A named slider with its value beside it — the shape Adobe's blur controls
+ * take. The number field is not decoration: a slider alone cannot be set
+ * exactly, and every other value in this panel can be typed.
+ */
+function SliderRow({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string
+  value: number | null
+  min: number
+  max: number
+  onChange: (value: number, committing: boolean) => void
+}) {
+  return (
+    <div className="slider-row">
+      <span className="slider-row-label">{label}</span>
+      <input
+        type="range"
+        className="effect-slider"
+        aria-label={label}
+        min={min}
+        max={max}
+        step={1}
+        value={value ?? min}
+        onKeyDown={(e) => e.stopPropagation()}
+        // Dragging streams under one coalesce key and commits on release, so a
+        // whole drag is one undo entry rather than one per pixel.
+        onChange={(e) => onChange(Number(e.target.value), false)}
+        onPointerUp={(e) => onChange(Number((e.target as HTMLInputElement).value), true)}
+      />
+      <NumberField value={value} min={min} max={max} onChange={onChange} title={label} />
+    </div>
   )
 }
 

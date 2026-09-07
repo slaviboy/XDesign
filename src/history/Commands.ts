@@ -40,30 +40,42 @@ import {
   boundsOfNodes,
   geometryBounds,
   isEffectivelyLocked,
+  nodePathData,
+  paintOrderIndex,
   worldMatrix,
 } from '../document/SceneGraph'
+import { outlineStroke } from '../geometry/StrokeOutline'
 import { rgbaEquals } from '../document/color'
 import { createSwatchId } from '../document/ids'
 import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
-import { createArtboard, createGroup } from '../document/NodeFactory'
+import { createArtboard, createGroup, createPath } from '../document/NodeFactory'
 import { current, isDraft } from 'immer'
 import { invert, multiply, rotationAbout, type Mat2D } from '../geometry/Matrix'
 import { center, containsPoint, type Bounds } from '../geometry/Bounds'
 import type {
+  BlurEffect,
   DesignDocument,
   DesignNode,
   NodeId,
   Paint,
+  ShadowEffect,
   Stroke,
   Style,
   TextStyle,
   Transform,
 } from '../document/types'
 import {
+  BLUR_AMOUNT_MAX,
+  BLUR_BRIGHTNESS_MAX,
+  DEFAULT_BLUR,
+  DEFAULT_SHADOW,
+  DEFAULT_STROKE,
   cornerIndex,
   hasScalarCornerRadius,
   hasStyle,
   isContainer,
+  isMaskGroup,
+  isShape,
   type BoxCorner,
   type RGBA,
 } from '../document/types'
@@ -216,6 +228,178 @@ export function wrapInGroup(ids: readonly NodeId[], name = 'Group'): NodeId | nu
     groupId = g.id
   })
   return groupId
+}
+
+// ---------------------------------------------------------------------------
+// Masking
+// ---------------------------------------------------------------------------
+
+/**
+ * Adobe: "Select all the objects that are to be masked in addition to the
+ * topmost object, which is the mask, and choose Object > Mask with Shape."
+ *
+ * The mask stays a real child of the group, which is what makes the rest of
+ * Adobe's description true: the masked area "is not deleted from your project",
+ * double-clicking steps inside to readjust it, and Ungroup Mask hands both the
+ * mask and the content back untouched.
+ */
+export function maskWithShape(): NodeId | null {
+  const doc = getDoc()
+  const ids = editableSelection()
+  if (ids.length < 2) return null
+
+  // Topmost in PAINT order, not in selection order — "the object on top of the
+  // stack acts as a mask" regardless of the order it was clicked in.
+  const maskId = [...ids].sort((a, b) => paintOrderIndex(doc, a) - paintOrderIndex(doc, b)).pop()!
+  if (!canBeMask(doc.nodes[maskId])) return null
+
+  let groupId: NodeId | null = null
+  transaction('Mask With Shape', (draft) => {
+    const created = groupNodes(draft, ids)
+    if (!created) return false
+    const group = draft.nodes[created]
+    if (!group || group.type !== 'group') return false
+
+    // Re-seated at the end so the mask is unambiguously the topmost child, even
+    // if the selection spanned parents and grouping had to flatten the order.
+    const at = group.children.indexOf(maskId)
+    if (at >= 0) group.children.splice(at, 1)
+    group.children.push(maskId)
+
+    group.maskId = maskId
+    group.name = 'Mask Group'
+    groupId = created
+    return undefined
+  })
+
+  if (groupId) setSelection([groupId])
+  return groupId
+}
+
+/**
+ * Adobe: "You cannot mask text on shapes, components, groups, or symbols."
+ *
+ * A line is excluded on top of that for a reason of its own: it encloses no
+ * area, so masking with one would hide everything and look like a bug.
+ */
+export function canBeMask(node: DesignNode | undefined | null): boolean {
+  return !!node && isShape(node) && node.type !== 'line'
+}
+
+/** Whether Mask With Shape would do anything for the current selection. */
+export function canMaskSelection(): boolean {
+  const doc = getDoc()
+  const ids = editableSelection()
+  if (ids.length < 2) return false
+  const top = [...ids].sort((a, b) => paintOrderIndex(doc, a) - paintOrderIndex(doc, b)).pop()!
+  return canBeMask(doc.nodes[top])
+}
+
+/**
+ * Release a mask, keeping everything it held — Adobe's "Ungroup Mask".
+ *
+ * The same operation as Ungroup, and deliberately so: the mask group IS a
+ * group, so releasing it is dissolving it. The separate name exists because
+ * that is the command Adobe puts on the context menu.
+ */
+export function ungroupMask(): NodeId[] {
+  const doc = getDoc()
+  const ids = editableSelection().filter((id) => isMaskGroup(doc.nodes[id]))
+  if (ids.length === 0) return []
+  let released: NodeId[] = []
+  transaction('Ungroup Mask', (draft) => {
+    released = ids.flatMap((id) => ungroupNode(draft, id))
+    if (released.length === 0) return false
+    return undefined
+  })
+  if (released.length) setSelection(released)
+  return released
+}
+
+// ---------------------------------------------------------------------------
+// Outline Stroke
+// ---------------------------------------------------------------------------
+
+/**
+ * Adobe: "convert your path and border-based elements, like icons, into solid
+ * vector shapes", and "If any layer contains both a fill and a border, they'll
+ * automatically be separated."
+ *
+ * So a stroked, filled shape becomes two objects: the original keeps the fill
+ * and loses its border, and a new path — filled with what the border was
+ * painted with — takes its place on top. A shape with no fill is replaced
+ * outright, because there would be nothing left of it otherwise.
+ */
+export function outlineStrokeSelection(): NodeId[] {
+  const doc = getDoc()
+  const ids = editableSelection().filter((id) => hasOutlinableStroke(doc.nodes[id]))
+  if (ids.length === 0) return []
+
+  const created: NodeId[] = []
+  const ok = transaction('Outline Stroke', (draft) => {
+    for (const id of ids) {
+      const node = draft.nodes[id]
+      if (!node || !hasStyle(node)) continue
+      const d = nodePathData(node)
+      if (!d) continue
+
+      const outlined = outlineStroke(d, {
+        width: node.style.stroke.width,
+        cap: node.style.stroke.cap,
+        join: node.style.stroke.join,
+        miterLimit: node.style.stroke.miterLimit,
+        align: node.style.stroke.align,
+      })
+      if (!outlined) continue
+
+      const keepsFill = node.style.fill.type !== 'none'
+      const path = createPath(outlined, { ...node.transform }, {
+        ...clonePlain(node.style),
+        // The border's paint becomes the new shape's fill: that is what makes
+        // the result look identical to what it replaced.
+        fill: clonePlain(node.style.stroke.paint),
+        fillRule: 'nonzero',
+        stroke: { ...DEFAULT_STROKE },
+        strokeOpacity: 1,
+        fillOpacity: node.style.strokeOpacity,
+      })
+      path.name = keepsFill ? `${node.name} Outline` : node.name
+
+      const parentId = node.parentId ?? draft.rootId
+      const parent = draft.nodes[parentId]
+      if (!parent || !isContainer(parent)) continue
+      const at = parent.children.indexOf(id)
+      addNode(draft, path, parentId, at < 0 ? parent.children.length : at + 1)
+      created.push(path.id)
+
+      if (keepsFill) {
+        // Separated, as Adobe describes: the fill stays where it was, without
+        // the border that is now its own object.
+        node.style.stroke = { ...node.style.stroke, paint: { type: 'none' } }
+        created.push(id)
+      } else {
+        removeNodes(draft, [id])
+      }
+    }
+    if (created.length === 0) return false
+    return undefined
+  })
+
+  if (ok && created.length) setSelection(created)
+  return ok ? created : []
+}
+
+/** Whether Outline Stroke has anything to convert on this node. */
+export function hasOutlinableStroke(node: DesignNode | undefined | null): boolean {
+  if (!node || !hasStyle(node)) return false
+  if (!isShape(node)) return false
+  return node.style.stroke.paint.type !== 'none' && node.style.stroke.width > 0
+}
+
+/** Whether Outline Stroke would do anything for the current selection. */
+export function canOutlineStrokeSelection(): boolean {
+  const doc = getDoc()
+  return editableSelection().some((id) => hasOutlinableStroke(doc.nodes[id]))
 }
 
 // ---------------------------------------------------------------------------
@@ -471,6 +655,78 @@ export function setStroke(patch: Partial<Stroke>, coalesceKey?: string): boolean
     },
     { coalesceKey },
   )
+}
+
+/**
+ * Add, edit or remove the shadow on the selection.
+ *
+ * `null` removes it outright; a patch merges into whatever is there, starting
+ * from Adobe's own default the first time. Turning the effect OFF is
+ * `{ visible: false }`, not removal — that is the checkbox in the Properties
+ * panel, and it has to keep the settings so ticking it again restores them.
+ */
+export function setShadow(
+  patch: Partial<ShadowEffect> | null,
+  coalesceKey?: string,
+): boolean {
+  const ids = editableSelection()
+  if (ids.length === 0) return false
+  return transaction(
+    patch === null ? 'Remove shadow' : 'Change shadow',
+    (draft) => {
+      if (
+        !eachStyled(ids, draft, (style) => {
+          if (patch === null) {
+            delete style.shadow
+            return
+          }
+          const base = style.shadow ?? DEFAULT_SHADOW
+          style.shadow = {
+            ...base,
+            ...clonePlain(patch),
+            blur: Math.max(0, patch.blur ?? base.blur),
+          }
+        })
+      )
+        return false
+      return undefined
+    },
+    { coalesceKey },
+  )
+}
+
+/** The same, for the blur. Ranges are Adobe's, and are clamped here. */
+export function setBlur(patch: Partial<BlurEffect> | null, coalesceKey?: string): boolean {
+  const ids = editableSelection()
+  if (ids.length === 0) return false
+  return transaction(
+    patch === null ? 'Remove blur' : 'Change blur',
+    (draft) => {
+      if (
+        !eachStyled(ids, draft, (style) => {
+          if (patch === null) {
+            delete style.blur
+            return
+          }
+          const base = style.blur ?? DEFAULT_BLUR
+          const merged = { ...base, ...clonePlain(patch) }
+          style.blur = {
+            ...merged,
+            amount: clamp(merged.amount, 0, BLUR_AMOUNT_MAX),
+            brightness: clamp(merged.brightness, -BLUR_BRIGHTNESS_MAX, BLUR_BRIGHTNESS_MAX),
+            fillOpacity: clamp(merged.fillOpacity, 0, 1),
+          }
+        })
+      )
+        return false
+      return undefined
+    },
+    { coalesceKey },
+  )
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Number.isFinite(n) ? n : min))
 }
 
 export function setStyleProperty<K extends keyof Style>(

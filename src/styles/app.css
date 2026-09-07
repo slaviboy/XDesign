@@ -1182,3 +1182,49 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   stroke-width: 1;
   pointer-events: none;
 }
+
+/* Effect sliders: a label, the track, and the value. The three columns are
+   fixed so Amount, Brightness and Opacity line up down the section. */
+.slider-row {
+  display: grid;
+  grid-template-columns: 62px 1fr 54px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.slider-row-label {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.slider-row .field { min-width: 0; }
+.effect-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  outline: none;
+}
+.effect-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+.effect-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+/* The shadow row's type dropdown takes the space the width field has in the
+   stroke row above it, so the two rows read as one column of controls. */
+.paint-row > select { min-width: 0; flex: 1; }

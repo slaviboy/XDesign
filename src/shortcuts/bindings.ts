@@ -73,6 +73,8 @@ export const SHORTCUTS: ShortcutSpec[] = [
   { group: 'Arrange', keys: `⇧${MOD}+]`, label: 'Bring to front' },
   { group: 'Arrange', keys: `${MOD}+[`, label: 'Send backward' },
   { group: 'Arrange', keys: `⇧${MOD}+[`, label: 'Send to back' },
+  { group: 'Arrange', keys: `⇧${MOD}+M`, label: 'Mask with shape' },
+  { group: 'Arrange', keys: `⇧${MOD}+O`, label: 'Outline stroke' },
   { group: 'Arrange', keys: `${MOD}+L`, label: 'Lock / unlock' },
   { group: 'Arrange', keys: `⇧${MOD}+H`, label: 'Hide / show' },
 
