@@ -237,15 +237,16 @@ test('unchecking Stroke hides the whole stroke section', async ({ page }) => {
   const toggle = stroke.locator('.paint-toggle')
   // A new shape has no stroke, so it starts off and its controls are not shown.
   await expect(toggle).not.toBeChecked()
-  await expect(stroke.locator('select')).toHaveCount(0)
+  await expect(stroke.locator('.icon-select')).toHaveCount(0)
 
   await toggle.check()
-  await expect(stroke.locator('select')).toHaveCount(3)
+  // Cap, join and alignment — icon dropdowns rather than plain selects.
+  await expect(stroke.locator('.icon-select')).toHaveCount(3)
   const painted = page.locator('.document-layer [data-node-type="rect"] path').first()
   expect(await painted.getAttribute('stroke')).not.toBe('none')
 
   await toggle.uncheck()
-  await expect(stroke.locator('select')).toHaveCount(0)
+  await expect(stroke.locator('.icon-select')).toHaveCount(0)
 })
 
 test('the Fill row has its own eyedropper', async ({ page }) => {

@@ -18,6 +18,8 @@ import { ChevronRightIcon } from './icons'
 export interface MenuItemSpec {
   kind?: 'item' | 'separator' | 'submenu'
   label?: string
+  /** Drawn before the label. Used by the icon dropdowns in the inspector. */
+  icon?: ReactNode
   shortcut?: string
   disabled?: boolean
   checked?: boolean
@@ -105,10 +107,15 @@ export function Menu({
               onClose()
             }}
           >
-            <span>
-              {item.checked ? '✓ ' : ''}
+            <span className="menu-item-label">
+              {item.icon ? (
+                <span className="menu-item-icon">{item.icon}</span>
+              ) : item.checked ? (
+                '✓ '
+              ) : null}
               {item.label}
             </span>
+            {item.icon && item.checked && <span className="menu-item-check">✓</span>}
             {item.shortcut && <span className="menu-shortcut">{item.shortcut}</span>}
           </button>
         )
@@ -134,10 +141,15 @@ function SubMenu({ items, onClose }: { items: MenuItemSpec[]; onClose: () => voi
               onClose()
             }}
           >
-            <span>
-              {item.checked ? '✓ ' : ''}
+            <span className="menu-item-label">
+              {item.icon ? (
+                <span className="menu-item-icon">{item.icon}</span>
+              ) : item.checked ? (
+                '✓ '
+              ) : null}
               {item.label}
             </span>
+            {item.icon && item.checked && <span className="menu-item-check">✓</span>}
             {item.shortcut && <span className="menu-shortcut">{item.shortcut}</span>}
           </button>
         ),

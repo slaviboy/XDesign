@@ -11,7 +11,7 @@
  * only the effective value is meaningful across both.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   alignSelection,
   distributeSelection,
@@ -47,7 +47,7 @@ import { toCss, toHex } from '../document/color'
 import { fontsByCategory, isBundledFont, nearestWeight } from '../text/FontRegistry'
 import { openDialog, setCornerRadiusMode, setEditor } from '../state/EditorStore'
 import { useDocument, useEditorStore, useLiveTransformTick, useSelectedNodes } from '../state/hooks'
-import { NumberField, Section, Select, TextField, common, IconButton } from './primitives'
+import { IconSelect, NumberField, Section, Select, TextField, common, IconButton } from './primitives'
 import { PaintPopover, PAINT_POPOVER_WIDTH } from './ColorPicker'
 import { useEyedropper } from './eyedropper'
 import {
@@ -56,6 +56,9 @@ import {
   CornersIndependentIcon, CornersUniformIcon, EyedropperIcon,
   LinkBracket, MatchHeightIcon, MatchSizeIcon, MatchWidthIcon,
   RotateIcon, TextAlignCenterIcon, TextAlignLeftIcon, TextAlignRightIcon,
+  CapButtIcon, CapRoundIcon, CapSquareIcon,
+  JoinBevelIcon, JoinMiterIcon, JoinRoundIcon,
+  StrokeCenterIcon, StrokeInnerIcon, StrokeOuterIcon,
 } from './icons'
 import {
   BLUR_AMOUNT_MAX,
@@ -469,6 +472,31 @@ function liveEffectiveSize(
 // Appearance
 // ---------------------------------------------------------------------------
 
+/**
+ * The three stroke dropdowns, each option carrying the icon that draws it.
+ *
+ * Adobe's names, not SVG's: XD calls a square cap "Projecting" and centre
+ * alignment "Center", and those are what the panel says. The stored values stay
+ * the SVG ones, so nothing downstream has to translate.
+ */
+const CAP_OPTIONS: Array<{ value: Style['stroke']['cap']; label: string; icon: ReactNode }> = [
+  { value: 'butt', label: 'Butt', icon: <CapButtIcon /> },
+  { value: 'round', label: 'Round', icon: <CapRoundIcon /> },
+  { value: 'square', label: 'Projecting', icon: <CapSquareIcon /> },
+]
+
+const JOIN_OPTIONS: Array<{ value: Style['stroke']['join']; label: string; icon: ReactNode }> = [
+  { value: 'miter', label: 'Miter', icon: <JoinMiterIcon /> },
+  { value: 'round', label: 'Round', icon: <JoinRoundIcon /> },
+  { value: 'bevel', label: 'Bevel', icon: <JoinBevelIcon /> },
+]
+
+const ALIGN_OPTIONS: Array<{ value: Style['stroke']['align']; label: string; icon: ReactNode }> = [
+  { value: 'inner', label: 'Inside', icon: <StrokeInnerIcon /> },
+  { value: 'outer', label: 'Outside', icon: <StrokeOuterIcon /> },
+  { value: 'center', label: 'Center', icon: <StrokeCenterIcon /> },
+]
+
 function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style }> }) {
   const [popover, setPopover] = useState<{
     target: 'fill' | 'stroke' | 'shadow'
@@ -613,34 +641,22 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
         </div>
         {strokeOn && (
         <><div className="field-row cols-3">
-          <Select
+          <IconSelect
             value={cap ?? 'butt'}
-            options={[
-              { value: 'butt', label: 'Butt' },
-              { value: 'round', label: 'Round' },
-              { value: 'square', label: 'Square' },
-            ]}
-            onChange={(v) => setStroke({ cap: v as Style['stroke']['cap'] })}
+            options={CAP_OPTIONS}
+            onChange={(v) => setStroke({ cap: v })}
             title="Line cap"
           />
-          <Select
+          <IconSelect
             value={join ?? 'miter'}
-            options={[
-              { value: 'miter', label: 'Miter' },
-              { value: 'round', label: 'Round' },
-              { value: 'bevel', label: 'Bevel' },
-            ]}
-            onChange={(v) => setStroke({ join: v as Style['stroke']['join'] })}
+            options={JOIN_OPTIONS}
+            onChange={(v) => setStroke({ join: v })}
             title="Line join"
           />
-          <Select
+          <IconSelect
             value={align ?? 'center'}
-            options={[
-              { value: 'center', label: 'Center' },
-              { value: 'inner', label: 'Inside' },
-              { value: 'outer', label: 'Outside' },
-            ]}
-            onChange={(v) => setStroke({ align: v as Style['stroke']['align'] })}
+            options={ALIGN_OPTIONS}
+            onChange={(v) => setStroke({ align: v })}
             title="Stroke alignment"
           />
         </div>

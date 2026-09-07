@@ -100,6 +100,12 @@ alone. The checkbox on each turns the effect off without discarding its settings
 drawn with strokes becomes solid vector that scales, takes a gradient and joins a boolean. A
 shape with both a fill and a border is separated into two objects, as Adobe describes.
 
+**Stroke cap, join and alignment** — three dropdowns whose every option carries an icon that
+*is* the setting: the cap and join glyphs are real strokes carrying the real `stroke-linecap`
+and `stroke-linejoin`, so the picture and the behaviour cannot drift apart. The alignment three
+show the stroke band inside, outside or straddling a filled square, because a band needs
+something to be measured against.
+
 **Corner radius** — draggable handles inside rectangles, polygons and stars.
 Drag inward to round, outward to sharpen. Each handle keeps a constant gap inside the corner
 it rounds, so it stays reachable at any radius without drifting toward the centre. A

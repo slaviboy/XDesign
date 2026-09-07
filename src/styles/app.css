@@ -1267,3 +1267,37 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   border-left: 2px solid var(--border);
   padding-left: 8px;
 }
+
+/* A dropdown that shows an icon for the option it holds. Sized and coloured to
+   sit in the same row as the native selects beside it. */
+.icon-select {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+}
+.icon-select:hover { border-color: var(--text-faint); }
+.icon-select-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--text);
+}
+.icon-select-arrow { flex: none; color: var(--text-faint); }
+
+/* Menu rows that carry an icon put the tick on the right, since the icon has
+   taken the place a leading tick would have used. */
+.menu-item-label { display: flex; align-items: center; gap: 8px; }
+.menu-item-icon { display: grid; place-items: center; color: var(--text); }
+.menu-item-check { color: var(--text-muted); }

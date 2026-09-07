@@ -11,6 +11,12 @@ import {
   readField, selectTool, setField,
 } from './helpers'
 
+/** Choose an option from one of the stroke section's icon dropdowns. */
+async function pickStroke(page: import('@playwright/test').Page, control: string, option: string) {
+  await page.locator(`.icon-select[title^="${control}"]`).click()
+  await page.locator('.menu-item', { hasText: new RegExp(`^${option}`) }).click()
+}
+
 /** Draw a shallow arc freehand, so the simplifier has real curvature to keep. */
 async function freehandArc(
   page: import('@playwright/test').Page,
@@ -318,8 +324,8 @@ test('stroke alignment, caps and dashes reach the rendered SVG', async ({ page }
   await hex.press('Enter')
   await page.keyboard.press('Escape')
 
-  await strokeSection.locator('select').nth(0).selectOption('round')
-  await strokeSection.locator('select').nth(1).selectOption('bevel')
+  await pickStroke(page, 'Line cap', 'Round')
+  await pickStroke(page, 'Line join', 'Bevel')
   const dash = strokeSection.locator('.field', { has: page.locator('.field-label:text-is("Dash")') }).locator('input')
   await dash.fill('6 3')
   await dash.press('Enter')
@@ -1035,4 +1041,47 @@ test('every preference explains itself behind an (i)', async ({ page }) => {
   await snap.click()
   await expect(page.locator('.dialog .pref-note')).toHaveCount(1)
   await expect(snap).toHaveAttribute('aria-expanded', 'false')
+})
+
+// -------------------------------------------------------- stroke pickers --
+
+test('cap, join and alignment each show the option they name', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 460, y: 340 })
+  const stroke = page.locator('.section', { hasText: 'STROKE' })
+  await stroke.locator('.paint-toggle').check()
+
+  // Three dropdowns, each showing an icon for what it currently holds.
+  const pickers = stroke.locator('.icon-select')
+  await expect(pickers).toHaveCount(3)
+  // The tooltip names the control AND the option it is showing, because the
+  // closed control has room for the icon and nothing else.
+  expect(
+    await pickers.evaluateAll((els) =>
+      els.map((e) => `${e.getAttribute('title')}=${e.getAttribute('data-value')}`),
+    ),
+  ).toEqual([
+    'Line cap: Butt=butt',
+    'Line join: Miter=miter',
+    'Stroke alignment: Center=center',
+  ])
+  await expect(pickers.first().locator('svg')).toHaveCount(2)
+
+  // Every option in the menu carries an icon, and the current one is ticked.
+  await stroke.locator('.icon-select[title^="Stroke alignment"]').click()
+  const items = page.locator('.menu-item')
+  await expect(items).toHaveCount(3)
+  await expect(items.locator('.menu-item-icon')).toHaveCount(3)
+  await expect(items.locator('.menu-item-check')).toHaveCount(1)
+  await expect(items.filter({ hasText: 'Center' }).locator('.menu-item-check')).toHaveCount(1)
+
+  // Choosing one applies it and shows it on the closed control.
+  await items.filter({ hasText: 'Outside' }).click()
+  await expect(page.locator('.menu-item')).toHaveCount(0)
+  await expect(stroke.locator('.icon-select[title^="Stroke alignment"]')).toHaveAttribute(
+    'data-value',
+    'outer',
+  )
+  // Outside alignment is drawn by masking the shape out of a doubled stroke.
+  await expect(page.locator('.document-layer mask[id^="sa-mask-"]')).toHaveCount(1)
 })

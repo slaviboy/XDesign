@@ -14,6 +14,8 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { MenuHost, useMenuState } from './Menu'
+import { ChevronDownIcon } from './icons'
 
 // ------------------------------------------------------------------ tooltip
 
@@ -354,6 +356,66 @@ export function Select<T extends string | number>({
         ),
       )}
     </select>
+  )
+}
+
+/**
+ * A dropdown whose every option carries an icon.
+ *
+ * A native <select> cannot draw anything but text in its options, so this is a
+ * button plus the same menu the application and context menus use — which is
+ * why dismissal, click-outside and edge-flipping need no code here.
+ *
+ * The closed control shows the icon alone. Three of these share one inspector
+ * row, which leaves about thirty pixels for a word: "Center" came out as "Ce…"
+ * and "Projecting" had no chance. The icons draw their own setting, the tooltip
+ * names both the control and its current value, and the menu spells every
+ * option out in full. `data-value` carries the setting for tests.
+ */
+export function IconSelect<T extends string>({
+  value,
+  options,
+  onChange,
+  title,
+}: {
+  value: T
+  options: Array<{ value: T; label: string; icon: ReactNode }>
+  onChange: (value: T) => void
+  title?: string
+}) {
+  const menu = useMenuState()
+  const ref = useRef<HTMLButtonElement>(null)
+  const current = options.find((o) => o.value === value) ?? options[0]
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className="icon-select"
+        title={current ? `${title}: ${current.label}` : title}
+        aria-label={current ? `${title}: ${current.label}` : title}
+        aria-haspopup="menu"
+        data-value={value}
+        onClick={() => {
+          const rect = ref.current?.getBoundingClientRect()
+          menu.open(
+            rect?.left ?? 0,
+            (rect?.bottom ?? 0) + 4,
+            options.map((o) => ({
+              label: o.label,
+              icon: o.icon,
+              checked: o.value === value,
+              onSelect: () => onChange(o.value),
+            })),
+          )
+        }}
+      >
+        <span className="icon-select-icon">{current?.icon}</span>
+        <ChevronDownIcon size={10} className="icon-select-arrow" />
+      </button>
+      <MenuHost menu={menu.menu} onClose={menu.close} />
+    </>
   )
 }
 

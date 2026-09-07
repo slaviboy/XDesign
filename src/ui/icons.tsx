@@ -409,6 +409,84 @@ export const EyedropperIcon = ({ size = 16, ...rest }: IconProps) => (
 export const GridIcon = (p: IconProps) => (
   <Icon {...p}><path d="M6 2.5v11M10 2.5v11M2.5 6h11M2.5 10h11" /></Icon>
 )
+/* ----------------------------------------------------------------- stroke */
+
+/*
+ * The stroke icons draw the thing they name rather than symbolising it: the cap
+ * and join glyphs are real strokes carrying the real `stroke-linecap` and
+ * `stroke-linejoin`, so each icon IS its setting and the two cannot drift.
+ *
+ * The alignment three need a reference to be read against, so they show the
+ * shape as a faint outline with the stroke band sitting inside it, outside it,
+ * or straddling the edge.
+ */
+
+/**
+ * The object the alignment icons measure against: a filled square, so the band
+ * can be seen sitting inside it, outside it, or across its edge. A bare outline
+ * disappears under the band it is meant to be compared with.
+ */
+const AlignShape = () => (
+  <path d="M4 3H13V12H4Z" fill="currentColor" stroke="none" opacity={0.2} />
+)
+
+export const StrokeInnerIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <AlignShape />
+    <path d="M5.5 3V10.5H13" strokeWidth={3} strokeLinecap="butt" />
+  </Icon>
+)
+export const StrokeOuterIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <AlignShape />
+    <path d="M2.5 3V13.5H13" strokeWidth={3} strokeLinecap="butt" />
+  </Icon>
+)
+export const StrokeCenterIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <AlignShape />
+    <path d="M4 3V12H13" strokeWidth={3} strokeLinecap="butt" />
+  </Icon>
+)
+
+/** Where the stroke nominally ends, so the cap's overhang is visible. */
+const CapEnd = () => <path d="M10.5 3v10" strokeWidth={1} opacity={0.4} />
+
+export const CapButtIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <CapEnd />
+    <path d="M3 8h7.5" strokeWidth={5} strokeLinecap="butt" />
+  </Icon>
+)
+export const CapRoundIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <CapEnd />
+    <path d="M3 8h7.5" strokeWidth={5} strokeLinecap="round" />
+  </Icon>
+)
+export const CapSquareIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <CapEnd />
+    <path d="M3 8h7.5" strokeWidth={5} strokeLinecap="square" />
+  </Icon>
+)
+
+export const JoinMiterIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 13V4.5h8" strokeWidth={4.5} strokeLinejoin="miter" strokeLinecap="butt" />
+  </Icon>
+)
+export const JoinRoundIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 13V4.5h8" strokeWidth={4.5} strokeLinejoin="round" strokeLinecap="butt" />
+  </Icon>
+)
+export const JoinBevelIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 13V4.5h8" strokeWidth={4.5} strokeLinejoin="bevel" strokeLinecap="butt" />
+  </Icon>
+)
+
 export const InfoIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="8" cy="8" r="6" />
