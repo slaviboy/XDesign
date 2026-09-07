@@ -120,14 +120,19 @@ export function ColorPicker({
         />
       </div>
 
-      <div className="value-row">
+      {/* Hex is one field and fits beside the dropdown; the other models are
+          three, and squeezing those onto the same row leaves them too narrow to
+          show "255". They drop to a row of their own instead. */}
+      <div className={`value-row${model === 'hex' ? '' : ' split'}`}>
         <Select
           value={model}
           options={MODEL_OPTIONS}
           title="Color model"
           onChange={(m) => { sharedModel = m; setModel(m) }}
         />
-        <ValueFields model={model} color={color} hsv={hsv} emit={emit} adopt={adopt} />
+        {model === 'hex' && (
+          <ValueFields model={model} color={color} hsv={hsv} emit={emit} adopt={adopt} />
+        )}
         <NumberField
           value={Math.round(color.a * 100)}
           min={0}
@@ -139,6 +144,12 @@ export function ColorPicker({
           onChange={(v, committing) => emit(hsv, v / 100, committing)}
         />
       </div>
+
+      {model !== 'hex' && (
+        <div className="components-row">
+          <ValueFields model={model} color={color} hsv={hsv} emit={emit} adopt={adopt} />
+        </div>
+      )}
 
       <SwatchRow color={color} onPick={adopt} />
     </div>
@@ -779,7 +790,7 @@ export function PaintPopover({
 }
 
 /** The popover's width, shared so the inspector's left-flip cannot drift from it. */
-export const PAINT_POPOVER_WIDTH = 300
+export const PAINT_POPOVER_WIDTH = 252
 
 /**
  * Convert between paint types, carrying the colour across.

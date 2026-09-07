@@ -701,9 +701,9 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .sv-square {
   position: relative;
   width: 100%;
-  /* Deliberately wider than tall: a square reads as a colour swatch, a
-     rectangle reads as a field you sweep across. */
-  height: 156px;
+  /* Square, and kept square by the ratio rather than a fixed height — so the
+     panel's width is the only number that decides how big it is. */
+  aspect-ratio: 1;
   border-radius: var(--radius);
   cursor: crosshair;
   touch-action: none;
@@ -808,6 +808,12 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 /* Sized so three-component modes still fit: a hue of 203 must not clip to 20. */
 .value-row { display: flex; gap: 4px; align-items: center; }
 .value-row .select-field { flex: 0 0 68px; }
+/* RGB, HSL and HSV need three fields; on one row with the model dropdown and the
+   opacity they end up too narrow to show "255". They get their own row instead. */
+.value-row.split .select-field { flex: 1 1 auto; }
+.components-row { display: flex; gap: 4px; }
+.components-row .field { flex: 1 1 0; min-width: 0; }
+.components-row .field input { min-width: 0; }
 .value-row .field { flex: 1 1 0; min-width: 0; }
 .value-row .field input { min-width: 0; }
 .value-row .alpha-field { flex: 0 0 54px; }
@@ -1107,16 +1113,13 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   margin: 2px 0;
 }
 .gradient-section {
-  display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .gradient-section-label {
   font-size: 11px;
   color: var(--text-faint);
-  /* Aligned to the first row of controls, not to the top of the block. */
-  padding-top: 6px;
 }
 .gradient-section-body { display: flex; flex-direction: column; gap: 6px; }
 /* Inset the ramp by half a marker, so the stops at 0% and 100% sit fully on it

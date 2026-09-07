@@ -61,20 +61,20 @@ test('the colour model dropdown switches without changing the colour', async ({ 
   await expect(model).toHaveValue('hex')
 
   await model.selectOption('rgb')
-  const rgb = page.locator('.popover .value-row .field:not(.alpha-field) input')
+  const rgb = page.locator('.popover .components-row .field input')
   await expect(rgb).toHaveCount(3)
   expect(await rgb.nth(0).inputValue()).toBe('43')
   expect(await rgb.nth(1).inputValue()).toBe('138')
   expect(await rgb.nth(2).inputValue()).toBe('198')
 
   await model.selectOption('hsl')
-  const hsl = page.locator('.popover .value-row .field:not(.alpha-field) input')
+  const hsl = page.locator('.popover .components-row .field input')
   // Hue near 203 — and not clipped by a field too narrow to show it.
   expect(Number(await hsl.nth(0).inputValue())).toBeGreaterThan(195)
   expect(Number(await hsl.nth(0).inputValue())).toBeLessThan(210)
 
   await model.selectOption('hsv')
-  await expect(page.locator('.popover .value-row .field:not(.alpha-field) input')).toHaveCount(3)
+  await expect(page.locator('.popover .components-row .field input')).toHaveCount(3)
 
   await model.selectOption('hex')
   await expect(hexInput(page)).toHaveValue('2b8ac6')

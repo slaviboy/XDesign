@@ -302,10 +302,12 @@ hue while you drag lightness to zero.
 The panel is ordered by what each control edits: the wheel, sliders and value
 fields change ONE stop, so they sit together at the top; below a rule, **Color stops** edits the
 ramp as a whole and **Position** edits where the gradient sits. The two labels are what stop those
-last two rows reading as more colour controls. The saturation field is deliberately wider than tall
-— a square reads as a swatch, a rectangle reads as something you sweep across — and both sliders'
-thumbs are hollow rings rather than filled dots, so the value they are pointing at shows through
-instead of being hidden underneath.
+last two rows reading as more colour controls. The saturation field is square, and kept square by an
+aspect ratio rather than a fixed height, so the panel's width is the only number that decides its
+size. The sliders share its corner radius and its cursor — the same hollow ring, so the hue or
+opacity being pointed at shows through instead of hiding under a filled dot. Hex fits beside the
+model dropdown; RGB, HSL and HSV are three fields and drop to a row of their own rather than being
+squeezed too narrow to show "255".
 
 The palette is document data, alongside `guides` — it travels with the artwork rather than living in
 one browser's storage, and adding a swatch is an ordinary undoable edit. The file-format field is
