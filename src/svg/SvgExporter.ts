@@ -17,7 +17,7 @@ import type { Bounds } from '../geometry/Bounds'
 import { polygonStarPath, rectPath } from '../geometry/ShapeGeometry'
 import { localMatrix, worldMatrix } from '../document/SceneGraph'
 import { toHex } from '../document/color'
-import { gradientId, isGradient, sortedStops } from '../canvas/paint'
+import { ANGULAR_TILE, angularWedges, gradientId, isGradient, sortedStops } from '../canvas/paint'
 import { layoutText, lineOffsetX } from '../text/TextLayout'
 import { fontStack } from '../text/FontRegistry'
 import { canEmbed, embedFontCss } from '../text/FontEmbedder'
@@ -437,7 +437,8 @@ function paintAttrs(
     case 'ref':
       return { value: paint.ref, opacity: 1 }
     case 'linear':
-    case 'radial': {
+    case 'radial':
+    case 'angular': {
       const id = gradientId(safeId(nodeId), target)
       ctx.defs.push(emitGradient(paint, id))
       return { value: `url(#${id})`, opacity: 1 }
@@ -457,6 +458,26 @@ function emitGradient(paint: Paint, id: string): string {
         `/>`,
     )
     .join('')
+
+  if (paint.type === 'angular') {
+    // SVG has no conic paint server. A <pattern> is one, so the sweep is drawn
+    // as a fan of wedges inside it. The DOCUMENT keeps the gradient parametric;
+    // only this rendering is generated, and it is shared with the live renderer
+    // so the two cannot drift.
+    const paths = angularWedges(paint.cx, paint.cy, paint.rotation, paint.stops)
+      .map(
+        (w) =>
+          `<path d="${w.d}" fill="${toHex(w.color)}"` +
+          (w.color.a < 1 ? ` fill-opacity="${round(w.color.a, 3)}"` : '') +
+          `/>`,
+      )
+      .join('')
+    return (
+      `<pattern id="${id}" patternUnits="objectBoundingBox" ` +
+      `patternContentUnits="objectBoundingBox" x="${ANGULAR_TILE.x}" y="${ANGULAR_TILE.y}" ` +
+      `width="${ANGULAR_TILE.width}" height="${ANGULAR_TILE.height}">${paths}</pattern>`
+    )
+  }
 
   // objectBoundingBox is SVG's default unit, and is what the model stores — so
   // the gradient rescales with the shape in any renderer that opens the file.

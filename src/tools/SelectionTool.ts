@@ -46,6 +46,19 @@ import {
   updateStarRatioDrag,
 } from './StarRatioSession'
 import {
+  beginGradientDrag,
+  cancelGradientDrag,
+  commitGradientDrag,
+  isGradientDragging,
+  addStopAt,
+  endStop,
+  nextGradientStop,
+  nudgeGradientStop,
+  removeStop,
+  updateGradientDrag,
+  type GradientHandle,
+} from './GradientSession'
+import {
   beginPathEditing,
   isPointEditable,
   endPathEditing,
@@ -71,7 +84,7 @@ import type { Mat2D, Vec2 } from '../geometry/Matrix'
 import type { NodeId } from '../document/types'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
 
-type Phase = 'idle' | 'pending' | 'marquee' | 'transform' | 'radius' | 'star-ratio'
+type Phase = 'idle' | 'pending' | 'marquee' | 'transform' | 'radius' | 'star-ratio' | 'gradient'
 
 interface State {
   phase: Phase
@@ -83,6 +96,8 @@ interface State {
   latest: Map<NodeId, Mat2D> | null
   /** Selection bounds captured at gesture start, for snapping the moving box. */
   startFrame: Bounds | null
+  /** Which gradient handle a 'gradient' phase started on. */
+  gradientHandle: GradientHandle | null
 }
 
 const state: State = {
@@ -93,6 +108,7 @@ const state: State = {
   snap: null,
   latest: null,
   startFrame: null,
+  gradientHandle: null,
 }
 
 /** Movement below this (in screen px) counts as a click, not a drag. */
@@ -105,6 +121,7 @@ function reset(): void {
   state.snap = null
   state.latest = null
   state.startFrame = null
+  state.gradientHandle = null
 }
 
 /**
@@ -176,6 +193,43 @@ export const selectionTool: Tool = {
       if (id && beginStarRatioDrag(doc, id, e.doc)) {
         state.phase = 'star-ratio'
         return
+      }
+      return
+    }
+
+    // 1a-ter. The on-canvas gradient editor, for the same reason: its segment
+    // and dots sit on top of the shape.
+    if (e.targetHandle === 'gradient') {
+      const editing = editor.gradientEditing
+      if (!editing) return
+      const corner = (e.targetCorner ?? 'segment') as GradientHandle
+      // An end handle sits exactly on the stop at that end, and paints over it.
+      // Pressing it selects that stop as well, so the one underneath stays
+      // reachable instead of being permanently covered.
+      if (corner === 'start' || corner === 'end' || corner === 'radius' || corner === 'angle') {
+        const end = corner === 'start' ? 'first' : 'last'
+        const stop = endStop(doc, editing.nodeId, editing.target, end)
+        if (stop) setEditor({ activeGradientStop: stop })
+      }
+      if (corner === 'stop') {
+        // Selecting a stop is what makes Delete and the picker's fields address
+        // it; the drag that may follow moves it along the axis.
+        setEditor({ activeGradientStop: e.native?.target instanceof Element
+          ? (e.native.target as Element).closest('[data-stop]')?.getAttribute('data-stop') ?? null
+          : null })
+      }
+      if (
+        beginGradientDrag(
+          doc,
+          editing.nodeId,
+          editing.target,
+          corner,
+          editorStore.getState().activeGradientStop,
+          e.doc,
+        )
+      ) {
+        state.phase = 'gradient'
+        state.gradientHandle = corner
       }
       return
     }
@@ -266,6 +320,17 @@ export const selectionTool: Tool = {
       return
     }
 
+    if (state.phase === 'gradient') {
+      // Same self-healing guard as the phases above.
+      if (!isGradientDragging() || e.buttons === 0) {
+        cancelGradientDrag()
+        reset()
+        return
+      }
+      updateGradientDrag(e.doc, e.shiftKey)
+      return
+    }
+
     if (editorStore.getState().nodeEditingId && pathEditPointerMove(e, ctx)) return
 
     if (state.phase === 'idle') {
@@ -323,6 +388,19 @@ export const selectionTool: Tool = {
 
     if (state.phase === 'star-ratio') {
       commitStarRatioDrag()
+      reset()
+      return
+    }
+
+    if (state.phase === 'gradient') {
+      const handle = commitGradientDrag()
+      const editing = editorStore.getState().gradientEditing
+      // Adobe: "Click anywhere on the gradient editor to add new color stops."
+      // A press on the segment that never became a drag is that click.
+      if (!handle && editing && state.gradientHandle === 'segment') {
+        const added = addStopAt(ctx.doc(), editing.nodeId, editing.target, e.doc)
+        if (added) setEditor({ activeGradientStop: added })
+      }
       reset()
       return
     }
@@ -399,6 +477,34 @@ export const selectionTool: Tool = {
   onKeyDown(e: KeyboardEvent): boolean {
     if (editorStore.getState().nodeEditingId && pathEditKeyDown(e)) return true
 
+    // While the gradient widget is on screen, its selected stop owns Delete and
+    // Tab — otherwise Delete would remove the whole shape out from under it.
+    const gradient = editorStore.getState().gradientEditing
+    if (gradient) {
+      const activeStop = editorStore.getState().activeGradientStop
+      if ((e.key === 'Delete' || e.key === 'Backspace') && activeStop) {
+        if (removeStop(getDoc(), gradient.nodeId, gradient.target, activeStop)) {
+          setEditor({ activeGradientStop: null })
+          return true
+        }
+      }
+      if (e.key === 'Tab') {
+        const next = nextGradientStop(getDoc(), gradient.nodeId, gradient.target, activeStop, e.shiftKey)
+        if (next) {
+          setEditor({ activeGradientStop: next })
+          return true
+        }
+      }
+      // Arrows nudge the stop. Without claiming them they fall through to the
+      // global nudge and move the whole shape instead.
+      if (activeStop && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        const step = (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 0.1 : 0.01)
+        if (nudgeGradientStop(getDoc(), gradient.nodeId, gradient.target, activeStop, step)) {
+          return true
+        }
+      }
+    }
+
     if (e.key === 'Escape') {
       if (isRadiusDragging()) {
         cancelRadiusDrag()
@@ -407,6 +513,11 @@ export const selectionTool: Tool = {
       }
       if (isStarRatioDragging()) {
         cancelStarRatioDrag()
+        reset()
+        return true
+      }
+      if (isGradientDragging()) {
+        cancelGradientDrag()
         reset()
         return true
       }
@@ -431,6 +542,7 @@ export const selectionTool: Tool = {
   onDeactivate(): void {
     if (isRadiusDragging()) cancelRadiusDrag()
     if (isStarRatioDragging()) cancelStarRatioDrag()
+    if (isGradientDragging()) cancelGradientDrag()
     if (isDragging()) cancelDrag()
     // Point editing is NOT torn down here: `nodeEditingId` owns its lifetime, and
     // the Canvas subscriber ends it the moment setTool clears that. Ending it

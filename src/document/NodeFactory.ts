@@ -57,6 +57,10 @@ export function clonePaint(p: Paint): Paint {
     case 'linear':
       return { ...p, stops: p.stops.map((s) => ({ ...s, color: { ...s.color } })) }
     case 'radial':
+    case 'angular':
+      // Every gradient must deep-copy its stops. Falling through to the shallow
+      // default aliased the array, so duplicating a shape and editing one copy's
+      // gradient silently edited the other's.
       return { ...p, stops: p.stops.map((s) => ({ ...s, color: { ...s.color } })) }
     default:
       return { ...p }

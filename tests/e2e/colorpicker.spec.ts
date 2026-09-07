@@ -185,3 +185,20 @@ test('the eyedropper picks a colour off the canvas', async ({ page }) => {
   // Sampled from real rendered pixels, so it works over images and gradients too.
   await expect(hexInput(page)).toHaveValue('1e9e4f')
 })
+
+test('angular joins the same dropdown and keeps the stops', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 220, y: 200 }, { x: 420, y: 360 })
+  await openFillPicker(page)
+  await setHex(page, 'e8a33d')
+
+  const type = page.locator('.popover select[title="Paint type"]')
+  await type.selectOption('angular')
+  // SVG has no conic paint server, so it is drawn as a pattern of wedges.
+  await expect(page.locator('.document-layer pattern')).toHaveCount(1)
+  await expect(page.locator('.gradient-bar')).toBeVisible()
+
+  await type.selectOption('linear')
+  const first = await page.locator('.document-layer linearGradient stop').first().getAttribute('stop-color')
+  expect(first?.toLowerCase()).toBe('#e8a33d')
+})

@@ -769,17 +769,31 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   border: 1px solid var(--border);
   cursor: copy;
 }
+/* Adobe describes the stops as "small circles". The checkerboard sits on the
+   marker and the colour on an inner span, so a translucent stop reads as
+   translucent instead of as a washed-out solid. */
 .gradient-stop {
   position: absolute;
-  top: -3px;
-  width: 12px; height: 28px;
-  transform: translateX(-50%);
+  top: 50%;
+  width: 16px; height: 16px;
+  transform: translate(-50%, -50%);
   border: 2px solid #fff;
-  border-radius: 3px;
+  border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
   cursor: grab;
+  touch-action: none;
+  overflow: hidden;
+  background-color: var(--checker-bg);
+  background-image:
+    linear-gradient(45deg, var(--checker) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker) 75%);
+  background-size: 6px 6px;
 }
+.gradient-stop-fill { display: block; width: 100%; height: 100%; }
 .gradient-stop.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.gradient-bar { touch-action: none; }
 
 /* Model dropdown, value fields, opacity — one row, as the reference lays it out. */
 /* Sized so three-component modes still fit: a hue of 203 must not clip to 20. */
@@ -1047,3 +1061,33 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   background: var(--magenta);
   color: var(--accent-contrast);
 }
+
+/* The on-canvas gradient editor. The axis is a plain line so it reads as a
+   segment rather than a shape edge; endpoints are hollow to distinguish them
+   from the solid stop dots that ride the same line. */
+.gradient-axis {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  opacity: 0.9;
+}
+.gradient-endpoint {
+  fill: var(--handle-fill);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+.gradient-stop-dot {
+  stroke: var(--handle-fill);
+  stroke-width: 1.5;
+}
+.gradient-stop-dot.active { stroke: var(--accent); stroke-width: 2; }
+/* A radial gradient paints an ellipse, not a circle, because the unit square is
+   scaled by the node's box — so the ring shows the ellipse, not a lie. */
+.gradient-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0.5;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 4 3;
+}
+.gradient-stop-base { fill: var(--handle-fill); stroke: none; }

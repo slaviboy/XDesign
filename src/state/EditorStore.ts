@@ -85,8 +85,10 @@ export interface EditorState {
   editingTextId: NodeId | null
   /** Path node the pen tool is currently building or editing. */
   penTargetId: NodeId | null
-  /** Node whose gradient handles are shown on canvas. */
+  /** Node whose gradient handles are shown on canvas, while the picker is open. */
   gradientEditing: { nodeId: NodeId; target: 'fill' | 'stroke' } | null
+  /** Gradient stop selected on the canvas widget, so Delete knows which to remove. */
+  activeGradientStop: string | null
   /** Path nodes whose Bezier points are shown for direct editing. */
   nodeEditingId: NodeId | null
   /**
@@ -142,6 +144,7 @@ export const editorStore = createStore<EditorState>()(
     editingTextId: null,
     penTargetId: null,
     gradientEditing: null,
+    activeGradientStop: null,
     nodeEditingId: null,
     selectedPoints: [],
 

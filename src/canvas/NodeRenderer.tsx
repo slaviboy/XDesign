@@ -27,6 +27,8 @@ import { localMatrix } from '../document/SceneGraph'
 import { useDocumentStore, useNode } from '../state/hooks'
 import { liveTransform } from './LiveTransform'
 import {
+  ANGULAR_TILE,
+  angularWedges,
   dashArrayValue,
   gradientId,
   isGradient,
@@ -87,6 +89,27 @@ function GradientDef({ paint, id }: { paint: Paint; id: string }): ReactNode {
   ))
   // Coordinates are objectBoundingBox units, SVG's default — so the gradient
   // rescales with the shape automatically.
+  if (paint.type === 'angular') {
+    // SVG has no conic paint server, so the sweep is a <pattern> of wedges —
+    // which IS a paint server, so nothing downstream has to know the difference.
+    const wedges = angularWedges(paint.cx, paint.cy, paint.rotation, paint.stops)
+    return (
+      <pattern
+        id={id}
+        patternUnits="objectBoundingBox"
+        patternContentUnits="objectBoundingBox"
+        x={ANGULAR_TILE.x}
+        y={ANGULAR_TILE.y}
+        width={ANGULAR_TILE.width}
+        height={ANGULAR_TILE.height}
+      >
+        {wedges.map((w, i) => (
+          <path key={i} d={w.d} fill={toHex(w.color)} fillOpacity={w.color.a} />
+        ))}
+      </pattern>
+    )
+  }
+
   return paint.type === 'linear' ? (
     <linearGradient id={id} x1={paint.x1} y1={paint.y1} x2={paint.x2} y2={paint.y2}>
       {stops}

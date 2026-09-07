@@ -136,6 +136,22 @@ export interface RadialGradientPaint {
 }
 
 /**
+ * A sweep around a centre, XD's third gradient type.
+ *
+ * Stored parametrically like the other two, in the same unit space — only the
+ * RENDERING is an approximation, because SVG has no conic paint server. See
+ * angularWedges in canvas/paint.ts for how it is drawn and what that costs.
+ */
+export interface AngularGradientPaint {
+  type: 'angular'
+  cx: number
+  cy: number
+  /** Where the sweep starts, in degrees clockwise from the +x axis. */
+  rotation: number
+  stops: GradientStop[]
+}
+
+/**
  * A reference to a paint server that lives inside a preserved SVG subtree
  * (a pattern, a gradient we chose not to model, a marker). Carries the raw
  * `url(#…)` so imported artwork keeps rendering exactly as authored even when
@@ -151,9 +167,10 @@ export type Paint =
   | SolidPaint
   | LinearGradientPaint
   | RadialGradientPaint
+  | AngularGradientPaint
   | RefPaint
 
-export type GradientPaint = LinearGradientPaint | RadialGradientPaint
+export type GradientPaint = LinearGradientPaint | RadialGradientPaint | AngularGradientPaint
 
 export const NO_PAINT: NoPaint = { type: 'none' }
 

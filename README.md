@@ -48,7 +48,13 @@ rotation cursor oriented to the corner and the object's own angle.
 **Transform panel** — W/H with an aspect-ratio lock, X/Y, rotation, flips, and match
 width / height / size across a selection. Every readout tracks a drag in real time.
 
-**Colour** — a paint-type dropdown (solid, linear, radial, none), Hex / RGB / HSL / HSV
+**Gradients** — linear, radial and angular, each with an on-canvas editor while the picker is
+open: a segment with draggable endpoints for a linear gradient, a centre and a radius handle for a
+radial one, a centre and an angle handle for an angular one. Stops ride the widget too — click it to
+add one, drag it along to reposition, drag it off to delete, or select it and press Delete. Arrow
+keys nudge, Tab cycles.
+
+**Colour** — a paint-type dropdown (solid, linear, radial, angular, none), Hex / RGB / HSL / HSV
 numeric modes, an opacity field, an eyedropper that samples any rendered pixel on the canvas
 including images and gradients, and a document palette that starts empty and fills up as you
 save colours with (+).
@@ -305,6 +311,52 @@ sample is an array lookup. It disarms on any pan or zoom, because the raster is 
 otherwise quietly lie about what is under the pointer. The native `EyeDropper` API is deliberately
 unused: it is Chromium-only, it takes the screen over with an OS magnifier no test can drive, and it
 cannot keep the picker's own fields updating as the pointer moves.
+
+### Gradient handles live in unit space, and the difference shows
+
+Gradient coordinates are objectBoundingBox units, which means the unit square is scaled by the
+node's box before anything is painted. Two consequences drive the whole widget:
+
+- a linear endpoint at unit `(1,1)` sits at local `(width, height)`, so the segment's **on-screen
+  angle is not** `atan2(y2−y1, x2−x1)` — on a 200×100 node a "45°" gradient draws at 26.6°;
+- a radial `r` paints an **ellipse** with semi-axes `r·width` and `r·height`, so a circular radius
+  ring would miss the paint on any node that is not square.
+
+So every handle is placed `unit → ×(w,h) → local → world → screen` and every drag runs the inverse,
+and the radial ring is drawn as the ellipse that is actually painted rather than as a circle that
+would be a lie. Endpoints are free to leave the shape, which is both what Adobe specifies and what
+objectBoundingBox units already allow — they are not clamped to 0..1.
+
+**The gradient drag writes to the store, unlike every other canvas gesture.** That is a deliberate
+exception with a hard reason: an angular gradient's live geometry is a whole `<pattern>` subtree, and
+a LiveTransform override is `Record<string, string>` applied with `setAttribute` — it cannot express
+that at all, and one mechanism has to serve all three types. It also matches how every other paint
+edit already behaves, and keeps the picker's fields, the ramp preview and the canvas in step. The
+writes are throttled to one per animation frame and the run is closed with `breakHistoryCoalescing()`
+rather than a final keyless write, so a drag costs exactly one undo entry — re-writing the identical
+paint on release would have emitted a second `replace` patch and cost the user two.
+
+### Angular gradients are approximated, and that is the honest word
+
+SVG has no conic paint server. But `<pattern>` *is* a paint server, so an angular gradient renders
+as a pattern of flat-coloured wedges and everything downstream — `paintToAttrs`, hit testing, PNG
+export — carries on unchanged.
+
+Flat wedges, not gradient-filled ones: a linear gradient's iso-lines are parallel and a conic's are
+rays, so no linear fill can agree with its neighbour all the way down a shared edge — chord-filled
+wedges leave visible spokes. Enough thin flat wedges have no seams at all, only banding, and at two
+degrees apiece the step between neighbours is under one 8-bit level across a full-range ramp. Each
+wedge overlaps the next so the later one paints over its antialiased edge; butt-jointed wedges leave
+a lattice of half-covered pixels that reads as moiré. Every stop offset is added to the boundary
+list, so a deliberate hard edge lands on a wedge edge instead of being smeared across the slice it
+happens to fall in. The tile is twice the bounding box, because an angular *stroke* paints outside
+the fill's box and would otherwise show the fan tiled.
+
+The document keeps the gradient fully parametric — `cx`, `cy`, `rotation` and stops, in the same
+unit space as the other two — so only the rendering is generated, and the generator is shared
+between the live renderer and the exporter exactly as the other gradients' is. The cost is real and
+one-way: an exported angular gradient is a pattern of paths, so re-importing that SVG gives back a
+pattern, not an angular gradient. `.xdesign` round-trips it exactly.
 
 ### Corner rounding is geometry, not a filter
 

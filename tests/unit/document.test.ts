@@ -48,6 +48,28 @@ describe('file format round trip', () => {
     }
   })
 
+  it('round-trips an angular gradient exactly, stop ids and order included', () => {
+    const angular = {
+      type: 'angular' as const,
+      cx: 0.4,
+      cy: 0.6,
+      rotation: 135,
+      stops: [
+        createStop(0, { r: 255, g: 0, b: 0, a: 1 }),
+        createStop(0.5, { r: 0, g: 255, b: 0, a: 0.25 }),
+        createStop(1, { r: 0, g: 0, b: 255, a: 1 }),
+      ],
+    }
+    const doc = docWith((d) => {
+      const rect = createRect({ width: 50, height: 50 })
+      rect.style.fill = angular
+      addNode(d, rect, d.rootId)
+    })
+    const back = deserializeDocument(serializeDocument(doc))
+    const rect = Object.values(back.nodes).find((n) => n.type === 'rect')!
+    expect('style' in rect && rect.style.fill).toEqual(angular)
+  })
+
   it('round-trips gradients exactly', () => {
     const gradient = createLinearGradient([
       createStop(0, { r: 255, g: 0, b: 0, a: 1 }),

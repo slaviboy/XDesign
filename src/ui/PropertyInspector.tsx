@@ -38,6 +38,7 @@ import { decompose, invert, multiply, type Mat2D } from '../geometry/Matrix'
 import { transformBounds, unionAll, type Bounds } from '../geometry/Bounds'
 import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
 import { getLiveMatrix, getLiveSize, usesIntrinsicSize } from '../tools/DragSession'
+import { isGradient as isGradientPaint } from '../canvas/paint'
 import { getLiveRadius } from '../tools/RadiusSession'
 import { getLiveStarRatio } from '../tools/StarRatioSession'
 import { toCss, toHex } from '../document/color'
@@ -474,6 +475,21 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
   const first = nodes[0]!
   const currentPaint: Paint = popover?.target === 'stroke' ? first.style.stroke.paint : first.style.fill
 
+  // The on-canvas gradient handles are part of the picker, as Adobe lists them:
+  // they appear when it opens and go when it closes, and this is also what tells
+  // the overlay whether it is editing the fill's gradient or the stroke's.
+  const gradientNodeId = popover && isGradientPaint(currentPaint) ? first.id : null
+  const gradientTarget = popover?.target ?? 'fill'
+  useEffect(() => {
+    setEditor({
+      gradientEditing: gradientNodeId ? { nodeId: gradientNodeId, target: gradientTarget } : null,
+      // Cleared alongside, or a stale id would outlive the widget and Delete
+      // would go looking for a stop that is no longer on screen.
+      activeGradientStop: null,
+    })
+    return () => setEditor({ gradientEditing: null, activeGradientStop: null })
+  }, [gradientNodeId, gradientTarget])
+
   const openPicker = useCallback((target: 'fill' | 'stroke', e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     // Flip left of the swatch; the width comes from the popover itself so the
@@ -600,6 +616,10 @@ function Swatch({ paint, onClick }: { paint: Paint | null; onClick: (e: React.Mo
         ? `linear-gradient(to right, ${paint.stops.map((s) => toCss(s.color)).join(', ')})`
         : paint.type === 'radial'
           ? `radial-gradient(circle, ${paint.stops.map((s) => toCss(s.color)).join(', ')})`
+          : paint.type === 'angular'
+            // CSS has a conic gradient even though SVG does not, so the chip can
+            // show the real thing. CSS starts at 12 o'clock, SVG angles at 3.
+            ? `conic-gradient(from ${paint.rotation + 90}deg, ${paint.stops.map((s) => toCss(s.color)).join(', ')})`
           : paint.type === 'ref'
             ? 'repeating-linear-gradient(45deg, var(--checker) 0 3px, var(--checker-bg) 3px 6px)'
             : 'transparent'

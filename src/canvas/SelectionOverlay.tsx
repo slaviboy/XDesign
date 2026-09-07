@@ -28,6 +28,10 @@ import { getEditingSubpaths } from '../tools/PathEditing'
 import { getLiveRadius, radiusHandlePosition, type RadiusCorner } from '../tools/RadiusSession'
 import { getLiveStarRatio } from '../tools/StarRatioSession'
 import { starRatioHandlePoint } from '../geometry/ShapeGeometry'
+import { toSvgMatrix } from '../geometry/Matrix'
+import { isGradient, sortedStops } from './paint'
+import { ANGULAR_RING, stopPointOnAxis } from '../tools/GradientSession'
+import { toCss } from '../document/color'
 import { cornerRadiusOf, supportsCornerRadius, type BoxCorner } from '../document/types'
 import {
   ancestorIds,
@@ -86,6 +90,7 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
   const hoverId = useEditorStore((s) => s.hoverId)
   const viewport = useEditorStore((s) => s.viewport)
   const nodeEditingId = useEditorStore((s) => s.nodeEditingId)
+  const gradientEditing = useEditorStore((s) => s.gradientEditing)
   const editingContext = useEditorStore((s) => s.editingContext)
   const dragging = useEditorStore((s) => s.isDragging)
   const tick = useLiveTransformTick()
@@ -123,9 +128,10 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
         />
       )}
 
-      {!nodeEditingId && selection.length === 1 && (
+      {!nodeEditingId && !gradientEditing && selection.length === 1 && (
         <RadiusHandles nodeId={selection[0]!} viewport={viewport} tick={tick} />
       )}
+
 
       {nodeEditingId ? (
         <PathPointOverlay viewport={viewport} tick={tick} />
@@ -133,6 +139,18 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
         frame && (
           <TransformFrame frame={frame} dragging={dragging} multiple={selection.length > 1} />
         )
+      )}
+
+      {/* After the frame, deliberately: a linear gradient's default endpoints sit
+          exactly on the nw and ne resize handles, and while the picker is open
+          the gradient is what the user came to edit. */}
+      {!nodeEditingId && gradientEditing && (
+        <GradientHandles
+          nodeId={gradientEditing.nodeId}
+          target={gradientEditing.target}
+          viewport={viewport}
+          tick={tick}
+        />
       )}
 
       <MarqueeBox viewport={viewport} />
@@ -475,6 +493,162 @@ function RadiusHandles({
           </g>
         )
       })}
+    </g>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Gradient handles
+// ---------------------------------------------------------------------------
+
+/**
+ * The on-canvas gradient editor.
+ *
+ * Adobe lists this as a component of the gradient colour picker, so it is gated
+ * on `gradientEditing` — set while the picker is open — rather than on selection
+ * alone. That also disambiguates the fill's gradient from the stroke's.
+ *
+ * Everything is placed by crossing objectBoundingBox units into local space:
+ * `unit x (width, height) -> local -> world -> screen`. Skipping that scale is
+ * the classic way to get a widget that looks right on a square node and drifts
+ * off the paint on every other one.
+ */
+function GradientHandles({
+  nodeId,
+  target,
+  viewport,
+  tick,
+}: {
+  nodeId: NodeId
+  target: 'fill' | 'stroke'
+  viewport: Viewport
+  tick: number
+}) {
+  void tick
+  const doc = useDocument()
+  const activeStop = useEditorStore((s) => s.activeGradientStop)
+  const node = doc.nodes[nodeId]
+  if (!node || !('style' in node)) return null
+  if (isEffectivelyLocked(doc, nodeId)) return null
+  // Note: no repeat-grid bail-out here, unlike RadiusHandles. That guard exists
+  // because only cell 0 registers with LiveTransform; this widget writes to the
+  // store, which every cell renders from, so it works inside a grid.
+
+  const paint = target === 'stroke' ? node.style.stroke.paint : node.style.fill
+  if (!isGradient(paint)) return null
+
+  const live = getLiveMatrix(nodeId)
+  const world = live ?? nodeWorldMatrix(doc, nodeId)
+  const liveSize = getLiveSize(nodeId)
+  const width = liveSize?.width ?? node.transform.width
+  const height = liveSize?.height ?? node.transform.height
+  if (width <= 0 || height <= 0) return null
+  // Below this the handles pile into an unusable cluster, the same reason the
+  // radius dots hide on a tiny shape.
+  const pxPerLocal = meanScale(world) * viewport.zoom
+  if (Math.min(width, height) * pxPerLocal < RADIUS_HANDLE_MIN_SHAPE) return null
+
+  /** unit -> screen, the whole chain in one place. */
+  const toScreen = (ux: number, uy: number) =>
+    docToScreen(viewport, applyToXY(world, ux * width, uy * height))
+
+  const stops = sortedStops(paint.stops)
+
+  // Where the widget's axis runs, in unit space: the segment for a linear
+  // gradient, the +x radius ray for a radial one, the rotation ray for angular.
+  let a: { x: number; y: number }
+  let b: { x: number; y: number }
+  if (paint.type === 'linear') {
+    a = { x: paint.x1, y: paint.y1 }
+    b = { x: paint.x2, y: paint.y2 }
+  } else if (paint.type === 'radial') {
+    a = { x: paint.cx, y: paint.cy }
+    b = { x: paint.cx + paint.r, y: paint.cy }
+  } else {
+    const rad = (paint.rotation * Math.PI) / 180
+    a = { x: paint.cx, y: paint.cy }
+    b = { x: paint.cx + Math.cos(rad) * ANGULAR_RING, y: paint.cy + Math.sin(rad) * ANGULAR_RING }
+  }
+
+  const pa = toScreen(a.x, a.y)
+  const pb = toScreen(b.x, b.y)
+
+  // The painted extent of a radial gradient is an ELLIPSE, because the unit
+  // square is scaled by the box — a circle would not touch the paint's edge on
+  // any node that is not square. Drawn as a transformed circle so rotation and
+  // shear come along too.
+  const ring =
+    paint.type === 'radial'
+      ? {
+          cx: paint.cx * width,
+          cy: paint.cy * height,
+          rx: paint.r * width,
+          ry: paint.r * height,
+        }
+      : null
+
+  return (
+    <g className="gradient-handles">
+      {ring && (
+        <ellipse
+          className="gradient-ring"
+          cx={ring.cx}
+          cy={ring.cy}
+          rx={ring.rx}
+          ry={ring.ry}
+          transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.zoom}) ${toSvgMatrix(world)}`}
+          pointerEvents="none"
+        />
+      )}
+
+      {/* The segment doubles as a grab target: dragging it moves the whole
+          gradient, which is Adobe's "drag the segment to change direction". */}
+      <g data-handle="gradient" data-corner="segment">
+        <line
+          x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
+          stroke="transparent"
+          strokeWidth={10}
+          pointerEvents="all"
+          style={{ cursor: 'move' }}
+        />
+        <line className="gradient-axis" x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} pointerEvents="none" />
+      </g>
+
+      {stops.map((stop) => {
+        // Through the paint's own axis, so an angular gradient's stops sit on the
+        // ring at the angle they paint rather than strung along a straight line.
+        const u = stopPointOnAxis(paint, stop.offset)
+        const p = toScreen(u.x, u.y)
+        return (
+          <g key={stop.id} data-handle="gradient" data-corner="stop" data-stop={stop.id}>
+            <circle cx={p.x} cy={p.y} r={8} fill="transparent" pointerEvents="all" style={{ cursor: 'grab' }} />
+            {/* Opaque backing, so a translucent stop is readable over artwork. */}
+            <circle className="gradient-stop-base" cx={p.x} cy={p.y} r={4} pointerEvents="none" />
+            <circle
+              className={`gradient-stop-dot${stop.id === activeStop ? ' active' : ''}`}
+              cx={p.x}
+              cy={p.y}
+              r={4}
+              fill={toCss(stop.color)}
+              pointerEvents="none"
+            />
+          </g>
+        )
+      })}
+
+      {[
+        { corner: paint.type === 'linear' ? 'start' : 'center', p: pa, cursor: 'move' },
+        {
+          corner: paint.type === 'linear' ? 'end' : paint.type === 'radial' ? 'radius' : 'angle',
+          p: pb,
+          cursor: paint.type === 'linear' ? 'move' : 'crosshair',
+        },
+      ].map(({ corner, p, cursor }) => (
+        <g key={corner} data-handle="gradient" data-corner={corner}>
+          <circle cx={p.x} cy={p.y} r={9} fill="transparent" pointerEvents="all" style={{ cursor }} />
+          <circle className="gradient-endpoint" cx={p.x} cy={p.y} r={5} pointerEvents="none" />
+        </g>
+      ))}
     </g>
   )
 }
