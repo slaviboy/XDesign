@@ -18,7 +18,11 @@
  */
 
 import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate'
-import { DEFAULT_SETTINGS, type DesignDocument, type DesignNode, type ImageAsset, type NodeId } from '../document/types'
+import {
+  DEFAULT_SETTINGS,
+  type DesignDocument, type DesignNode, type ImageAsset, type NodeId,
+  type RGBA, type Swatch,
+} from '../document/types'
 import { createDocumentRoot } from '../document/NodeFactory'
 
 export const FORMAT_NAME = 'OfflineDesignDocument'
@@ -37,6 +41,7 @@ export interface XDesignFile {
     modifiedAt: number
     settings: DesignDocument['settings']
     guides: DesignDocument['guides']
+    swatches?: DesignDocument['swatches']
   }
   rootId: NodeId
   /** Convenience index; the authoritative structure is in `layers`. */
@@ -81,6 +86,7 @@ export function serializeDocument(
       modifiedAt: Date.now(),
       settings: doc.settings,
       guides: doc.guides,
+      swatches: doc.swatches,
     },
     rootId: doc.rootId,
     artboards: Object.values(doc.nodes)
@@ -271,10 +277,30 @@ function buildDocument(
     rootId,
     assets,
     guides: Array.isArray(payload.document?.guides) ? payload.document.guides : [],
+    // Absent in files written before swatches existed, which is exactly the
+    // right default — no version bump needed for a purely additive field.
+    swatches: Array.isArray(payload.document?.swatches)
+      ? payload.document.swatches.filter(isSwatch)
+      : [],
     settings: { ...DEFAULT_SETTINGS, ...(payload.document?.settings ?? {}) },
     createdAt: payload.document?.createdAt ?? Date.now(),
     modifiedAt: payload.document?.modifiedAt ?? Date.now(),
   }
+}
+
+/** Repair-what-you-can: a malformed swatch is dropped, not fatal. */
+function isSwatch(value: unknown): value is Swatch {
+  if (!value || typeof value !== 'object') return false
+  const s = value as Swatch
+  const c = s.color as RGBA | undefined
+  return (
+    typeof s.id === 'string' &&
+    !!c &&
+    typeof c.r === 'number' &&
+    typeof c.g === 'number' &&
+    typeof c.b === 'number' &&
+    typeof c.a === 'number'
+  )
 }
 
 /**

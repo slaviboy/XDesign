@@ -132,7 +132,13 @@ class LiveTransformChannel {
     })
   }
 
-  private flush(): void {
+  /**
+   * Apply every pending write right now.
+   *
+   * Public so a test can drive a gesture without a real animation frame — the
+   * scheduler is the only thing between `set()` and the DOM.
+   */
+  flush(): void {
     for (const [id, override] of this.pending) {
       const set = this.elements.get(id)
       if (!set) continue

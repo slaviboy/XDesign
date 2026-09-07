@@ -548,6 +548,50 @@ export function flipNodes(doc: DesignDocument, ids: readonly NodeId[], axis: 'h'
 // Misc
 // ---------------------------------------------------------------------------
 
+/**
+ * Turn a parametric shape into a real path, IN PLACE.
+ *
+ * The node keeps its id, and that is the whole point: `createPath` mints a fresh
+ * one, which would orphan the selection, `nodeEditingId`, `selectedPoints`, the
+ * Layers panel's state and any boolean-op back-reference. Deleting the
+ * type-specific fields on an immer draft emits `remove` patches, so undo puts
+ * the rectangle back exactly as it was.
+ *
+ * The layer name is deliberately kept — silently renaming someone's "Rectangle"
+ * to "Path" is the same mistake the legacy-shape migration avoids.
+ *
+ * @returns false for a node that has no outline to convert.
+ */
+export function convertNodeToPath(node: DesignNode, d: string, closed: boolean): boolean {
+  const shape = node as DesignNode & Record<string, unknown>
+  switch (node.type) {
+    case 'path':
+      return true
+    case 'rect':
+      delete shape.cornerRadius
+      break
+    case 'polygon':
+      delete shape.sides
+      delete shape.starRatio
+      delete shape.cornerRadius
+      break
+    case 'line':
+      delete shape.x1
+      delete shape.y1
+      delete shape.x2
+      delete shape.y2
+      break
+    case 'ellipse':
+      break
+    default:
+      return false
+  }
+  shape.type = 'path'
+  shape.d = d
+  shape.closed = closed
+  return true
+}
+
 export function setNodeName(doc: DesignDocument, id: NodeId, name: string): void {
   const node = doc.nodes[id]
   if (node) node.name = name.trim() || node.name

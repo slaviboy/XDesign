@@ -47,6 +47,7 @@ import {
 } from './StarRatioSession'
 import {
   beginPathEditing,
+  isPointEditable,
   endPathEditing,
   pathEditDoubleClick,
   pathEditKeyDown,
@@ -371,8 +372,10 @@ export const selectionTool: Tool = {
       setEditor({ editingTextId: deep })
       return
     }
-    // Double-clicking a path enters point-editing mode.
-    if (node?.type === 'path') {
+    // Double-clicking any shape shows its points — a line its two ends, a
+    // rectangle its four corners. Text was already handled above, and nothing
+    // is written to the document, so this is free until a point actually moves.
+    if (isPointEditable(node)) {
       setSelection([deep])
       setEditor({ nodeEditingId: deep })
       beginPathEditing(deep)
@@ -429,7 +432,9 @@ export const selectionTool: Tool = {
     if (isRadiusDragging()) cancelRadiusDrag()
     if (isStarRatioDragging()) cancelStarRatioDrag()
     if (isDragging()) cancelDrag()
-    endPathEditing()
+    // Point editing is NOT torn down here: `nodeEditingId` owns its lifetime, and
+    // the Canvas subscriber ends it the moment setTool clears that. Ending it
+    // unconditionally would break handing the points to the direct-select tool.
     setEditor({ marquee: null, hoverId: null })
     reset()
   },

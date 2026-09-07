@@ -455,6 +455,17 @@ export interface Guide {
   position: number
 }
 
+/**
+ * A colour the user saved, with its opacity.
+ *
+ * Document data, deliberately — like guides, and like XD's Assets panel. The
+ * palette travels with the artwork rather than being stuck in one browser.
+ */
+export interface Swatch {
+  id: string
+  color: RGBA
+}
+
 export interface DocumentSettings {
   gridSize: number
   gridVisible: boolean
@@ -481,6 +492,7 @@ export interface DesignDocument {
   rootId: NodeId
   assets: Record<AssetId, ImageAsset>
   guides: Guide[]
+  swatches: Swatch[]
   settings: DocumentSettings
   createdAt: number
   modifiedAt: number

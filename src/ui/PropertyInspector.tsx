@@ -45,7 +45,7 @@ import { fontsByCategory, isBundledFont, nearestWeight } from '../text/FontRegis
 import { openDialog, setCornerRadiusMode, setEditor } from '../state/EditorStore'
 import { useDocument, useEditorStore, useLiveTransformTick, useSelectedNodes } from '../state/hooks'
 import { NumberField, Section, Select, TextField, common, IconButton } from './primitives'
-import { PaintPopover } from './ColorPicker'
+import { PaintPopover, PAINT_POPOVER_WIDTH } from './ColorPicker'
 import {
   AlignBottomIcon, AlignCenterHIcon, AlignCenterVIcon, AlignLeftIcon, AlignRightIcon,
   AlignTopIcon, DistributeHIcon, DistributeVIcon, FlipHIcon, FlipVIcon,
@@ -476,7 +476,9 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
 
   const openPicker = useCallback((target: 'fill' | 'stroke', e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setPopover({ target, x: rect.left - 258, y: rect.top })
+    // Flip left of the swatch; the width comes from the popover itself so the
+    // two cannot drift apart.
+    setPopover({ target, x: rect.left - (PAINT_POPOVER_WIDTH + 10), y: rect.top })
   }, [])
 
   return (

@@ -27,6 +27,10 @@ export function createStopId(): string {
   return createId('s')
 }
 
+export function createSwatchId(): string {
+  return createId('w')
+}
+
 export function createGuideId(): string {
   return createId('g')
 }

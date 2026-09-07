@@ -18,6 +18,7 @@ export const IS_MAC = MOD === '⌘'
 
 export const SHORTCUTS: ShortcutSpec[] = [
   { group: 'Tools', keys: 'V', label: 'Selection' },
+  { group: 'Tools', keys: 'D', label: 'Direct Selection (edit points)' },
   { group: 'Tools', keys: 'R', label: 'Rectangle' },
   { group: 'Tools', keys: 'E', label: 'Ellipse' },
   { group: 'Tools', keys: 'Y', label: 'Polygon (triangle, n-gon or star)' },
@@ -39,7 +40,9 @@ export const SHORTCUTS: ShortcutSpec[] = [
   { group: 'Pen', keys: 'Enter', label: 'End the open path' },
   { group: 'Pen', keys: 'Escape', label: 'End the path and return to Select' },
   { group: 'Pen', keys: 'Backspace', label: 'Remove the last point placed' },
-  { group: 'Points', keys: 'Double-click path', label: 'Edit its points' },
+  { group: 'Points', keys: 'Click with D', label: 'Show a shape\'s points' },
+  { group: 'Points', keys: 'Double-click shape', label: 'Edit its points' },
+  { group: 'Points', keys: 'Drag a point', label: 'Converts the shape to a path' },
   { group: 'Points', keys: 'Double-click point', label: 'Convert corner and smooth' },
   { group: 'Points', keys: 'Alt click point', label: 'Convert corner and smooth' },
   { group: 'Points', keys: 'Click outline', label: 'Insert a point' },
@@ -91,7 +94,9 @@ export const SHORTCUTS: ShortcutSpec[] = [
 ]
 
 export function shortcutGroups(): Array<{ group: string; items: ShortcutSpec[] }> {
-  const order = ['Tools', 'File', 'Edit', 'Arrange', 'Transform', 'View']
+  // Pen and Points were missing here, so every one of their entries was
+  // silently filtered out of the shortcuts dialog.
+  const order = ['Tools', 'File', 'Edit', 'Arrange', 'Transform', 'View', 'Pen', 'Points']
   return order
     .map((group) => ({ group, items: SHORTCUTS.filter((s) => s.group === group) }))
     .filter((g) => g.items.length > 0)

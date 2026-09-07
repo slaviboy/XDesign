@@ -564,7 +564,7 @@ test('Prototype and Share are honestly disabled, not fake', async ({ page }) => 
 
 test('every tool in the rail activates', async ({ page }) => {
   await openApp(page)
-  const tools = ['select', 'rect', 'ellipse', 'polygon', 'line',
+  const tools = ['select', 'direct-select', 'rect', 'ellipse', 'polygon', 'line',
                  'pen', 'pencil', 'text', 'artboard', 'zoom', 'hand']
   for (const tool of tools) {
     await selectTool(page, tool)
@@ -575,7 +575,7 @@ test('every tool in the rail activates', async ({ page }) => {
 test('every tool keyboard shortcut selects its tool', async ({ page }) => {
   await openApp(page)
   const map: Record<string, string> = {
-    v: 'select', r: 'rect', e: 'ellipse', y: 'polygon',
+    v: 'select', d: 'direct-select', r: 'rect', e: 'ellipse', y: 'polygon',
     l: 'line', p: 'pen', n: 'pencil', t: 'text', a: 'artboard', z: 'zoom', h: 'hand',
   }
   for (const [key, tool] of Object.entries(map)) {

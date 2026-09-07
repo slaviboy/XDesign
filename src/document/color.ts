@@ -202,6 +202,24 @@ export function hsvToRgb(h: number, s: number, v: number, a = 1): RGBA {
 }
 
 /** Relative luminance, used to pick readable text over a swatch. */
+/**
+ * HSV -> HSL and back, without going through RGB.
+ *
+ * Routing between the two models through 8-bit RGB quantises every value and
+ * collapses the hue at the extremes, which makes the hue slider jump while you
+ * drag lightness to zero. These are exact.
+ */
+export function hsvToHsl(h: number, s: number, v: number): HSL {
+  const l = v * (1 - s / 2)
+  const d = Math.min(l, 1 - l)
+  return { h, s: d === 0 ? 0 : (v - l) / d, l }
+}
+
+export function hslToHsv(h: number, s: number, l: number): HSV {
+  const v = l + s * Math.min(l, 1 - l)
+  return { h, s: v === 0 ? 0 : 2 * (1 - l / v), v }
+}
+
 export function luminance(c: RGBA): number {
   const f = (n: number) => {
     const v = n / 255

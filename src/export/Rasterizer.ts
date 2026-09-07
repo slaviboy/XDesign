@@ -46,6 +46,29 @@ export class RasterizeError extends Error {
 }
 
 /**
+ * Rasterize to pixels rather than to a file.
+ *
+ * The eyedropper needs to READ the rendered artwork, which a Blob cannot give
+ * it. Same-origin blob: SVG does not taint the canvas, so getImageData works —
+ * that is the whole reason this module uses a Blob URL rather than a data URL.
+ */
+export async function rasterizeSvgToImageData(
+  svg: string,
+  size: { width: number; height: number },
+): Promise<ImageData> {
+  const width = Math.max(1, Math.round(size.width))
+  const height = Math.max(1, Math.round(size.height))
+  const image = await loadSvgImage(svg)
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) throw new RasterizeError('This browser could not provide a 2D canvas.')
+  ctx.drawImage(image, 0, 0, width, height)
+  return ctx.getImageData(0, 0, width, height)
+}
+
+/**
  * Rasterize a self-contained SVG string.
  * @throws RasterizeError with a message suitable for showing to the user.
  */

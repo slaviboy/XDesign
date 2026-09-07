@@ -34,6 +34,12 @@ anchor to retract its handle (a curve followed by a straight line), `Shift` to c
 45° placing and 15° dragging. Click the first point to close, or drag from it to shape the
 closing curve. `Enter`, `Escape` or a double-click ends an open path.
 
+**Two pointers** — the filled arrow selects and moves whole objects; the hollow one
+(**Direct Selection**, `D`) goes straight to the leaf and shows its points. A single click on
+a rectangle puts its four corners on screen, on a line its two ends. Looking costs nothing:
+the shape stays a live rectangle, with its Corners and Radius fields, until you actually move
+a point — at which moment it becomes an editable path, as Illustrator does.
+
 **Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
 snapping and smart guides, per-point Bézier editing, boolean operations, alignment and
 distribution, z-ordering, grouping, locking, hiding, guides and a grid. Corners carry a
@@ -41,6 +47,11 @@ rotation cursor oriented to the corner and the object's own angle.
 
 **Transform panel** — W/H with an aspect-ratio lock, X/Y, rotation, flips, and match
 width / height / size across a selection. Every readout tracks a drag in real time.
+
+**Colour** — a paint-type dropdown (solid, linear, radial, none), Hex / RGB / HSL / HSV
+numeric modes, an opacity field, an eyedropper that samples any rendered pixel on the canvas
+including images and gradients, and a document palette that starts empty and fills up as you
+save colours with (+).
 
 **Corner radius** — draggable handles inside rectangles, polygons and stars.
 Drag inward to round, outward to sharpen. A rectangle's corners can be edited together
@@ -234,6 +245,66 @@ occupy. The generator now measures the raw outer ring and maps its bounds onto
 `0..w × 0..h`. Two properties fall out: three corners reproduce the old hand-authored
 isosceles triangle *exactly*, and because only the outer ring is measured, the frame cannot
 move while the Star Ratio handle is dragged.
+
+### Point editing had no live feedback, for a subtle reason
+
+Dragging a path point mutated the point model and then called `refreshOverlay()`. That bumps
+`overlayTick` — and the only subscriber to `overlayTick` is `ToolOverlay`, which draws the pen
+rubber band and drag previews but *not* path points. The component that draws them subscribes
+to the LiveTransform tick instead. So neither the shape nor the anchor dots moved until the
+mouse came up, and the commit only ran on pointerup.
+
+The fix is the channel the rest of the app already uses for exactly this: `liveTransform.begin()`
+on grab, `set(geomKey(id), { attrs: { d } })` per move, `end()` on release. No coordinate
+conversion is needed, because the point model and the element's `d` are both in the node's local
+space. The dots come along free — the flush emits, which is what the overlay listens to.
+
+Two ordering traps came with it, and both are commented at the call sites. The commit has to run
+*before* `dragging` is cleared, because any store write notifies the sync subscriber, which
+reloads the point model from the document unless a drag is in progress — clearing first threw the
+edit away and wrote back the pre-drag geometry. And the selection has to be set *before*
+`nodeEditingId`, for the mirror-image reason.
+
+### Any shape is point-editable, and converts only when you edit it
+
+`beginPathEditing` used to accept `path` nodes only, so a double-clicked line fell through to
+group stepping and the pen, finding no path, started a second object on top of it.
+
+It now loads from an explicit allow-list — rect, ellipse, polygon, line, path — via `nodePathData`.
+The allow-list matters: `nodePathData` falls back to a *box* for text, artboards and imported SVG,
+so a bare call would have let a double-click turn a text node into a rectangle-shaped path and
+throw the text away. Images are excluded for the same reason: converting one would drop its asset.
+
+Nothing is written when the points appear. The conversion happens inside `commitPath`, on the first
+real edit, and it mutates the node **in place** so the id survives. That is the whole point:
+`createPath` mints a fresh id, which would orphan the selection, the point model, the Layers panel's
+state and any boolean-op back-reference. Deleting the type-specific fields on an immer draft emits
+`remove` patches, so undo puts the rectangle back exactly as it was — corner radius and all.
+
+Clicking an open end with the pen goes further and *resumes* the path into the pen's own model, so
+every further click appends and Enter finishes it. Extending once and then starting an unrelated
+object beside it is not what "continue this line" means.
+
+### The colour picker keeps one canonical state
+
+HSV is held locally and everything else is a projection of it, because HSV is not recoverable from
+RGB at the extremes — pure black has no hue, so a round trip through RGB would reset the hue slider
+to red the moment value hits zero. HSL is derived from that same HSV through exact `hsvToHsl` /
+`hslToHsv` rather than through RGB, which would quantise every value through 8 bits and collapse the
+hue while you drag lightness to zero.
+
+The palette is document data, alongside `guides` — it travels with the artwork rather than living in
+one browser's storage, and adding a swatch is an ordinary undoable edit. The file-format field is
+purely additive, so `FORMAT_VERSION` stays at 2: an older build ignores the key, and a file without
+it loads with an empty palette, which is the right answer rather than a migration.
+
+The eyedropper renders rather than inspects. The artwork is SVG, so there are no pixels to read
+until we make some: arming it serialises the visible document through the same exporter the PNG
+pipeline uses — bitmaps embedded, gradients intact — and rasterises it once, after which every
+sample is an array lookup. It disarms on any pan or zoom, because the raster is a snapshot and would
+otherwise quietly lie about what is under the pointer. The native `EyeDropper` API is deliberately
+unused: it is Chromium-only, it takes the screen over with an OS magnifier no test can drive, and it
+cannot keep the picker's own fields updating as the pointer moves.
 
 ### Corner rounding is geometry, not a filter
 

@@ -67,6 +67,24 @@ export const CursorIcon = (p: IconProps) => (
     />
   </ToolIcon>
 )
+/**
+ * The hollow counterpart, for Direct Selection.
+ *
+ * Same outline as the pointer above, unfilled — the wrapper already strokes it
+ * in currentColor, which is the distinction Illustrator draws between selecting
+ * an object and selecting its points.
+ */
+export const DirectCursorIcon = (p: IconProps) => (
+  <ToolIcon {...p}>
+    <path
+      d="M5.5 2.4v16.9l4.3-4.2 2.7 6.2 2.6-1.1-2.7-6.1h6.1z"
+      fill="none"
+      strokeWidth={1.4}
+      strokeLinejoin="round"
+    />
+  </ToolIcon>
+)
+
 export const RectIcon = (p: IconProps) => (
   <ToolIcon {...p}><rect x="3.6" y="5.1" width="16.8" height="13.8" /></ToolIcon>
 )
@@ -370,6 +388,15 @@ export const TrashIcon = (p: IconProps) => (
 export const CloseIcon = (p: IconProps) => (
   <Icon {...p}><path d="M4 4l8 8M12 4l-8 8" /></Icon>
 )
+/** Pipette: the barrel on the diagonal, the tip pointing at what it samples. */
+export const EyedropperIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M10.5 6.5 3 14v2h2l7.5-7.5" />
+    <path d="M9.6 5.6 11 4.2a1.7 1.7 0 0 1 2.4 0l.4.4a1.7 1.7 0 0 1 0 2.4l-1.4 1.4z" />
+    <path d="M4.5 12.5h2.2" />
+  </Icon>
+)
+
 export const GridIcon = (p: IconProps) => (
   <Icon {...p}><path d="M6 2.5v11M10 2.5v11M2.5 6h11M2.5 10h11" /></Icon>
 )

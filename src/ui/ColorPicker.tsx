@@ -8,6 +8,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  hslToHsv,
+  hsvToHsl,
   hsvToRgb,
   parseHex,
   rgbToHsv,
@@ -16,20 +18,35 @@ import {
   type HSV,
 } from '../document/color'
 import { createStop } from '../document/NodeFactory'
-import { NumberField } from './primitives'
-import { CloseIcon, PlusIcon, TrashIcon } from './icons'
+import { addSwatch, removeSwatch } from '../history/Commands'
+import { editorStore } from '../state/EditorStore'
+import { useDocument } from '../state/hooks'
+import { NumberField, Select } from './primitives'
+import { CloseIcon, EyedropperIcon, PlusIcon, TrashIcon } from './icons'
+import { armEyedropper, type EyedropperSampler } from './eyedropper'
 import type { GradientStop, Paint, RGBA } from '../document/types'
 
-const PRESETS = [
-  '#000000', '#404040', '#757575', '#a8a8a8', '#d4d4d4', '#ffffff',
-  '#d7373f', '#e68619', '#e2c541', '#268e6c', '#1473e6', '#6767ec',
-  '#d83790', '#7b3fb5', '#0d66d0', '#0f797d', '#4b8b3b', '#8f5f00',
-  '#5e2b2b', '#2b3a5e',
-]
 
 // ---------------------------------------------------------------------------
 // Solid colour
 // ---------------------------------------------------------------------------
+
+/** Numeric modes offered by the value row, matching XD (which calls HSV "HSB"). */
+type ColorModel = 'hex' | 'rgb' | 'hsl' | 'hsv'
+
+const MODEL_OPTIONS: Array<{ value: ColorModel; label: string }> = [
+  { value: 'hex', label: 'Hex' },
+  { value: 'rgb', label: 'RGB' },
+  { value: 'hsl', label: 'HSL' },
+  { value: 'hsv', label: 'HSV' },
+]
+
+/**
+ * Module-level so the choice survives closing and reopening the popover. It is
+ * a UI preference, not document data — a file must not carry how someone likes
+ * to type colours.
+ */
+let sharedModel: ColorModel = 'hex'
 
 export function ColorPicker({
   color,
@@ -40,8 +57,10 @@ export function ColorPicker({
 }) {
   // HSV is kept locally because it is not recoverable from RGB at the extremes:
   // pure black has no hue, so a round trip through RGB would reset the hue
-  // slider to red the moment value hits zero.
+  // slider to red the moment value hits zero. Every field below is a projection
+  // of this plus the alpha, and every edit writes back into it.
   const [hsv, setHsv] = useState<HSV>(() => rgbToHsv(color))
+  const [model, setModel] = useState<ColorModel>(sharedModel)
   const lastEmitted = useRef<string>(toHex(color, true))
 
   useEffect(() => {
@@ -62,56 +81,178 @@ export function ColorPicker({
     [onChange],
   )
 
+  /** Adopt a colour that came from outside — a swatch, or the eyedropper. */
+  const adopt = useCallback(
+    (next: RGBA, committing: boolean) => {
+      setHsv(rgbToHsv(next))
+      lastEmitted.current = toHex(next, true)
+      onChange(next, committing)
+    },
+    [onChange],
+  )
+
   const hueColor = useMemo(() => toCss(hsvToRgb(hsv.h, 1, 1)), [hsv.h])
 
   return (
     <div className="color-picker">
-      <SaturationValueSquare
-        hsv={hsv}
-        hueColor={hueColor}
-        onChange={(s, v, committing) => emit({ ...hsv, s, v }, color.a, committing)}
-      />
-
-      <Slider
-        className="hue-track"
-        value={hsv.h / 360}
-        onChange={(t, committing) => emit({ ...hsv, h: t * 360 }, color.a, committing)}
-      />
-
-      <Slider
-        className="alpha-track"
-        value={color.a}
-        overlay={`linear-gradient(to right, transparent, ${toCss({ ...color, a: 1 })})`}
-        onChange={(t, committing) => emit(hsv, t, committing)}
-      />
-
-      <div className="field-row cols-4" style={{ gridTemplateColumns: '1.6fr 1fr 1fr 1fr' }}>
-        <HexField color={color} onChange={(c) => onChange(c, true)} />
-        <NumberField label="R" value={color.r} min={0} max={255} onChange={(v, c) => onChange({ ...color, r: Math.round(v) }, c)} precision={0} />
-        <NumberField label="G" value={color.g} min={0} max={255} onChange={(v, c) => onChange({ ...color, g: Math.round(v) }, c)} precision={0} />
-        <NumberField label="B" value={color.b} min={0} max={255} onChange={(v, c) => onChange({ ...color, b: Math.round(v) }, c)} precision={0} />
+      <div className="sv-row">
+        <SaturationValueSquare
+          hsv={hsv}
+          hueColor={hueColor}
+          onChange={(sat, val, committing) => emit({ ...hsv, s: sat, v: val }, color.a, committing)}
+        />
+        <Slider
+          className="hue-track"
+          vertical
+          value={hsv.h / 360}
+          onChange={(t, committing) => emit({ ...hsv, h: t * 360 }, color.a, committing)}
+        />
+        {/* Inverted: the ramp runs opaque at the TOP down to transparent, and
+            the slider measures from the top, so the two must be mirrored or the
+            thumb sits at the transparent end while reporting full opacity. */}
+        <Slider
+          className="alpha-track"
+          vertical
+          value={1 - color.a}
+          overlay={`linear-gradient(to bottom, ${toCss({ ...color, a: 1 })}, transparent)`}
+          onChange={(t, committing) => emit(hsv, 1 - t, committing)}
+        />
       </div>
 
-      <div className="preset-swatches">
-        {PRESETS.map((hex) => (
+      <div className="value-row">
+        <Select
+          value={model}
+          options={MODEL_OPTIONS}
+          title="Color model"
+          onChange={(m) => { sharedModel = m; setModel(m) }}
+        />
+        <ValueFields model={model} color={color} hsv={hsv} emit={emit} adopt={adopt} />
+        <NumberField
+          value={Math.round(color.a * 100)}
+          min={0}
+          max={100}
+          precision={0}
+          suffix="%"
+          title="Opacity"
+          className="alpha-field"
+          onChange={(v, committing) => emit(hsv, v / 100, committing)}
+        />
+      </div>
+
+      <SwatchRow color={color} onPick={adopt} />
+    </div>
+  )
+}
+
+/**
+ * The numeric fields for the chosen model.
+ *
+ * HSL and HSV are derived from the local HSV, never from the RGB, so dragging
+ * lightness to zero does not collapse the hue under the cursor.
+ */
+function ValueFields({
+  model,
+  color,
+  hsv,
+  emit,
+  adopt,
+}: {
+  model: ColorModel
+  color: RGBA
+  hsv: HSV
+  emit: (next: HSV, alpha: number, committing: boolean) => void
+  adopt: (color: RGBA, committing: boolean) => void
+}) {
+  if (model === 'hex') {
+    return <HexField color={color} onChange={(c) => adopt(c, true)} />
+  }
+  if (model === 'rgb') {
+    return (
+      <>
+        <NumberField label="R" value={color.r} min={0} max={255} precision={0}
+          onChange={(v, c) => adopt({ ...color, r: Math.round(v) }, c)} />
+        <NumberField label="G" value={color.g} min={0} max={255} precision={0}
+          onChange={(v, c) => adopt({ ...color, g: Math.round(v) }, c)} />
+        <NumberField label="B" value={color.b} min={0} max={255} precision={0}
+          onChange={(v, c) => adopt({ ...color, b: Math.round(v) }, c)} />
+      </>
+    )
+  }
+  if (model === 'hsl') {
+    const hsl = hsvToHsl(hsv.h, hsv.s, hsv.v)
+    const back = (next: { h?: number; s?: number; l?: number }, committing: boolean) => {
+      const merged = { ...hsl, ...next }
+      emit({ ...hslToHsv(merged.h, merged.s, merged.l), h: merged.h }, color.a, committing)
+    }
+    return (
+      <>
+        <NumberField label="H" value={Math.round(hsl.h)} min={0} max={360} precision={0}
+          onChange={(v, c) => back({ h: v }, c)} />
+        <NumberField label="S" value={Math.round(hsl.s * 100)} min={0} max={100} precision={0}
+          onChange={(v, c) => back({ s: v / 100 }, c)} />
+        <NumberField label="L" value={Math.round(hsl.l * 100)} min={0} max={100} precision={0}
+          onChange={(v, c) => back({ l: v / 100 }, c)} />
+      </>
+    )
+  }
+  return (
+    <>
+      <NumberField label="H" value={Math.round(hsv.h)} min={0} max={360} precision={0}
+        onChange={(v, c) => emit({ ...hsv, h: v }, color.a, c)} />
+      <NumberField label="S" value={Math.round(hsv.s * 100)} min={0} max={100} precision={0}
+        onChange={(v, c) => emit({ ...hsv, s: v / 100 }, color.a, c)} />
+      <NumberField label="V" value={Math.round(hsv.v * 100)} min={0} max={100} precision={0}
+        onChange={(v, c) => emit({ ...hsv, v: v / 100 }, color.a, c)} />
+    </>
+  )
+}
+
+/**
+ * The document's palette.
+ *
+ * Empty until the user saves something — a fixed set of presets is somebody
+ * else's taste, and XD ships none either. (+) keeps the colour AND its opacity.
+ */
+function SwatchRow({
+  color,
+  onPick,
+}: {
+  color: RGBA
+  onPick: (color: RGBA, committing: boolean) => void
+}) {
+  const swatches = useDocument().swatches
+
+  return (
+    <div className="swatch-row">
+      <button
+        type="button"
+        className="icon-button add-swatch"
+        title="Add this color to the document"
+        aria-label="Add swatch"
+        onClick={() => addSwatch(color)}
+      >
+        <PlusIcon />
+      </button>
+      {swatches.map((sw) => (
+        <span key={sw.id} className="preset-swatch-slot">
           <button
-            key={hex}
             type="button"
             className="preset-swatch"
-            style={{ background: hex }}
-            title={hex}
-            onClick={() => {
-              const parsed = parseHex(hex)
-              if (parsed) {
-                const next = { ...parsed, a: color.a }
-                setHsv(rgbToHsv(next))
-                lastEmitted.current = toHex(next, true)
-                onChange(next, true)
-              }
-            }}
+            style={{ background: toCss(sw.color) }}
+            title={toHex(sw.color, true)}
+            onClick={() => onPick({ ...sw.color }, true)}
           />
-        ))}
-      </div>
+          <button
+            type="button"
+            className="remove-swatch"
+            title="Remove swatch"
+            aria-label="Remove swatch"
+            onClick={() => removeSwatch(sw.id)}
+          >
+            <CloseIcon size={8} />
+          </button>
+        </span>
+      ))}
     </div>
   )
 }
@@ -195,40 +336,49 @@ function Slider({
   onChange,
   className,
   overlay,
+  vertical = false,
 }: {
   value: number
   onChange: (t: number, committing: boolean) => void
   className: string
   overlay?: string
+  /** Vertical, beside the square, as XD lays them out. */
+  vertical?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
 
-  const update = (clientX: number, committing: boolean) => {
+  const update = (clientX: number, clientY: number, committing: boolean) => {
     const rect = ref.current?.getBoundingClientRect()
     if (!rect) return
-    onChange(clamp01((clientX - rect.left) / rect.width), committing)
+    const t = vertical
+      ? (clientY - rect.top) / rect.height
+      : (clientX - rect.left) / rect.width
+    onChange(clamp01(t), committing)
   }
 
   return (
     <div
       ref={ref}
-      className={`slider-track ${className}`}
+      className={`slider-track ${className}${vertical ? ' vertical' : ''}`}
       onPointerDown={(e) => {
         dragging.current = true
         e.currentTarget.setPointerCapture(e.pointerId)
-        update(e.clientX, false)
+        update(e.clientX, e.clientY, false)
       }}
-      onPointerMove={(e) => { if (dragging.current) update(e.clientX, false) }}
+      onPointerMove={(e) => { if (dragging.current) update(e.clientX, e.clientY, false) }}
       onPointerUp={(e) => {
         if (!dragging.current) return
         dragging.current = false
         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* released */ }
-        update(e.clientX, true)
+        update(e.clientX, e.clientY, true)
       }}
     >
       {overlay && <div className="alpha-overlay" style={{ background: overlay }} />}
-      <div className="slider-thumb" style={{ left: `${value * 100}%` }} />
+      <div
+        className="slider-thumb"
+        style={vertical ? { top: `${value * 100}%` } : { left: `${value * 100}%` }}
+      />
     </div>
   )
 }
@@ -396,6 +546,14 @@ export function GradientEditor({
 // Popover host
 // ---------------------------------------------------------------------------
 
+/** Paint types, as a dropdown — the reference puts this at the top of the panel. */
+const PAINT_OPTIONS: Array<{ value: Paint['type']; label: string }> = [
+  { value: 'solid', label: 'Solid Color' },
+  { value: 'linear', label: 'Linear Gradient' },
+  { value: 'radial', label: 'Radial Gradient' },
+  { value: 'none', label: 'None' },
+]
+
 export function PaintPopover({
   paint,
   anchor,
@@ -411,6 +569,8 @@ export function PaintPopover({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState(anchor)
+  const [sampler, setSampler] = useState<EyedropperSampler | null>(null)
+  const [arming, setArming] = useState(false)
 
   useEffect(() => {
     const el = ref.current
@@ -421,12 +581,70 @@ export function PaintPopover({
     if (x !== pos.x || y !== pos.y) setPos({ x: Math.max(8, x), y: Math.max(8, y) })
   }, [anchor, pos.x, pos.y])
 
+  // Remembered so None -> Solid comes back to the colour that was on screen.
+  // Without it, switching away from a paint that carries no colour and back
+  // again silently resets it to black.
+  const lastColor = useRef<RGBA>({ r: 0, g: 0, b: 0, a: 1 })
+  const solidColor: RGBA =
+    paint.type === 'solid'
+      ? paint.color
+      : paint.type === 'linear' || paint.type === 'radial'
+        ? (paint.stops[0]?.color ?? lastColor.current)
+        : lastColor.current
+  lastColor.current = solidColor
+
+  // ---- eyedropper --------------------------------------------------------
+  const disarm = useCallback(() => setSampler(null), [])
+
+  const toggleEyedropper = useCallback(() => {
+    if (sampler) return disarm()
+    setArming(true)
+    void armEyedropper()
+      .then((s) => setSampler(s))
+      .catch(() => setSampler(null))
+      .finally(() => setArming(false))
+  }, [sampler, disarm])
+
+  useEffect(() => {
+    if (!sampler) return
+    const pick = (e: PointerEvent, committing: boolean) => {
+      const rgba = sampler.sample(e.clientX, e.clientY)
+      if (rgba) onChange({ type: 'solid', color: rgba }, committing)
+    }
+    const onMove = (e: PointerEvent) => pick(e, false)
+    const onDown = (e: PointerEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      pick(e, true)
+      disarm()
+    }
+    document.body.classList.add('eyedropping')
+    window.addEventListener('pointermove', onMove, true)
+    window.addEventListener('pointerdown', onDown, true)
+    // The raster is a snapshot of the current view, so a pan or zoom would make
+    // it silently lie about what is under the pointer.
+    const unsubscribe = editorStore.subscribe((s, prev) => {
+      if (s.viewport !== prev.viewport) disarm()
+    })
+    return () => {
+      document.body.classList.remove('eyedropping')
+      window.removeEventListener('pointermove', onMove, true)
+      window.removeEventListener('pointerdown', onDown, true)
+      unsubscribe()
+    }
+  }, [sampler, onChange, disarm])
+
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
+      if (sampler) return
       if (!ref.current?.contains(e.target as Node)) onClose()
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose() }
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        if (sampler) disarm()
+        else onClose()
+      }
     }
     window.addEventListener('pointerdown', onDown, true)
     window.addEventListener('keydown', onKey, true)
@@ -434,20 +652,39 @@ export function PaintPopover({
       window.removeEventListener('pointerdown', onDown, true)
       window.removeEventListener('keydown', onKey, true)
     }
-  }, [onClose])
+  }, [onClose, sampler, disarm])
 
-  const solidColor: RGBA =
-    paint.type === 'solid'
-      ? paint.color
-      : paint.type === 'linear' || paint.type === 'radial'
-        ? (paint.stops[0]?.color ?? { r: 0, g: 0, b: 0, a: 1 })
-        : { r: 0, g: 0, b: 0, a: 1 }
+  const options = allowGradient
+    ? PAINT_OPTIONS
+    : PAINT_OPTIONS.filter((o) => o.value === 'solid' || o.value === 'none')
 
   return (
-    <div ref={ref} className="popover" style={{ left: pos.x, top: pos.y, width: 248 }}>
-      <div className="hstack" style={{ marginBottom: 8 }}>
-        <TypeTabs paint={paint} onChange={onChange} allowGradient={allowGradient} />
+    <div ref={ref} className="popover" style={{ left: pos.x, top: pos.y, width: PAINT_POPOVER_WIDTH }}>
+      <div className="hstack popover-header">
+        <Select
+          value={paint.type}
+          title="Paint type"
+          options={
+            // An imported paint server has no editor; naming it keeps the
+            // dropdown honest instead of rendering blank.
+            paint.type === 'ref'
+              ? [{ value: 'ref' as Paint['type'], label: 'Imported paint' }, ...options]
+              : options
+          }
+          onChange={(type) => onChange(paintOfType(type, paint, solidColor), true)}
+        />
         <div className="spacer" />
+        <button
+          type="button"
+          className={`icon-button${sampler ? ' active' : ''}`}
+          title="Pick a color from the canvas"
+          aria-label="Eyedropper"
+          aria-pressed={!!sampler}
+          disabled={arming}
+          onClick={toggleEyedropper}
+        >
+          <EyedropperIcon />
+        </button>
         <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
           <CloseIcon />
         </button>
@@ -470,78 +707,43 @@ export function PaintPopover({
   )
 }
 
-function TypeTabs({
-  paint,
-  onChange,
-  allowGradient,
-}: {
-  paint: Paint
-  onChange: (p: Paint, committing: boolean) => void
-  allowGradient: boolean
-}) {
-  const current = paint.type
-  const base = paint.type === 'solid' ? paint.color : { r: 200, g: 200, b: 200, a: 1 }
+/** The popover's width, shared so the inspector's left-flip cannot drift from it. */
+export const PAINT_POPOVER_WIDTH = 296
 
-  return (
-    <div className="icon-row">
-      <button
-        type="button"
-        className={`icon-button${current === 'solid' ? ' active' : ''}`}
-        style={{ width: 40, fontSize: 10 }}
-        onClick={() => onChange({ type: 'solid', color: base }, true)}
-      >
-        Solid
-      </button>
-      {allowGradient && (
-        <>
-          <button
-            type="button"
-            className={`icon-button${current === 'linear' ? ' active' : ''}`}
-            style={{ width: 46, fontSize: 10 }}
-            onClick={() =>
-              onChange(
-                {
-                  type: 'linear',
-                  x1: 0, y1: 0, x2: 1, y2: 0,
-                  stops: [createStop(0, { ...base }), createStop(1, { r: 255, g: 255, b: 255, a: 1 })],
-                },
-                true,
-              )
-            }
-          >
-            Linear
-          </button>
-          <button
-            type="button"
-            className={`icon-button${current === 'radial' ? ' active' : ''}`}
-            style={{ width: 46, fontSize: 10 }}
-            onClick={() =>
-              onChange(
-                {
-                  type: 'radial',
-                  cx: 0.5, cy: 0.5, r: 0.5,
-                  stops: [createStop(0, { ...base }), createStop(1, { r: 255, g: 255, b: 255, a: 1 })],
-                },
-                true,
-              )
-            }
-          >
-            Radial
-          </button>
-        </>
-      )}
-      <button
-        type="button"
-        className={`icon-button${current === 'none' ? ' active' : ''}`}
-        style={{ width: 40, fontSize: 10 }}
-        onClick={() => onChange({ type: 'none' }, true)}
-      >
-        None
-      </button>
-    </div>
-  )
+/**
+ * Convert between paint types, carrying the colour across.
+ *
+ * Switching gradient -> solid used to discard the stop and jump to grey 200,
+ * which threw away the colour the user had just chosen.
+ */
+function paintOfType(type: Paint['type'], current: Paint, base: RGBA): Paint {
+  if (type === current.type) return current
+  switch (type) {
+    case 'solid':
+      return { type: 'solid', color: { ...base } }
+    case 'none':
+      return { type: 'none' }
+    case 'linear':
+      return isGradient(current)
+        ? { type: 'linear', x1: 0, y1: 0, x2: 1, y2: 0, stops: current.stops }
+        : { type: 'linear', x1: 0, y1: 0, x2: 1, y2: 0, stops: rampFrom(base) }
+    case 'radial':
+      return isGradient(current)
+        ? { type: 'radial', cx: 0.5, cy: 0.5, r: 0.5, stops: current.stops }
+        : { type: 'radial', cx: 0.5, cy: 0.5, r: 0.5, stops: rampFrom(base) }
+    default:
+      return current
+  }
 }
 
-function clamp01(n: number): number {
-  return n < 0 ? 0 : n > 1 ? 1 : n
+function isGradient(p: Paint): p is Extract<Paint, { stops: GradientStop[] }> {
+  return p.type === 'linear' || p.type === 'radial'
+}
+
+function rampFrom(base: RGBA): GradientStop[] {
+  return [createStop(0, { ...base }), createStop(1, { ...base, a: 0 })]
+}
+
+function clamp01(t: number): number {
+  return t < 0 ? 0 : t > 1 ? 1 : t
 }

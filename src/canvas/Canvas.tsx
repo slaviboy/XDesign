@@ -32,7 +32,7 @@ import { ArtboardLabels } from './ArtboardLabels'
 import { TextEditor } from './TextEditor'
 import { screenDistanceToDoc, screenToDoc, docToScreen } from './Viewport'
 import { getTool } from '../tools/ToolRegistry'
-import { getDoc } from '../state/DocumentStore'
+import { documentStore, getDoc } from '../state/DocumentStore'
 import {
   editorStore,
   panBy,
@@ -42,7 +42,7 @@ import {
   zoomAt,
 } from '../state/EditorStore'
 import { useEditorStore } from '../state/hooks'
-import { syncPathEditing } from '../tools/PathEditing'
+import { endPathEditing, syncPathEditing } from '../tools/PathEditing'
 import type { CanvasPointerEvent, ToolContext } from '../tools/types'
 import type { Vec2 } from '../geometry/Matrix'
 
@@ -137,10 +137,23 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
     return () => ro.disconnect()
   }, [])
 
-  // Keep the point-editing model in step with undo/redo and inspector edits.
+  // `nodeEditingId` is the single source of truth for the point model: whoever
+  // sets it opens the editor, whoever clears it closes the editor. That is what
+  // lets the two pointer tools hand point editing back and forth without either
+  // of them tearing it down in onDeactivate.
   useEffect(() => {
     return editorStore.subscribe((s) => {
       if (s.nodeEditingId) syncPathEditing()
+      else endPathEditing()
+    })
+  }, [])
+
+  // The document can change without the editor store changing at all — undo and
+  // redo do exactly that. Without this, undoing a shape-to-path conversion left
+  // the point model holding path data for a node that was a rectangle again.
+  useEffect(() => {
+    return documentStore.subscribe(() => {
+      if (editorStore.getState().nodeEditingId) syncPathEditing()
     })
   }, [])
 

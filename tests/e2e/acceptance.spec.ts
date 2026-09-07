@@ -244,7 +244,7 @@ test('TEST 7 — gradient with edited stops survives save and reload', async ({ 
   await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 400, y: 320 })
 
   await page.locator('.section', { hasText: 'FILL' }).locator('.swatch').first().click()
-  await page.locator('.popover button:text-is("Linear")').click()
+  await page.locator('.popover select[title="Paint type"]').selectOption('linear')
   await expect(page.locator('.gradient-bar')).toBeVisible()
 
   // Add a third stop, then move it.

@@ -5,6 +5,7 @@
  */
 
 import { selectionTool } from './SelectionTool'
+import { directSelectionTool } from './DirectSelectionTool'
 import {
   ellipseTool,
   lineTool,
@@ -21,6 +22,7 @@ import type { Tool } from './types'
 
 export const TOOLS: Record<ToolId, Tool> = {
   select: selectionTool,
+  'direct-select': directSelectionTool,
   rect: rectangleTool,
   ellipse: ellipseTool,
   polygon: polygonTool,
@@ -40,6 +42,7 @@ export function getTool(id: ToolId): Tool {
 /** Order of the left tool rail, with separators between groups. */
 export const TOOLBAR_LAYOUT: Array<ToolId | 'separator'> = [
   'select',
+  'direct-select',
   'separator',
   'rect',
   'ellipse',
@@ -59,6 +62,7 @@ export const TOOLBAR_LAYOUT: Array<ToolId | 'separator'> = [
 /** Single-key shortcuts. Modifier combinations live in shortcuts/bindings.ts. */
 export const TOOL_SHORTCUTS: Record<string, ToolId> = {
   v: 'select',
+  d: 'direct-select',
   r: 'rect',
   e: 'ellipse',
   y: 'polygon',

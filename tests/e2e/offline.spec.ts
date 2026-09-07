@@ -33,7 +33,7 @@ test('boots and works after a hard reload with the network cut', async ({ page, 
 
   // 4. The whole editor must still be there and functional.
   await expect(page.locator('.topbar')).toBeVisible()
-  await expect(page.locator('.toolbar .tool-button')).toHaveCount(11)
+  await expect(page.locator('.toolbar .tool-button')).toHaveCount(12)
   await expect(page.locator('[data-node-type="artboard"]')).toHaveCount(1)
 
   await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 340, y: 300 })

@@ -42,6 +42,8 @@ import {
   isEffectivelyLocked,
   worldMatrix,
 } from '../document/SceneGraph'
+import { rgbaEquals } from '../document/color'
+import { createSwatchId } from '../document/ids'
 import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
 import { createArtboard, createGroup } from '../document/NodeFactory'
 import { current, isDraft } from 'immer'
@@ -63,6 +65,7 @@ import {
   hasStyle,
   isContainer,
   type BoxCorner,
+  type RGBA,
 } from '../document/types'
 
 // ---------------------------------------------------------------------------
@@ -580,6 +583,46 @@ export function setShapeParam(
     },
     { coalesceKey },
   )
+}
+
+// ---------------------------------------------------------------------------
+// Swatches
+// ---------------------------------------------------------------------------
+
+/**
+ * Save a colour, with its opacity, to the document's palette.
+ *
+ * Undoable like any other edit, which is the natural consequence of the palette
+ * being document data rather than a browser preference.
+ */
+export function addSwatch(color: RGBA): boolean {
+  return transaction('Add swatch', (draft) => {
+    // Adding the colour you already saved should be a no-op, not a duplicate.
+    if (draft.swatches.some((s) => rgbaEquals(s.color, color))) return false
+    draft.swatches.push({ id: createSwatchId(), color: { ...color } })
+    return undefined
+  })
+}
+
+export function removeSwatch(id: string): boolean {
+  return transaction('Remove swatch', (draft) => {
+    const index = draft.swatches.findIndex((s) => s.id === id)
+    if (index < 0) return false
+    draft.swatches.splice(index, 1)
+    return undefined
+  })
+}
+
+/** Drag-to-reorder within the palette. */
+export function moveSwatch(id: string, toIndex: number): boolean {
+  return transaction('Reorder swatches', (draft) => {
+    const from = draft.swatches.findIndex((s) => s.id === id)
+    const to = Math.min(draft.swatches.length - 1, Math.max(0, toIndex))
+    if (from < 0 || from === to) return false
+    const [moved] = draft.swatches.splice(from, 1)
+    draft.swatches.splice(to, 0, moved!)
+    return undefined
+  })
 }
 
 // ---------------------------------------------------------------------------

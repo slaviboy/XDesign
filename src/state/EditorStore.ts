@@ -20,6 +20,7 @@ export interface PointRef {
 
 export type ToolId =
   | 'select'
+  | 'direct-select'
   | 'rect'
   | 'ellipse'
   | 'polygon'
@@ -204,7 +205,8 @@ export function setTool(tool: ToolId, keepEditing = false): void {
     // Leaving a vector tool ends whatever it was building.
     penTargetId: tool === 'pen' ? s.penTargetId : null,
     editingTextId: keepEditing ? s.editingTextId : null,
-    nodeEditingId: tool === 'select' ? s.nodeEditingId : null,
+    // Both pointers keep the point overlay; every other tool drops it.
+    nodeEditingId: tool === 'select' || tool === 'direct-select' ? s.nodeEditingId : null,
   })
 }
 

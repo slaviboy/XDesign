@@ -364,6 +364,7 @@ export function createDocument(name = 'Untitled', withArtboard = true): DesignDo
     rootId: root.id,
     assets: {},
     guides: [],
+    swatches: [],
     settings: { ...DEFAULT_SETTINGS },
     createdAt: now,
     modifiedAt: now,

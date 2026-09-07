@@ -14,6 +14,7 @@ import { Tooltip } from './primitives'
 import {
   ArtboardIcon,
   CursorIcon,
+  DirectCursorIcon,
   EllipseIcon,
   HandIcon,
   LineIcon,
@@ -30,6 +31,7 @@ const TOOL_ICON_SIZE = 20
 
 const TOOL_ICONS: Record<ToolId, ReactNode> = {
   select: <CursorIcon size={TOOL_ICON_SIZE} />,
+  'direct-select': <DirectCursorIcon size={TOOL_ICON_SIZE} />,
   rect: <RectIcon size={TOOL_ICON_SIZE} />,
   ellipse: <EllipseIcon size={TOOL_ICON_SIZE} />,
   // A triangle, because that is what the tool draws before you change anything —

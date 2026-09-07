@@ -25,11 +25,14 @@ import {
   togglePointType,
   type PenSubpath,
 } from '../geometry/PathPoints'
-import { worldMatrix } from '../document/SceneGraph'
+import { ancestorIds, nodePathData, worldMatrix } from '../document/SceneGraph'
+import { convertNodeToPath } from '../document/DocumentModel'
+import { liveTransform } from '../canvas/LiveTransform'
+import { geomKey } from '../canvas/NodeRenderer'
 import { transaction, getDoc } from '../state/DocumentStore'
 import { editorStore, refreshOverlay, setEditor } from '../state/EditorStore'
 import type { PointRef } from '../state/EditorStore'
-import type { NodeId } from '../document/types'
+import type { DesignNode, NodeId } from '../document/types'
 import type { CanvasPointerEvent, ToolContext } from './types'
 
 /** Alias, so a grab result drops straight into the store with no conversion. */
@@ -42,6 +45,8 @@ interface EditState {
   dragging: PointHandleRef | null
   lastLocal: Vec2 | null
   changed: boolean
+  /** True while a LiveTransform override is open, so it is closed exactly once. */
+  live: boolean
 }
 
 const edit: EditState = {
@@ -51,23 +56,93 @@ const edit: EditState = {
   dragging: null,
   lastLocal: null,
   changed: false,
+  live: false,
+}
+
+/**
+ * Start pushing the edited geometry straight to the mounted SVG element.
+ *
+ * Point editing used to repaint through refreshOverlay(), which bumps
+ * `overlayTick` — and the only subscriber to that is ToolOverlay, which draws
+ * previews and rubber bands but not path points. So neither the shape nor the
+ * anchor dots moved until the mouse came up. This is the same LiveTransform
+ * channel DragSession and RadiusSession use, and it needs no coordinate
+ * conversion: `edit.subs` and the element's `d` are both in local space.
+ */
+function beginLive(): void {
+  if (edit.live) return
+  edit.live = true
+  liveTransform.begin()
+  editorStore.setState({ isDragging: true })
+}
+
+/** Push the current points to the DOM. Also wakes the overlay, via the flush. */
+function pushLive(): void {
+  if (!edit.nodeId || !edit.live) return
+  liveTransform.set(geomKey(edit.nodeId), { attrs: { d: subpathsToPath(edit.subs) } })
+}
+
+function endLive(commit: boolean): void {
+  if (!edit.live) return
+  edit.live = false
+  if (commit) liveTransform.end()
+  else liveTransform.cancel()
+  editorStore.setState({ isDragging: false })
 }
 
 /** Screen-pixel radius for grabbing a point or handle. */
 const GRAB_PX = 7
+
+/**
+ * The outline to edit, or null for a node that has no editable points.
+ *
+ * An explicit allow-list rather than a bare `nodePathData` call, because that
+ * falls back to a box for text, svg, artboards and repeat grids — editing one
+ * would turn a text node into a rectangle-shaped path and throw the text away.
+ * Images are out for the same reason: converting one would drop its asset.
+ */
+export function editableOutline(node: DesignNode | undefined): string | null {
+  if (!node) return null
+  switch (node.type) {
+    case 'path':
+      return node.d
+    case 'rect':
+    case 'ellipse':
+    case 'polygon':
+    case 'line':
+      return nodePathData(node)
+    default:
+      return null
+  }
+}
+
+/** Whether this node's points can be edited — the gate both pointer tools use. */
+export function isPointEditable(node: DesignNode | undefined): boolean {
+  return editableOutline(node) !== null
+}
 
 export function getEditingSubpaths(): { nodeId: NodeId; subs: PenSubpath[]; world: Mat2D } | null {
   if (!edit.nodeId) return null
   return { nodeId: edit.nodeId, subs: edit.subs, world: edit.world }
 }
 
-/** Load a node's path into the editable point model. */
+/**
+ * Load a node's outline into the editable point model.
+ *
+ * Any shape can be opened — a line shows its two ends, a rectangle its four
+ * corners — and NOTHING is written to the document here. The node only becomes
+ * a real path when the user first moves something; see commitPath.
+ */
 export function beginPathEditing(nodeId: NodeId): boolean {
   const doc = getDoc()
   const node = doc.nodes[nodeId]
-  if (!node || node.type !== 'path') return false
+  const outline = editableOutline(node)
+  if (!outline) return false
+  // Inside a repeat grid only the first cell registers with LiveTransform, so a
+  // live preview would show on one cell while committing to all of them.
+  if (ancestorIds(doc, nodeId).some((a) => doc.nodes[a]?.type === 'repeat-grid')) return false
   edit.nodeId = nodeId
-  edit.subs = pathToSubpaths(node.d)
+  edit.subs = pathToSubpaths(outline)
   edit.world = worldMatrix(doc, nodeId)
   edit.dragging = null
   edit.changed = false
@@ -76,9 +151,12 @@ export function beginPathEditing(nodeId: NodeId): boolean {
 }
 
 export function endPathEditing(): void {
+  if (!edit.nodeId) return
+  endLive(false)
   edit.nodeId = null
   edit.subs = []
   edit.dragging = null
+  edit.lastLocal = null
   edit.changed = false
 }
 
@@ -87,12 +165,15 @@ export function syncPathEditing(): void {
   if (!edit.nodeId) return
   const doc = getDoc()
   const node = doc.nodes[edit.nodeId]
-  if (!node || node.type !== 'path') {
+  const outline = editableOutline(node)
+  if (!outline) {
     endPathEditing()
     return
   }
+  // Reloading from the OUTLINE, not from node.d, is what lets undo take a
+  // converted path back to being a rectangle without evicting the editor.
   if (!edit.dragging) {
-    edit.subs = pathToSubpaths(node.d)
+    edit.subs = pathToSubpaths(outline)
     edit.world = worldMatrix(doc, edit.nodeId)
   }
 }
@@ -147,6 +228,7 @@ export function pathEditPointerDown(e: CanvasPointerEvent, ctx: ToolContext): bo
     }
     edit.dragging = grab
     edit.lastLocal = local
+    beginLive()
     setEditor({ selectedPoints: [grab] })
     refreshOverlay()
     return true
@@ -165,6 +247,7 @@ export function pathEditPointerDown(e: CanvasPointerEvent, ctx: ToolContext): bo
         edit.dragging = { subpath: near.subpath, index: inserted, kind: 'anchor' }
         edit.lastLocal = local
         commitPath('Insert point')
+        beginLive()
         setEditor({ selectedPoints: [{ subpath: near.subpath, index: inserted, kind: 'anchor' }] })
       }
     }
@@ -176,6 +259,19 @@ export function pathEditPointerDown(e: CanvasPointerEvent, ctx: ToolContext): bo
 
 export function pathEditPointerMove(e: CanvasPointerEvent, _ctx: ToolContext): boolean {
   if (!edit.nodeId || !edit.dragging || !edit.lastLocal) return false
+
+  // Self-healing: a tool switch mid-gesture can deliver the pointerup elsewhere,
+  // and a button-less move here would otherwise keep deforming the shape.
+  if (e.buttons === 0) {
+    edit.dragging = null
+    edit.lastLocal = null
+    edit.changed = false
+    endLive(false)
+    syncPathEditing()
+    refreshOverlay()
+    return true
+  }
+
   const local = toLocal(e.doc)
   const sub = edit.subs[edit.dragging.subpath]
   if (!sub) return false
@@ -188,15 +284,22 @@ export function pathEditPointerMove(e: CanvasPointerEvent, _ctx: ToolContext): b
   }
   edit.lastLocal = local
   edit.changed = true
-  refreshOverlay()
+  pushLive()
   return true
 }
 
 export function pathEditPointerUp(): boolean {
   if (!edit.nodeId || !edit.dragging) return false
+  // Commit FIRST, while `dragging` is still set. Any store write notifies the
+  // Canvas subscriber, and syncPathEditing reloads edit.subs from the document
+  // unless a drag is in progress — so clearing `dragging` before committing
+  // threw the whole edit away and wrote back the pre-drag geometry.
+  if (edit.changed) commitPath('Edit path')
   edit.dragging = null
   edit.lastLocal = null
-  if (edit.changed) commitPath('Edit path')
+  // Released after the commit: end() drops the override without restoring, and
+  // by now React has the same geometry from the document, so nothing flashes.
+  endLive(true)
   return true
 }
 
@@ -320,11 +423,16 @@ function commitPath(label: string): void {
   const nodeId = edit.nodeId
   if (!nodeId) return
   const d = subpathsToPath(edit.subs)
+  const closed = edit.subs.length > 0 && edit.subs.every((sub) => sub.closed)
   transaction(
     label,
     (draft) => {
       const node = draft.nodes[nodeId]
-      if (!node || node.type !== 'path') return false
+      if (!node) return false
+      // First real edit of a parametric shape turns it into a path, in place.
+      // Opening the editor alone converts nothing, so looking costs nothing.
+      if (node.type !== 'path' && !convertNodeToPath(node, d, closed)) return false
+      if (node.type !== 'path') return false
       node.d = d
       const b = pathBounds(d)
       node.transform = {

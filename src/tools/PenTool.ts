@@ -18,10 +18,12 @@
  * hands off to PathEditing for point-level work.
  */
 
+import { applyToPoint, invert } from '../geometry/Matrix'
 import { pathBounds } from '../geometry/PathUtils'
 import {
   clearHandle,
   corner,
+  pathToSubpaths,
   cornerPoint,
   moveHandle,
   subpathToPath,
@@ -29,9 +31,10 @@ import {
   type PenSubpath,
 } from '../geometry/PathPoints'
 import { createPath } from '../document/NodeFactory'
-import { hitTest } from '../document/SceneGraph'
+import { hitTest, worldMatrix } from '../document/SceneGraph'
+import { convertNodeToPath } from '../document/DocumentModel'
 import { insertNode } from '../history/Commands'
-import { transaction } from '../state/DocumentStore'
+import { getDoc, transaction } from '../state/DocumentStore'
 import {
   editorStore,
   refreshOverlay,
@@ -41,7 +44,9 @@ import {
 } from '../state/EditorStore'
 import {
   beginPathEditing,
+  editableOutline,
   endPathEditing,
+  isPointEditable,
   pathEditDoubleClick,
   pathEditExtendAt,
   pathEditKeyDown,
@@ -52,6 +57,7 @@ import {
 import { snapAngle } from './snapHelpers'
 import { DEFAULT_STROKE } from '../document/types'
 import type { Vec2 } from '../geometry/Matrix'
+import type { DesignDocument, NodeId } from '../document/types'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
 
 interface PenState {
@@ -66,6 +72,15 @@ interface PenState {
    * shape the closing curve before the path is committed.
    */
   closing: boolean
+  /**
+   * The existing node this path is continuing, if any.
+   *
+   * Clicking an open end with the pen RESUMES that path rather than extending it
+   * once: the points come into the pen's own model, so every further click
+   * appends as normal and Enter or Escape finishes it. Without this you could
+   * add exactly one point and the next click started an unrelated object.
+   */
+  resumeId: NodeId | null
 }
 
 const pen: PenState = {
@@ -74,6 +89,7 @@ const pen: PenState = {
   draggingHandle: false,
   dragStart: null,
   closing: false,
+  resumeId: null,
 }
 
 /** Screen-pixel radius for "clicked the first point to close". */
@@ -91,6 +107,59 @@ function resetPen(): void {
   pen.draggingHandle = false
   pen.dragStart = null
   pen.closing = false
+  pen.resumeId = null
+}
+
+/**
+ * Try to pick up an existing open path at the point clicked.
+ *
+ * Points are carried into DOCUMENT space, because that is what the pen builds
+ * in; finishPath maps them back through the node's own matrix, so a resumed
+ * path keeps its transform, its style and its id.
+ */
+function resumeAt(doc: DesignDocument, id: NodeId, at: Vec2, zoom: number): boolean {
+  const node = doc.nodes[id]
+  const outline = editableOutline(node)
+  if (!outline) return false
+
+  const world = worldMatrix(doc, id)
+  const subs = pathToSubpaths(outline)
+  for (const sub of subs) {
+    if (sub.closed || sub.points.length < 2) continue
+    const toDoc = (p: PenPoint): PenPoint => ({
+      x: applyToPoint(world, { x: p.x, y: p.y }).x,
+      y: applyToPoint(world, { x: p.x, y: p.y }).y,
+      inX: p.inX === null || p.inY === null ? null : applyToPoint(world, { x: p.inX, y: p.inY }).x,
+      inY: p.inX === null || p.inY === null ? null : applyToPoint(world, { x: p.inX, y: p.inY }).y,
+      outX: p.outX === null || p.outY === null ? null : applyToPoint(world, { x: p.outX, y: p.outY }).x,
+      outY: p.outX === null || p.outY === null ? null : applyToPoint(world, { x: p.outX, y: p.outY }).y,
+    })
+    const points = sub.points.map(toDoc)
+    const head = points[0]!
+    const tail = points[points.length - 1]!
+
+    const atTail = Math.hypot(tail.x - at.x, tail.y - at.y) * zoom <= CLOSE_PX
+    const atHead = !atTail && Math.hypot(head.x - at.x, head.y - at.y) * zoom <= CLOSE_PX
+    if (!atTail && !atHead) continue
+
+    // Appending always happens at the END, so a head grab reverses the path —
+    // which swaps each point's two handles with it.
+    if (atHead) {
+      points.reverse()
+      for (const pt of points) {
+        const [ix, iy] = [pt.inX, pt.inY]
+        pt.inX = pt.outX
+        pt.inY = pt.outY
+        pt.outX = ix
+        pt.outY = iy
+      }
+    }
+
+    pen.building = { points, closed: false }
+    pen.resumeId = id
+    return true
+  }
+  return false
 }
 
 /** The anchor a new segment would start from. */
@@ -115,6 +184,47 @@ function finishPath(closed: boolean): void {
   }
 
   sub.closed = closed
+
+  // Resuming an existing node: map the points back through ITS matrix and write
+  // them in, so the path keeps its id, its style and its place in the tree.
+  if (pen.resumeId) {
+    const nodeId = pen.resumeId
+    const doc = getDoc()
+    if (doc.nodes[nodeId]) {
+      const toLocal = invert(worldMatrix(doc, nodeId))
+      const localPoints = sub.points.map((p) => {
+        const a = applyToPoint(toLocal, { x: p.x, y: p.y })
+        const i = p.inX === null || p.inY === null ? null : applyToPoint(toLocal, { x: p.inX, y: p.inY })
+        const o = p.outX === null || p.outY === null ? null : applyToPoint(toLocal, { x: p.outX, y: p.outY })
+        return {
+          x: a.x, y: a.y,
+          inX: i?.x ?? null, inY: i?.y ?? null,
+          outX: o?.x ?? null, outY: o?.y ?? null,
+        }
+      })
+      const d = subpathToPath({ closed, points: localPoints })
+      const bounds = pathBounds(d)
+      resetPen()
+      transaction('Extend path', (draft) => {
+        const target = draft.nodes[nodeId]
+        if (!target) return false
+        if (target.type !== 'path' && !convertNodeToPath(target, d, closed)) return false
+        if (target.type !== 'path') return false
+        target.d = d
+        target.closed = closed
+        target.transform = {
+          ...target.transform,
+          width: Math.max(0.5, bounds.width || target.transform.width),
+          height: Math.max(0.5, bounds.height || target.transform.height),
+        }
+        return undefined
+      })
+      setSelection([nodeId])
+      refreshOverlay()
+      return
+    }
+  }
+
   const worldD = subpathToPath(sub)
   const b = pathBounds(worldD)
 
@@ -163,7 +273,20 @@ export const penTool: Tool = {
       // Clicking an existing path with the pen enters point editing on it, or
       // extends it when the click lands on an open end.
       const hit = hitTest(ctx.doc(), e.doc, { tolerance: ctx.tolerance() })
-      if (hit && ctx.doc().nodes[hit]?.type === 'path') {
+      // An open end picks the path back up, so the next click carries on
+      // drawing it instead of starting an unrelated object beside it.
+      if (hit && resumeAt(ctx.doc(), hit, e.doc, ctx.viewport().zoom)) {
+        if (editorStore.getState().nodeEditingId) {
+          setEditor({ nodeEditingId: null, selectedPoints: [] })
+          endPathEditing()
+        }
+        pen.draggingHandle = true
+        pen.dragStart = e.doc
+        refreshOverlay()
+        return
+      }
+      // Otherwise clicking a shape opens its points for editing.
+      if (hit && isPointEditable(ctx.doc().nodes[hit])) {
         setSelection([hit])
         setEditor({ nodeEditingId: hit })
         beginPathEditing(hit)

@@ -3,7 +3,7 @@
  * plain node — no DOM anywhere.
  */
 import { describe, it, expect } from 'vitest'
-import { parseHex, toHex, parseCssColor, rgbToHsv, hsvToRgb, rgbToHsl, hslToRgb, toCss, luminance, mixRgba } from '@/document/color'
+import { parseHex, toHex, parseCssColor, rgbToHsv, hsvToRgb, rgbToHsl, hslToRgb, hsvToHsl, hslToHsv, toCss, luminance, mixRgba } from '@/document/color'
 import { boundsFromPoints, contains, intersects, transformBounds, union, roundOut, fitInto, inflate, containsPoint } from '@/geometry/Bounds'
 import { rotation, translation, compose } from '@/geometry/Matrix'
 import { rectPath, ellipsePath, polygonStarPath, simplifyPoints, smoothPolylineToPath } from '@/geometry/ShapeGeometry'
@@ -49,6 +49,31 @@ describe('colour', () => {
       const hsl = rgbToHsl(c)
       const backL = hslToRgb(hsl.h, hsl.s, hsl.l)
       expect(backL.r).toBeCloseTo(c.r, 0)
+    }
+  })
+
+  it('converts between HSV and HSL exactly, without a trip through RGB', () => {
+    // Routing between the two models through 8-bit RGB quantises every value and
+    // collapses the hue at the extremes, which makes the hue slider jump while
+    // lightness is dragged to zero.
+    for (const s of [0, 0.25, 0.5, 0.75, 1]) {
+      for (const v of [0, 0.25, 0.5, 0.75, 1]) {
+        const hsl = hsvToHsl(210, s, v)
+        const back = hslToHsv(hsl.h, hsl.s, hsl.l)
+        expect(back.v).toBeCloseTo(v, 9)
+        // Saturation is undefined at v = 0, where every colour is black.
+        if (v > 0) expect(back.s).toBeCloseTo(s, 9)
+        expect(hsl.h).toBe(210)
+      }
+    }
+  })
+
+  it('agrees with the RGB round trip it replaces', () => {
+    for (const [h, s, v] of [[0, 1, 1], [120, 0.5, 0.8], [280, 0.2, 0.35]] as const) {
+      const direct = hsvToHsl(h, s, v)
+      const viaRgb = rgbToHsl(hsvToRgb(h, s, v))
+      expect(direct.s).toBeCloseTo(viaRgb.s, 2)
+      expect(direct.l).toBeCloseTo(viaRgb.l, 2)
     }
   })
 
