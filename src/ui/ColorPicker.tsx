@@ -807,8 +807,8 @@ function paintOfType(type: Paint['type'], current: Paint, base: RGBA): Paint {
       return { type: 'none' }
     case 'linear':
       return isGradient(current)
-        ? { type: 'linear', x1: 0, y1: 0, x2: 1, y2: 0, stops: current.stops }
-        : { type: 'linear', x1: 0, y1: 0, x2: 1, y2: 0, stops: rampFrom(base) }
+        ? { type: 'linear', x1: 0, y1: 0.5, x2: 1, y2: 0.5, stops: current.stops }
+        : { type: 'linear', x1: 0, y1: 0.5, x2: 1, y2: 0.5, stops: rampFrom(base) }
     case 'radial':
       return isGradient(current)
         ? { type: 'radial', cx: 0.5, cy: 0.5, r: 0.5, stops: current.stops }

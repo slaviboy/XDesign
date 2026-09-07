@@ -1076,32 +1076,41 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
 /* The on-canvas gradient editor. The axis is a plain line so it reads as a
    segment rather than a shape edge; endpoints are hollow to distinguish them
    from the solid stop dots that ride the same line. */
+/* The gradient widget sits ON the artwork, over whatever colours the gradient
+   itself is painting — so it is drawn in white with a shadow rather than in the
+   accent, which disappears the moment the gradient passes through blue. The
+   shadow goes on the group so the line, the dots and the ring all get it from
+   one declaration. */
+.gradient-handles { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55)); }
+
 .gradient-axis {
-  stroke: var(--accent);
-  stroke-width: 1.5;
-  opacity: 0.9;
+  stroke: #fff;
+  stroke-width: 2.5;
+  stroke-linecap: round;
 }
 .gradient-endpoint {
-  fill: var(--handle-fill);
-  stroke: var(--accent);
-  stroke-width: 1.5;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.5;
 }
+/* The dot keeps the stop's own colour inside a bold white ring: white enough to
+   read against the artwork, but still telling you which stop is which. */
 .gradient-stop-dot {
-  stroke: var(--handle-fill);
-  stroke-width: 1.5;
+  stroke: #fff;
+  stroke-width: 2.5;
 }
-.gradient-stop-dot.active { stroke: var(--accent); stroke-width: 2; }
+.gradient-stop-dot.active { stroke-width: 4; }
 /* A radial gradient paints an ellipse, not a circle, because the unit square is
    scaled by the node's box — so the ring shows the ellipse, not a lie. */
 .gradient-ring {
   fill: none;
-  stroke: var(--accent);
-  stroke-width: 1;
-  opacity: 0.5;
+  stroke: #fff;
+  stroke-width: 1.5;
+  opacity: 0.85;
   vector-effect: non-scaling-stroke;
   stroke-dasharray: 4 3;
 }
-.gradient-stop-base { fill: var(--handle-fill); stroke: none; }
+.gradient-stop-base { fill: #fff; stroke: none; }
 
 /* ---------------------------------------------------- gradient sections -- */
 

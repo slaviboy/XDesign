@@ -298,10 +298,12 @@ export function createLinearGradient(
 ): LinearGradientPaint {
   return {
     type: 'linear',
+    // Across the middle, not along the top edge: the on-canvas segment is the
+    // handle you grab, and on the top edge it lands under the resize handles.
     x1: 0,
-    y1: 0,
+    y1: 0.5,
     x2: 1,
-    y2: 0,
+    y2: 0.5,
     stops: stops ?? [
       createStop(0, { r: 255, g: 255, b: 255, a: 1 }),
       createStop(1, { r: 0, g: 0, b: 0, a: 1 }),

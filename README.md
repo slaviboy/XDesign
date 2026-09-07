@@ -332,6 +332,11 @@ node's box before anything is painted. Two consequences drive the whole widget:
 - a radial `r` paints an **ellipse** with semi-axes `r·width` and `r·height`, so a circular radius
   ring would miss the paint on any node that is not square.
 
+The widget is drawn in white with a drop shadow rather than in the accent colour, because it sits on
+top of the gradient it is editing — an accent-blue line vanishes the moment the ramp passes through
+blue. The default linear segment runs across the middle of the shape rather than along its top edge,
+where its endpoints landed underneath the nw and ne resize handles.
+
 So every handle is placed `unit → ×(w,h) → local → world → screen` and every drag runs the inverse,
 and the radial ring is drawn as the ellipse that is actually painted rather than as a circle that
 would be a lie. Endpoints are free to leave the shape, which is both what Adobe specifies and what

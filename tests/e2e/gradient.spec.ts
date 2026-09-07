@@ -46,6 +46,21 @@ test('the handles belong to the picker, not to selection', async ({ page }) => {
   await expect(page.locator('[data-handle="radius"]')).toHaveCount(4)
 })
 
+test('the linear segment runs across the middle, clear of the resize handles', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 220, y: 200 }, { x: 440, y: 340 })
+  await openGradient(page, 'linear')
+
+  const y = await page.locator('.document-layer linearGradient').first().getAttribute('y1')
+  expect(Number(y)).toBeCloseTo(0.5, 4)
+
+  // On the top edge the endpoints landed under the nw/ne resize handles; across
+  // the middle they are clear of the frame entirely.
+  const shape = (await nodesOfType(page, 'rect').first().boundingBox())!
+  const start = await centreOf(page, 'start')
+  expect(start.y).toBeCloseTo(shape.y + shape.height / 2, 0)
+})
+
 // ------------------------------------------------------------- dragging --
 
 test('dragging an endpoint moves the gradient, in one undo step', async ({ page }) => {
