@@ -798,3 +798,114 @@ test('typing an artboard name does not reach the tool shortcuts', async ({ page 
   await expect(page.locator('.tool-button.active')).toHaveAttribute('data-tool', 'select')
   await expect(page.locator('.artboard-label').first()).toHaveText('Rate')
 })
+
+// --------------------------------------------------------------- panning --
+
+/** The viewport, read off the canvas transform rather than the store. */
+async function viewportOf(page: import('@playwright/test').Page) {
+  return page.evaluate(() => {
+    const t = document.querySelector('.viewport')!.getAttribute('transform')!
+    const m = /translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)/.exec(t)!
+    return { x: Number(m[1]), y: Number(m[2]), zoom: Number(m[3]) }
+  })
+}
+
+test('the hand tool pans 1:1 with the cursor, without shaking', async ({ page }) => {
+  await openApp(page)
+  await selectTool(page, 'hand')
+  const box = (await page.locator(CANVAS).boundingBox())!
+  const before = await viewportOf(page)
+
+  await page.mouse.move(box.x + 400, box.y + 300)
+  await page.mouse.down()
+  const path: number[] = []
+  for (let i = 1; i <= 10; i++) {
+    await page.mouse.move(box.x + 400 + i * 20, box.y + 300 + i * 10)
+    path.push((await viewportOf(page)).x - before.x)
+  }
+  await page.mouse.up()
+
+  // The document tracks the cursor exactly: 200px right, 100px down.
+  const after = await viewportOf(page)
+  expect(after.x - before.x).toBeCloseTo(200, 0)
+  expect(after.y - before.y).toBeCloseTo(100, 0)
+  expect(after.zoom).toBeCloseTo(before.zoom, 5)
+
+  // And it got there smoothly. This is the shake: the delta used to be measured
+  // in document space against the very viewport the pan was moving, which turns
+  // a difference of positions into a difference of DIFFERENCES — the pointer's
+  // acceleration, not its movement. Every step here must be the same 20px.
+  path.forEach((x, i) => expect(x, `step ${i + 1}`).toBeCloseTo(20 * (i + 1), 0))
+})
+
+test('panning at a zoom other than 100% still tracks the cursor', async ({ page }) => {
+  await openApp(page)
+  await press(page, '1')
+  await selectTool(page, 'hand')
+  const box = (await page.locator(CANVAS).boundingBox())!
+  const before = await viewportOf(page)
+
+  await page.mouse.move(box.x + 500, box.y + 400)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 620, box.y + 340, { steps: 12 })
+  await page.mouse.up()
+
+  // Screen pixels, not document units — the view follows the hand, not the zoom.
+  const after = await viewportOf(page)
+  expect(after.x - before.x).toBeCloseTo(120, 0)
+  expect(after.y - before.y).toBeCloseTo(-60, 0)
+})
+
+// -------------------------------------------------- dragging by the label --
+
+test('an artboard can be dragged by its name, whatever tool is selected', async ({ page }) => {
+  await openApp(page)
+  // Deliberately not a selection tool: the label is chrome, and belongs to no tool.
+  await selectTool(page, 'rect')
+
+  const label = page.locator('.artboard-label').first()
+  const before = (await label.boundingBox())!
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(before.x + before.width / 2 + 120, before.y + before.height / 2 + 60, { steps: 8 })
+
+  // The name follows the artboard through the drag rather than jumping to it on
+  // release — it is positioned from the live matrix, not the document.
+  const during = (await label.boundingBox())!
+  expect(during.x - before.x).toBeCloseTo(120, 0)
+  expect(during.y - before.y).toBeCloseTo(60, 0)
+  await page.mouse.up()
+
+  // Committed as a real move: one undo entry, and no rectangle was drawn by the
+  // tool that happened to be active.
+  await expect(nodesOfType(page, 'rect')).toHaveCount(0)
+  expect(await readField(page, 'X')).toBeCloseTo(200, 0)
+  await press(page, 'z')
+  expect(await readField(page, 'X')).toBeCloseTo(0, 0)
+})
+
+test('a click on an artboard name selects without moving it', async ({ page }) => {
+  await openApp(page)
+  const label = page.locator('.artboard-label').first()
+  const box = (await label.boundingBox())!
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+
+  await expect(page.locator('.layer-row.selected')).toHaveCount(1)
+  expect(await readField(page, 'X')).toBeCloseTo(0, 0)
+  // Nothing to undo: a press that never moved writes nothing.
+  await press(page, 'z')
+  expect(await readField(page, 'X')).toBeCloseTo(0, 0)
+})
+
+test('Escape during a label drag puts the artboard back', async ({ page }) => {
+  await openApp(page)
+  const label = page.locator('.artboard-label').first()
+  const box = (await label.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + 90, box.y + box.height / 2, { steps: 6 })
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+
+  expect(await readField(page, 'X')).toBeCloseTo(0, 0)
+})

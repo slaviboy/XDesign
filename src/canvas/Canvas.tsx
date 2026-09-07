@@ -57,7 +57,7 @@ export interface CanvasProps {
 export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
-  const lastDocRef = useRef<Vec2>({ x: 0, y: 0 })
+  const lastScreenRef = useRef<Vec2>({ x: 0, y: 0 })
   const activePointerRef = useRef<number | null>(null)
   const dragDepthRef = useRef(0)
 
@@ -91,8 +91,8 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
       const screen = toCanvasPoint(e.clientX, e.clientY)
       const v = editorStore.getState().viewport
       const doc = screenToDoc(v, screen)
-      const prev = lastDocRef.current
-      lastDocRef.current = doc
+      const prev = lastScreenRef.current
+      lastScreenRef.current = screen
 
       const target = e.target as Element | null
       const nodeEl = target?.closest?.('[data-node-id]') as HTMLElement | null
@@ -101,7 +101,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
       return {
         screen,
         doc,
-        deltaDoc: { x: doc.x - prev.x, y: doc.y - prev.y },
+        deltaScreen: { x: screen.x - prev.x, y: screen.y - prev.y },
         shiftKey: e.shiftKey,
         altKey: e.altKey,
         metaKey: e.metaKey,
@@ -175,7 +175,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
       if (editorStore.getState().editingTextId) setEditor({ editingTextId: null })
 
       const ev = buildEvent(e)
-      lastDocRef.current = ev.doc
+      lastScreenRef.current = ev.screen
       activePointerRef.current = e.pointerId
       svgRef.current?.setPointerCapture(e.pointerId)
       getTool(editorStore.getState().tool).onPointerDown?.(ev, ctx)

@@ -28,7 +28,7 @@ function ev(x: number, y: number, mods: Partial<CanvasPointerEvent> = {}): Canva
   return {
     screen: { x, y },
     doc: { x, y },
-    deltaDoc: { x: 0, y: 0 },
+    deltaScreen: { x: 0, y: 0 },
     shiftKey: false,
     altKey: false,
     metaKey: false,

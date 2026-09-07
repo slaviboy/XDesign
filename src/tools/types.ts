@@ -16,8 +16,17 @@ export interface CanvasPointerEvent {
   screen: Vec2
   /** Pointer position in document units. */
   doc: Vec2
-  /** Movement since the previous event, in document units. */
-  deltaDoc: Vec2
+  /**
+   * Movement since the previous event, in canvas-relative CSS pixels.
+   *
+   * Screen space, not document space, and deliberately so: the only tool that
+   * wants a delta is the Hand, and the Hand moves the very viewport a document
+   * delta would be measured against. Differencing two document positions taken
+   * either side of a pan yields the pointer's ACCELERATION rather than its
+   * movement, which is what made panning shake. A screen delta cannot feed back
+   * on itself, because screen coordinates do not depend on the viewport at all.
+   */
+  deltaScreen: Vec2
   shiftKey: boolean
   altKey: boolean
   metaKey: boolean

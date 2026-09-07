@@ -48,7 +48,10 @@ pointers hand the points back and forth without dropping them.
 
 **Artboards** — double-click a name label on the canvas to rename it in place, with the whole
 name selected so typing replaces it. `Enter` or clicking away commits, `Escape` abandons, and
-an empty name keeps the old one rather than leaving an artboard with no name at all.
+an empty name keeps the old one rather than leaving an artboard with no name at all. Dragging
+the name moves the artboard whatever tool is selected: the label is chrome rather than artwork,
+so it takes the pointer itself and no tool ever sees the press. It is positioned from the live
+matrix, so it travels with the artboard instead of jumping to it on release.
 
 **Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
 snapping and smart guides, per-point Bézier editing, boolean operations, alignment and
@@ -270,6 +273,27 @@ occupy. The generator now measures the raw outer ring and maps its bounds onto
 `0..w × 0..h`. Two properties fall out: three corners reproduce the old hand-authored
 isosceles triangle *exactly*, and because only the outer ring is measured, the frame cannot
 move while the Star Ratio handle is dragged.
+
+### The pointer delta is in screen space, because the Hand moves its own frame of reference
+
+The pointer event carried `deltaDoc`, a movement in document units. Exactly one tool ever read
+it — the Hand — and it is the one tool that cannot use it, because panning moves the very
+viewport a document delta is measured against.
+
+Follow one drag. The press samples the pointer at screen `s0` and stores `d0 = (s0 - v0)/z`.
+The next move samples `s1` against the same viewport, so the delta is the true `(s1 - s0)/z`
+and the pan lands the viewport at `v1 = v0 + (s1 - s0)`. But the move after that converts `s2`
+with `v1` while the stored `d1` was converted with `v0`, and the difference comes out as
+
+    d2 - d1 = (s2 - 2·s1 + s0) / z
+
+which is a *second* difference — the pointer's acceleration, not its movement. Drag at a
+constant speed and it is zero; wobble a pixel and the whole canvas jitters around you. That is
+the shake.
+
+`deltaScreen` cannot have the bug, because screen coordinates do not depend on the viewport at
+all: the difference of two of them is the movement, whatever the pan does in between. The field
+was renamed rather than added, so no tool can pick up the broken one by accident.
 
 ### Point editing had no live feedback, for a subtle reason
 

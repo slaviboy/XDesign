@@ -26,7 +26,7 @@ const ctx: ToolContext = {
 
 function ev(x: number, y: number, mods: Partial<CanvasPointerEvent> = {}): CanvasPointerEvent {
   return {
-    screen: { x, y }, doc: { x, y }, deltaDoc: { x: 0, y: 0 },
+    screen: { x, y }, doc: { x, y }, deltaScreen: { x: 0, y: 0 },
     shiftKey: false, altKey: false, metaKey: false, ctrlKey: false, primaryModifier: false,
     button: 0, buttons: 1, pointerId: 1,
     targetNodeId: null, targetHandle: null, targetCorner: null,

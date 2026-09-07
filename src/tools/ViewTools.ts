@@ -77,11 +77,12 @@ export const handTool: Tool = {
     panning = true
   },
 
-  onPointerMove(e: CanvasPointerEvent, ctx: ToolContext): void {
+  onPointerMove(e: CanvasPointerEvent): void {
     if (!panning) return
-    // Pan in screen space: the document should track the cursor 1:1 at any zoom.
-    const zoom = ctx.viewport().zoom
-    panBy(e.deltaDoc.x * zoom, e.deltaDoc.y * zoom)
+    // Straight through in screen pixels: the document tracks the cursor 1:1 at
+    // any zoom, and nothing here is measured against the viewport this call is
+    // about to move.
+    panBy(e.deltaScreen.x, e.deltaScreen.y)
   },
 
   onPointerUp(): void {

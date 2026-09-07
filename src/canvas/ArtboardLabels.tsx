@@ -9,21 +9,33 @@
  * beside the SVG rather than anything inside it: a caret, a text selection and
  * IME composition are things only a real input gives you, and the label is
  * screen-space already, so nothing is lost by leaving the SVG for it.
+ *
+ * Dragging a label moves the artboard, whatever tool is selected. The label
+ * follows it frame by frame, which is why this reads the live matrix rather
+ * than the document: a drag deliberately writes nothing until it is released,
+ * so a label positioned from the document alone would sit still while the
+ * artboard it names slid out from under it.
  */
 
 import { memo, useLayoutEffect, useRef, useState } from 'react'
 import { docToScreen } from './Viewport'
-import { geometryBounds, artboardIds } from '../document/SceneGraph'
+import { geometryBounds, artboardIds, localGeometryBounds } from '../document/SceneGraph'
+import { transformBounds } from '../geometry/Bounds'
 import { renameNode } from '../history/Commands'
+import { beginArtboardLabelDrag } from '../tools/ArtboardLabelDrag'
+import { getLiveMatrix } from '../tools/DragSession'
 import { setEditor, setSelection } from '../state/EditorStore'
-import { useDocument, useEditorStore } from '../state/hooks'
-import type { NodeId } from '../document/types'
+import { useDocument, useEditorStore, useLiveTransformTick } from '../state/hooks'
+import type { DesignDocument, DesignNode, NodeId } from '../document/types'
 
 export const ArtboardLabels = memo(function ArtboardLabels() {
   const doc = useDocument()
   const viewport = useEditorStore((s) => s.viewport)
   const selection = useEditorStore((s) => s.selection)
   const renaming = useEditorStore((s) => s.renamingArtboardId)
+  // Re-renders on every live-transform frame, so a label tracks the artboard
+  // through a drag instead of jumping to it on release.
+  void useLiveTransformTick()
   const boards = artboardIds(doc)
   if (boards.length === 0) return null
 
@@ -35,7 +47,7 @@ export const ArtboardLabels = memo(function ArtboardLabels() {
         // The input stands in for the label it is editing, so the two never
         // show the name twice.
         if (renaming === id) return null
-        const bounds = geometryBounds(doc, id)
+        const bounds = labelAnchor(doc, id, node)
         const p = docToScreen(viewport, { x: bounds.x, y: bounds.y })
         // Skip labels that have scrolled out of view.
         if (p.y < -40 || p.y > 4000) return null
@@ -47,8 +59,13 @@ export const ArtboardLabels = memo(function ArtboardLabels() {
             y={p.y - 7}
             pointerEvents="all"
             onPointerDown={(e) => {
+              // Kept from the tools entirely: dragging a name moves its
+              // artboard whichever instrument happens to be selected, so the
+              // active tool must never see this press.
               e.stopPropagation()
-              setSelection([id])
+              const svg = e.currentTarget.ownerSVGElement
+              if (!svg) return
+              beginArtboardLabelDrag(id, e.nativeEvent, e.currentTarget, svg)
             }}
             onDoubleClick={(e) => {
               // Stopped here, or the canvas would also read this as a
@@ -65,6 +82,17 @@ export const ArtboardLabels = memo(function ArtboardLabels() {
     </g>
   )
 })
+
+/**
+ * Where the label sits: the artboard's top-left, in document space.
+ *
+ * The live matrix wins while a drag is in flight — it is the only place the new
+ * position exists until the gesture commits.
+ */
+function labelAnchor(doc: DesignDocument, id: NodeId, node: DesignNode) {
+  const live = getLiveMatrix(id)
+  return live ? transformBounds(localGeometryBounds(node), live) : geometryBounds(doc, id)
+}
 
 /** Mounted beside the canvas SVG; renders only while a label is being renamed. */
 export function ArtboardNameEditor() {
