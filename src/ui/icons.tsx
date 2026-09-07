@@ -70,9 +70,11 @@ export const CursorIcon = (p: IconProps) => (
 /**
  * The hollow counterpart, for Direct Selection.
  *
- * Same outline as the pointer above, unfilled — the wrapper already strokes it
- * in currentColor, which is the distinction Illustrator draws between selecting
- * an object and selecting its points.
+ * Same outline as the pointer above with no body at all — the wrapper strokes it
+ * in currentColor and nothing fills it, so whatever is behind shows through. That
+ * is the distinction Illustrator draws between selecting an object and selecting
+ * its points, and it survives the active state: on the blue the solid arrow goes
+ * solid white while this one stays an outline with blue inside.
  */
 export const DirectCursorIcon = (p: IconProps) => (
   <ToolIcon {...p}>

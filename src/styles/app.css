@@ -1053,14 +1053,10 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   stroke-width: 1.2;
 }
 
-/* Direct Selection is a different KIND of pointer, so it reads as a different
-   colour — the same distinction Illustrator draws with its hollow white arrow.
-   --magenta is already defined for both themes with its contrast measured. */
-.tool-button[data-tool="direct-select"] { color: var(--magenta); }
-.tool-button[data-tool="direct-select"].active {
-  background: var(--magenta);
-  color: var(--accent-contrast);
-}
+/* The two pointers are told apart by SHAPE, not by colour: Select is a solid
+   arrow, Direct Selection the same arrow with no body. Both take the same blue
+   when active, so the rail reads as one consistent control — and the hollow one
+   stays legible there, because the blue shows through where the body would be. */
 
 /* The on-canvas gradient editor. The axis is a plain line so it reads as a
    segment rather than a shape edge; endpoints are hollow to distinguish them
