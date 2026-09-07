@@ -212,7 +212,7 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 
 .shape-preview { fill: rgba(20, 115, 230, 0.10); stroke: var(--accent); stroke-width: 1; }
 .pen-path { fill: none; stroke: var(--accent); stroke-width: 1.5; }
-.pen-rubber { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; }
+.pen-rubber { fill: none; stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; }
 .pencil-preview { fill: none; stroke: var(--preview-stroke); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .artboard-preview, .text-preview, .zoom-preview {
   fill: rgba(20, 115, 230, 0.06);
@@ -968,3 +968,11 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   min-width: 0;
 }
 .corner-radius-row > .tf-corner-all { flex: 1; min-width: 0; }
+
+/* The Star Ratio handle: a filled dot, distinct from the radius handle's ring,
+   because the two sit inside the same shape and do different things. */
+.star-ratio-handle {
+  fill: var(--accent);
+  stroke: var(--handle-fill);
+  stroke-width: 1.2;
+}

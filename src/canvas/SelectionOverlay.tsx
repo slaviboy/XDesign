@@ -26,6 +26,8 @@ import { angleBetween, rotationCursor } from './cursors'
 import { getDragMode, getLiveMatrix, getLiveRotation, getLiveSize, isDragging } from '../tools/DragSession'
 import { getEditingSubpaths } from '../tools/PathEditing'
 import { getLiveRadius, radiusHandlePosition, type RadiusCorner } from '../tools/RadiusSession'
+import { getLiveStarRatio } from '../tools/StarRatioSession'
+import { starRatioHandlePoint } from '../geometry/ShapeGeometry'
 import { cornerRadiusOf, supportsCornerRadius, type BoxCorner } from '../document/types'
 import {
   ancestorIds,
@@ -419,8 +421,37 @@ function RadiusHandles({
       ? ['nw', 'ne', 'se', 'sw']
       : ['vertex']
 
+  // The Star Ratio handle sits on the first inner vertex — at ratio 1 that is an
+  // edge midpoint, which is how a plain polygon advertises the gesture.
+  let starHandle: { x: number; y: number } | null = null
+  if (node.type === 'polygon') {
+    const ratio = getLiveStarRatio(nodeId) ?? node.starRatio
+    const at = starRatioHandlePoint(width, height, node.sides, ratio)
+    starHandle = docToScreen(viewport, applyToXY(world, at.x, at.y))
+  }
+
   return (
     <g className="radius-handles">
+      {starHandle && (
+        <g data-handle="star-ratio">
+          {/* Invisible, larger target so the dot is easy to grab. */}
+          <circle
+            cx={starHandle.x}
+            cy={starHandle.y}
+            r={9}
+            fill="transparent"
+            pointerEvents="all"
+            style={{ cursor: 'move' }}
+          />
+          <circle
+            className="star-ratio-handle"
+            cx={starHandle.x}
+            cy={starHandle.y}
+            r={4}
+            pointerEvents="none"
+          />
+        </g>
+      )}
       {corners.map((corner) => {
         // Per-corner radius, so independent corners each show their own inset.
         const boxCorner = corner === 'vertex' ? undefined : (corner as BoxCorner)
@@ -455,7 +486,7 @@ function RadiusHandles({
 function PathPointOverlay({ viewport, tick }: { viewport: Viewport; tick: number }) {
   void tick
   const editing = getEditingSubpaths()
-  const selectedPoints = useEditorStore((s) => s.selectedPointIndices)
+  const selectedPoints = useEditorStore((s) => s.selectedPoints)
   if (!editing) return null
 
   const toScreen = (x: number, y: number): Vec2 =>
@@ -468,7 +499,11 @@ function PathPointOverlay({ viewport, tick }: { viewport: Viewport; tick: number
           const a = toScreen(p.x, p.y)
           const hIn = p.inX !== null && p.inY !== null ? toScreen(p.inX, p.inY) : null
           const hOut = p.outX !== null && p.outY !== null ? toScreen(p.outX, p.outY) : null
-          const selected = selectedPoints.includes(i)
+          // Matched on the subpath too: a bare index lit up the matching point
+          // of every ring at once.
+          const selected = selectedPoints.some(
+            (r) => r.subpath === si && r.index === i && r.kind === 'anchor',
+          )
           return (
             <g key={`${si}-${i}`}>
               {hIn && <line className="handle-arm" x1={a.x} y1={a.y} x2={hIn.x} y2={hIn.y} />}

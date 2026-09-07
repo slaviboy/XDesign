@@ -19,9 +19,7 @@ import {
   LineIcon,
   PenIcon,
   PencilIcon,
-  PolygonIcon,
   RectIcon,
-  StarIcon,
   TextIcon,
   TriangleIcon,
   ZoomIcon,
@@ -34,9 +32,9 @@ const TOOL_ICONS: Record<ToolId, ReactNode> = {
   select: <CursorIcon size={TOOL_ICON_SIZE} />,
   rect: <RectIcon size={TOOL_ICON_SIZE} />,
   ellipse: <EllipseIcon size={TOOL_ICON_SIZE} />,
-  triangle: <TriangleIcon size={TOOL_ICON_SIZE} />,
-  polygon: <PolygonIcon size={TOOL_ICON_SIZE} />,
-  star: <StarIcon size={TOOL_ICON_SIZE} />,
+  // A triangle, because that is what the tool draws before you change anything —
+  // the same glyph XD uses for its Polygon tool.
+  polygon: <TriangleIcon size={TOOL_ICON_SIZE} />,
   line: <LineIcon size={TOOL_ICON_SIZE} />,
   pen: <PenIcon size={TOOL_ICON_SIZE} />,
   pencil: <PencilIcon size={TOOL_ICON_SIZE} />,

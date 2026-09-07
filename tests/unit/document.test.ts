@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { serializeDocument, deserializeDocument, DocumentFormatError, dataUrlToBytes, bytesToDataUrl } from '@/persistence/FileFormat'
-import { createDocument, createRect, createEllipse, createStar, createImage, createText, createLinearGradient, createStop } from '@/document/NodeFactory'
+import { createDocument, createRect, createEllipse, createPolygon, createImage, createText, createLinearGradient, createStop } from '@/document/NodeFactory'
 import {
   addNode, bringForward, bringToFront, duplicateNodes, groupNodes, removeNode,
   sendBackward, sendToBack, alignNodes, distributeNodes, reparentNode,
@@ -323,9 +323,10 @@ describe('hit testing', () => {
 
 describe('node factory', () => {
   it('creates fully populated nodes', () => {
-    const star = createStar({ width: 10, height: 10 }, {}, 7, 0.4)
-    expect(star.points).toBe(7)
-    expect(star.innerRatio).toBe(0.4)
+    const star = createPolygon({ width: 10, height: 10 }, {}, 7, 0.4)
+    expect(star.sides).toBe(7)
+    expect(star.starRatio).toBe(0.4)
+    expect(star.name).toBe('Star')
     expect(star.style.fill.type).toBe('solid')
     expect(star.transform.originX).toBe(0.5)
     expect(star.visible).toBe(true)

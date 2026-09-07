@@ -36,8 +36,10 @@ import {
 } from '../document/SceneGraph'
 import { decompose, invert, multiply, type Mat2D } from '../geometry/Matrix'
 import { transformBounds, unionAll, type Bounds } from '../geometry/Bounds'
+import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
 import { getLiveMatrix, getLiveSize, usesIntrinsicSize } from '../tools/DragSession'
 import { getLiveRadius } from '../tools/RadiusSession'
+import { getLiveStarRatio } from '../tools/StarRatioSession'
 import { toCss, toHex } from '../document/color'
 import { fontsByCategory, isBundledFont, nearestWeight } from '../text/FontRegistry'
 import { openDialog, setCornerRadiusMode, setEditor } from '../state/EditorStore'
@@ -774,51 +776,48 @@ function RepeatGridSection({ nodes }: { nodes: DesignNode[] }) {
 }
 
 function ShapeSection({ nodes }: { nodes: DesignNode[] }) {
-  const liveTick = useLiveTransformTick()
-  void liveTick
+  // Subscribes to the LiveTransform channel so the Star and Radius readouts
+  // follow their on-canvas handles mid-drag, when the document has not changed.
+  void useLiveTransformTick()
   const roundable = nodes.filter(supportsCornerRadius)
   const polygons = nodes.filter((n) => n.type === 'polygon')
-  const stars = nodes.filter((n) => n.type === 'star')
-  if (roundable.length === 0 && polygons.length === 0 && stars.length === 0) return null
+  if (roundable.length === 0 && polygons.length === 0) return null
 
   return (
     <Section title="Shape">
-      {roundable.length > 0 && <CornerRadiusRow nodes={roundable} />}
       {polygons.length > 0 && (
         <div className="field-row">
           <NumberField
-            label="Sides"
+            label="Corners"
+            title="Corner count"
             value={common(polygons, (n) => (n.type === 'polygon' ? n.sides : 0))}
-            min={3}
-            max={64}
+            min={MIN_SIDES}
+            max={MAX_SIDES}
             precision={0}
-            onChange={(v, committing) => setShapeParam({ sides: v }, committing ? undefined : 'sides')}
-          />
-        </div>
-      )}
-      {stars.length > 0 && (
-        <div className="field-row">
-          <NumberField
-            label="Pts"
-            value={common(stars, (n) => (n.type === 'star' ? n.points : 0))}
-            min={3}
-            max={64}
-            precision={0}
-            onChange={(v, committing) => setShapeParam({ points: v }, committing ? undefined : 'points')}
+            onChange={(v, committing) =>
+              setShapeParam({ sides: v }, committing ? undefined : 'sides')
+            }
           />
           <NumberField
-            label="Inner"
-            value={common(stars, (n) => (n.type === 'star' ? Math.round(n.innerRatio * 100) : 0))}
+            label="Star"
+            title="Star ratio"
+            // Shown as a percentage, as XD does; 100% is a plain polygon.
+            value={common(polygons, (n) =>
+              n.type === 'polygon'
+                ? Math.round((getLiveStarRatio(n.id) ?? n.starRatio) * 100)
+                : 0,
+            )}
             min={1}
             max={100}
             suffix="%"
             precision={0}
             onChange={(v, committing) =>
-              setShapeParam({ innerRatio: v / 100 }, committing ? undefined : 'inner')
+              setShapeParam({ starRatio: v / 100 }, committing ? undefined : 'star')
             }
           />
         </div>
       )}
+      {roundable.length > 0 && <CornerRadiusRow nodes={roundable} />}
     </Section>
   )
 }

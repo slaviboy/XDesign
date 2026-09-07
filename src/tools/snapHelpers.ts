@@ -17,11 +17,28 @@ import { createMatrixCache, geometryBounds } from '../document/SceneGraph'
 import { isContainer } from '../document/types'
 import { visibleDocBounds } from '../canvas/Viewport'
 import type { Bounds } from '../geometry/Bounds'
+import type { Vec2 } from '../geometry/Matrix'
 import type { DesignDocument, NodeId } from '../document/types'
 import type { Viewport } from '../state/EditorStore'
 
 /** Screen-pixel snap radius; converted to document units by the caller. */
 export const SNAP_THRESHOLD_PX = 6
+
+/**
+ * Snap `to` onto the nearest ray of `stepDeg` degrees around `from`.
+ *
+ * Shared because the shape tools and the pen constrain the same way and must
+ * agree: 45 degrees for a line or a new anchor, 15 for a Bezier handle, both
+ * matching XD.
+ */
+export function snapAngle(from: Vec2, to: Vec2, stepDeg: number): Vec2 {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const step = (stepDeg * Math.PI) / 180
+  const angle = Math.round(Math.atan2(dy, dx) / step) * step
+  const len = Math.hypot(dx, dy)
+  return { x: from.x + Math.cos(angle) * len, y: from.y + Math.sin(angle) * len }
+}
 
 /**
  * Everything the dragged selection may align to: artboard edges and centers,

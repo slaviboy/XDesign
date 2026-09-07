@@ -32,10 +32,8 @@ import { transformBounds, unionAll, type Bounds } from '../geometry/Bounds'
 import {
   ellipsePath,
   linePath,
-  polygonPath,
+  polygonStarPath,
   rectPath,
-  starPath,
-  trianglePath,
 } from '../geometry/ShapeGeometry'
 import { transformPath } from '../geometry/PathUtils'
 import {
@@ -70,10 +68,9 @@ interface NodeSnapshot {
   line?: { x1: number; y1: number; x2: number; y2: number }
   /** Shape parameters, so the live preview redraws the real shape, not a default. */
   sides?: number
-  points?: number
-  innerRatio?: number
+  starRatio?: number
   cornerRadius?: readonly [number, number, number, number]
-  /** Scalar vertex rounding for triangle / polygon / star. */
+  /** Scalar vertex rounding for the parametric polygon. */
   vertexRadius?: number
 }
 
@@ -177,13 +174,9 @@ export function beginDrag(
           ? { x1: node.x1, y1: node.y1, x2: node.x2, y2: node.y2 }
           : undefined,
       sides: node.type === 'polygon' ? node.sides : undefined,
-      points: node.type === 'star' ? node.points : undefined,
-      innerRatio: node.type === 'star' ? node.innerRatio : undefined,
+      starRatio: node.type === 'polygon' ? node.starRatio : undefined,
       cornerRadius: node.type === 'rect' ? node.cornerRadius : undefined,
-      vertexRadius:
-        node.type === 'triangle' || node.type === 'polygon' || node.type === 'star'
-          ? node.cornerRadius
-          : undefined,
+      vertexRadius: node.type === 'polygon' ? node.cornerRadius : undefined,
     }
   })
 
@@ -495,9 +488,7 @@ export function usesIntrinsicSize(type: DesignNode['type']): boolean {
   return (
     type === 'rect' ||
     type === 'ellipse' ||
-    type === 'triangle' ||
     type === 'polygon' ||
-    type === 'star' ||
     type === 'path' ||
     type === 'line'
   )
@@ -510,16 +501,12 @@ function livePathData(snap: NodeSnapshot, width: number, height: number): string
       return rectPath(width, height, snap.cornerRadius ?? 0)
     case 'ellipse':
       return ellipsePath(width, height)
-    case 'triangle':
-      return trianglePath(width, height, snap.vertexRadius ?? 0)
     case 'polygon':
-      return polygonPath(width, height, snap.sides ?? 6, snap.vertexRadius ?? 0)
-    case 'star':
-      return starPath(
+      return polygonStarPath(
         width,
         height,
-        snap.points ?? 5,
-        snap.innerRatio ?? 0.5,
+        snap.sides ?? 3,
+        snap.starRatio ?? 1,
         snap.vertexRadius ?? 0,
       )
     case 'path':

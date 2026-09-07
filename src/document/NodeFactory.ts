@@ -5,7 +5,7 @@
  * so consumers never have to defend against a missing style or transform.
  */
 
-import type { CornerRadii } from '../geometry/ShapeGeometry'
+import { MAX_SIDES, MIN_SIDES, type CornerRadii } from '../geometry/ShapeGeometry'
 import { createNodeId, createStopId } from './ids'
 import {
   DEFAULT_SETTINGS,
@@ -31,12 +31,10 @@ import {
   type RadialGradientPaint,
   type RectNode,
   type RGBA,
-  type StarNode,
   type Style,
   type SvgNode,
   type TextNode,
   type Transform,
-  type TriangleNode,
 } from './types'
 
 export function cloneTransform(t: Partial<Transform> = {}): Transform {
@@ -101,46 +99,36 @@ export function createEllipse(
   return { ...base('ellipse', 'Ellipse', transform), type: 'ellipse', style: cloneStyle(style) }
 }
 
-export function createTriangle(
-  transform: Partial<Transform> = {},
-  style: Partial<Style> = {},
-): TriangleNode {
-  return {
-    ...base('triangle', 'Triangle', transform),
-    type: 'triangle',
-    style: cloneStyle(style),
-    cornerRadius: 0,
-  }
-}
+/**
+ * The one parametric polygon.
+ *
+ * Named for its corner count, exactly as XD does: 3 corners is a triangle, and a
+ * star ratio below 1 makes it a star. `sides = 3` is the default because that is
+ * what the tool draws before you touch anything.
+ */
+export const POLYGON_DEFAULT_SIDES = 3
+export const POLYGON_DEFAULT_STAR_RATIO = 1
 
 export function createPolygon(
   transform: Partial<Transform> = {},
   style: Partial<Style> = {},
-  sides = 6,
+  sides = POLYGON_DEFAULT_SIDES,
+  starRatio = POLYGON_DEFAULT_STAR_RATIO,
 ): PolygonNode {
   return {
-    ...base('polygon', 'Polygon', transform),
+    ...base('polygon', polygonName(sides, starRatio), transform),
     type: 'polygon',
     style: cloneStyle(style),
-    sides,
+    sides: Math.min(MAX_SIDES, Math.max(MIN_SIDES, Math.round(sides))),
+    starRatio: Math.min(1, Math.max(0.01, starRatio)),
     cornerRadius: 0,
   }
 }
 
-export function createStar(
-  transform: Partial<Transform> = {},
-  style: Partial<Style> = {},
-  points = 5,
-  innerRatio = 0.5,
-): StarNode {
-  return {
-    ...base('star', 'Star', transform),
-    type: 'star',
-    style: cloneStyle(style),
-    points,
-    innerRatio,
-    cornerRadius: 0,
-  }
+/** Layer name at creation. Never revised afterwards — that is the user's to set. */
+function polygonName(sides: number, starRatio: number): string {
+  if (starRatio < 1) return 'Star'
+  return Math.round(sides) === 3 ? 'Triangle' : 'Polygon'
 }
 
 export function createLine(

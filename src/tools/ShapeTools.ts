@@ -1,8 +1,9 @@
 /**
- * The drag-to-draw shape tools: rectangle, ellipse, triangle, polygon, star, line.
+ * The drag-to-draw shape tools: rectangle, ellipse, polygon, line.
  *
- * All six share one implementation because they differ only in which node they
- * construct. The shape is previewed in the overlay and only committed on
+ * All four share one implementation because they differ only in which node they
+ * construct. Triangle and star are not tools: they are a polygon with three
+ * corners, and a polygon with a star ratio below 100% — exactly as in XD. The shape is previewed in the overlay and only committed on
  * pointerup, so an accidental click does not leave an empty undo entry.
  *
  * Modifiers match every other vector tool: Shift constrains to a square/circle
@@ -15,18 +16,16 @@ import {
   createLine,
   createPolygon,
   createRect,
-  createStar,
-  createTriangle,
 } from '../document/NodeFactory'
 import { insertNode } from '../history/Commands'
-import { buildSnapContext, resolveSnap, type SnapContext } from './snapHelpers'
+import { buildSnapContext, resolveSnap, snapAngle, type SnapContext } from './snapHelpers'
 import { editorStore, refreshOverlay, setEditor, setTool } from '../state/EditorStore'
 import type { DesignNode, Transform } from '../document/types'
 import type { Vec2 } from '../geometry/Matrix'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
 import type { ToolId } from '../state/EditorStore'
 
-export type ShapeKind = 'rect' | 'ellipse' | 'triangle' | 'polygon' | 'star' | 'line'
+export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'line'
 
 /** Size used when the tool is clicked rather than dragged. */
 const CLICK_DEFAULT_SIZE = 100
@@ -52,25 +51,46 @@ const draw: DrawState = {
   kind: null,
 }
 
-/** Exposed so the overlay can draw the in-progress shape. */
-export function getDrawPreview(): { bounds: Bounds; kind: ShapeKind } | null {
-  if (!draw.active || !draw.kind) return null
-  return { bounds: previewBounds(), kind: draw.kind }
+/** The two endpoints of the gesture, after Shift and Alt have been applied. */
+interface DrawSegment {
+  a: Vec2
+  b: Vec2
 }
 
-function previewBounds(): Bounds {
+/**
+ * Exposed so the overlay can draw the in-progress shape.
+ *
+ * The segment rides along because a line is not symmetric: its box says how big
+ * it is but not which way round it runs, and the overlay has to draw the same
+ * direction the commit will store.
+ */
+export function getDrawPreview(): {
+  bounds: Bounds
+  kind: ShapeKind
+  segment: DrawSegment
+} | null {
+  if (!draw.active || !draw.kind) return null
+  const segment = previewSegment()
+  return { bounds: boundsOf(segment), kind: draw.kind, segment }
+}
+
+/**
+ * The gesture's resolved endpoints — the single source of truth.
+ *
+ * Everything downstream (the preview, the snap box, the discard guard and the
+ * committed node) derives from these, so Shift and Alt cannot apply to some of
+ * them and not others.
+ */
+function previewSegment(): DrawSegment {
   let { x: sx, y: sy } = draw.start
   let { x: cx, y: cy } = draw.current
 
   if (draw.constrain) {
     // Square/circle for area shapes; 45-degree increments for lines.
     if (draw.kind === 'line') {
-      const dx = cx - sx
-      const dy = cy - sy
-      const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4)
-      const len = Math.hypot(dx, dy)
-      cx = sx + Math.cos(angle) * len
-      cy = sy + Math.sin(angle) * len
+      const snapped = snapAngle({ x: sx, y: sy }, { x: cx, y: cy }, 45)
+      cx = snapped.x
+      cy = snapped.y
     } else {
       const size = Math.max(Math.abs(cx - sx), Math.abs(cy - sy))
       cx = sx + Math.sign(cx - sx || 1) * size
@@ -85,12 +105,28 @@ function previewBounds(): Bounds {
     sy -= dy
   }
 
-  return draw.kind === 'line'
-    ? { x: Math.min(sx, cx), y: Math.min(sy, cy), width: cx - sx, height: cy - sy }
-    : boundsFromCorners(sx, sy, cx, cy)
+  return { a: { x: sx, y: sy }, b: { x: cx, y: cy } }
 }
 
-function buildNode(kind: ShapeKind, bounds: Bounds, raw: Bounds): DesignNode {
+/**
+ * The gesture's bounding box — ALWAYS unsigned, for every kind.
+ *
+ * The line used to get a signed box here (min corner, but signed width/height).
+ * Every consumer reads it as a normal AABB, so that one inconsistency produced
+ * four separate bugs: the preview drew a full drag-delta away from the pointer,
+ * an up-left drag was silently discarded by the size guard, snapping saw its
+ * right and bottom edges inverted, and the committed node disagreed with the
+ * preview. Direction now lives in the segment, where it belongs.
+ */
+function boundsOf(segment: DrawSegment): Bounds {
+  return boundsFromCorners(segment.a.x, segment.a.y, segment.b.x, segment.b.y)
+}
+
+function previewBounds(): Bounds {
+  return boundsOf(previewSegment())
+}
+
+function buildNode(kind: ShapeKind, bounds: Bounds, segment: DrawSegment): DesignNode {
   const transform: Partial<Transform> = {
     x: bounds.x,
     y: bounds.y,
@@ -102,39 +138,26 @@ function buildNode(kind: ShapeKind, bounds: Bounds, raw: Bounds): DesignNode {
       return createRect(transform)
     case 'ellipse':
       return createEllipse(transform)
-    case 'triangle':
-      return createTriangle(transform)
     case 'polygon':
-      return createPolygon(transform, {}, 6)
-    case 'star':
-      return createStar(transform, {}, 5, 0.5)
-    case 'line': {
+      return createPolygon(transform)
+    case 'line':
       // A line keeps its true endpoints in local space so direction survives;
-      // the bounding box is only its extent.
-      const x1 = raw.width >= 0 ? 0 : Math.abs(raw.width)
-      const y1 = raw.height >= 0 ? 0 : Math.abs(raw.height)
-      const x2 = raw.width >= 0 ? Math.abs(raw.width) : 0
-      const y2 = raw.height >= 0 ? Math.abs(raw.height) : 0
-      return createLine(
-        {
-          x: Math.min(raw.x, raw.x + raw.width),
-          y: Math.min(raw.y, raw.y + raw.height),
-          width: Math.max(1, Math.abs(raw.width)),
-          height: Math.max(1, Math.abs(raw.height)),
-        },
-        {},
-        { x1, y1, x2, y2 },
-      )
-    }
+      // the bounding box is only its extent. Rebasing the SAME endpoints the
+      // preview drew is what makes Shift-45 and Alt-from-centre reach the
+      // document — they used to stop at the preview.
+      return createLine(transform, {}, {
+        x1: segment.a.x - bounds.x,
+        y1: segment.a.y - bounds.y,
+        x2: segment.b.x - bounds.x,
+        y2: segment.b.y - bounds.y,
+      })
   }
 }
 
 const LABELS: Record<ShapeKind, { label: string; shortcut: string }> = {
   rect: { label: 'Rectangle', shortcut: 'R' },
   ellipse: { label: 'Ellipse', shortcut: 'E' },
-  triangle: { label: 'Triangle', shortcut: 'Y' },
-  polygon: { label: 'Polygon', shortcut: 'G' },
-  star: { label: 'Star', shortcut: 'S' },
+  polygon: { label: 'Polygon', shortcut: 'Y' },
   line: { label: 'Line', shortcut: 'L' },
 }
 
@@ -187,27 +210,24 @@ export function createShapeTool(kind: ShapeKind): Tool {
       const dragged =
         Math.hypot(e.doc.x - draw.start.x, e.doc.y - draw.start.y) * zoom >= DRAG_THRESHOLD_PX
 
-      let bounds = previewBounds()
-      const raw = {
-        x: draw.start.x,
-        y: draw.start.y,
-        width: draw.current.x - draw.start.x,
-        height: draw.current.y - draw.start.y,
-      }
+      let segment = previewSegment()
 
       if (!dragged) {
-        // A plain click drops a default-sized shape centered on the click.
-        bounds = {
-          x: draw.start.x - CLICK_DEFAULT_SIZE / 2,
-          y: draw.start.y - CLICK_DEFAULT_SIZE / 2,
-          width: CLICK_DEFAULT_SIZE,
-          height: CLICK_DEFAULT_SIZE,
-        }
-        raw.width = CLICK_DEFAULT_SIZE
-        raw.height = kind === 'line' ? 0 : CLICK_DEFAULT_SIZE
-        raw.x = bounds.x
-        raw.y = bounds.y
+        // A plain click drops a default-sized shape centered on the click — for
+        // a line, a horizontal one THROUGH the click rather than above it.
+        const half = CLICK_DEFAULT_SIZE / 2
+        segment =
+          kind === 'line'
+            ? {
+                a: { x: draw.start.x - half, y: draw.start.y },
+                b: { x: draw.start.x + half, y: draw.start.y },
+              }
+            : {
+                a: { x: draw.start.x - half, y: draw.start.y - half },
+                b: { x: draw.start.x + half, y: draw.start.y + half },
+              }
       }
+      const bounds = boundsOf(segment)
 
       draw.active = false
       draw.kind = null
@@ -216,7 +236,7 @@ export function createShapeTool(kind: ShapeKind): Tool {
       refreshOverlay()
 
       if (bounds.width < 0.5 && bounds.height < 0.5) return
-      insertNode(buildNode(kind, bounds, raw))
+      insertNode(buildNode(kind, bounds, segment))
       // Match XD: drop back to the selection tool so the new shape can be tweaked.
       setTool('select')
     },
@@ -243,7 +263,5 @@ export function createShapeTool(kind: ShapeKind): Tool {
 
 export const rectangleTool = createShapeTool('rect')
 export const ellipseTool = createShapeTool('ellipse')
-export const triangleTool = createShapeTool('triangle')
 export const polygonTool = createShapeTool('polygon')
-export const starTool = createShapeTool('star')
 export const lineTool = createShapeTool('line')

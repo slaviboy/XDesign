@@ -14,7 +14,7 @@
 
 import { toSvgMatrix, multiply, type Mat2D } from '../geometry/Matrix'
 import type { Bounds } from '../geometry/Bounds'
-import { polygonPath, rectPath, starPath, trianglePath } from '../geometry/ShapeGeometry'
+import { polygonStarPath, rectPath } from '../geometry/ShapeGeometry'
 import { localMatrix, worldMatrix } from '../document/SceneGraph'
 import { toHex } from '../document/color'
 import { gradientId, isGradient, sortedStops } from '../canvas/paint'
@@ -298,14 +298,8 @@ function emitShape(ctx: EmitContext, node: DesignNode): string {
     case 'line':
       element = `<line x1="${round(node.x1, p)}" y1="${round(node.y1, p)}" x2="${round(node.x2, p)}" y2="${round(node.y2, p)}"`
       break
-    case 'triangle':
-      element = `<path d="${trianglePath(width, height, node.cornerRadius)}"`
-      break
     case 'polygon':
-      element = `<path d="${polygonPath(width, height, node.sides, node.cornerRadius)}"`
-      break
-    case 'star':
-      element = `<path d="${starPath(width, height, node.points, node.innerRatio, node.cornerRadius)}"`
+      element = `<path d="${polygonStarPath(width, height, node.sides, node.starRatio, node.cornerRadius)}"`
       break
     case 'path':
       element = `<path d="${node.d}"`

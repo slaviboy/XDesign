@@ -13,7 +13,9 @@
 import { applyToPoint, invert, type Mat2D, type Vec2 } from '../geometry/Matrix'
 import { pathBounds } from '../geometry/PathUtils'
 import {
+  clearHandle,
   closestSegment,
+  corner,
   deletePoint,
   insertPointAt,
   moveHandle,
@@ -26,14 +28,12 @@ import {
 import { worldMatrix } from '../document/SceneGraph'
 import { transaction, getDoc } from '../state/DocumentStore'
 import { editorStore, refreshOverlay, setEditor } from '../state/EditorStore'
+import type { PointRef } from '../state/EditorStore'
 import type { NodeId } from '../document/types'
 import type { CanvasPointerEvent, ToolContext } from './types'
 
-export interface PointHandleRef {
-  subpath: number
-  index: number
-  kind: 'anchor' | 'in' | 'out'
-}
+/** Alias, so a grab result drops straight into the store with no conversion. */
+export type PointHandleRef = PointRef
 
 interface EditState {
   nodeId: NodeId | null
@@ -147,7 +147,7 @@ export function pathEditPointerDown(e: CanvasPointerEvent, ctx: ToolContext): bo
     }
     edit.dragging = grab
     edit.lastLocal = local
-    setEditor({ selectedPointIndices: [grab.index] })
+    setEditor({ selectedPoints: [grab] })
     refreshOverlay()
     return true
   }
@@ -160,8 +160,12 @@ export function pathEditPointerDown(e: CanvasPointerEvent, ctx: ToolContext): bo
       const inserted = insertPointAt(sub, near.index, near.t)
       if (inserted !== null) {
         edit.changed = true
+        // Armed before the commit so the point can be dragged in the SAME
+        // gesture: commitPath can reload edit.subs, which would drop the ref.
+        edit.dragging = { subpath: near.subpath, index: inserted, kind: 'anchor' }
+        edit.lastLocal = local
         commitPath('Insert point')
-        setEditor({ selectedPointIndices: [inserted] })
+        setEditor({ selectedPoints: [{ subpath: near.subpath, index: inserted, kind: 'anchor' }] })
       }
     }
     return true
@@ -200,25 +204,107 @@ export function pathEditKeyDown(e: KeyboardEvent): boolean {
   if (!edit.nodeId) return false
 
   if (e.key === 'Escape') {
-    setEditor({ nodeEditingId: null, selectedPointIndices: [] })
+    setEditor({ nodeEditingId: null, selectedPoints: [] })
     endPathEditing()
     return true
   }
 
   if (e.key === 'Delete' || e.key === 'Backspace') {
-    const indices = editorStore.getState().selectedPointIndices
-    if (indices.length === 0) return false
-    // Delete from the end so earlier indices stay valid.
-    const sorted = [...indices].sort((a, b) => b - a)
-    let removed = false
-    for (const sub of edit.subs) {
-      for (const i of sorted) if (deletePoint(sub, i)) removed = true
+    const refs = editorStore.getState().selectedPoints
+    if (refs.length === 0) return false
+
+    // Grouped BY SUBPATH, and deleted from the end within each, so indices stay
+    // valid and one ring's edit cannot reach into another's.
+    const bySubpath = new Map<number, PointRef[]>()
+    for (const ref of refs) {
+      const list = bySubpath.get(ref.subpath)
+      if (list) list.push(ref)
+      else bySubpath.set(ref.subpath, [ref])
     }
+
+    let removed = false
+    for (const [si, list] of bySubpath) {
+      const sub = edit.subs[si]
+      if (!sub) continue
+      for (const ref of [...list].sort((a, b) => b.index - a.index)) {
+        if (ref.kind !== 'anchor') {
+          // Selecting the end of a direction line and pressing Delete removes
+          // that handle, exactly as XD does — the anchor stays put.
+          clearHandle(sub, ref.index, ref.kind)
+          removed = true
+          continue
+        }
+        // Never let a path be deleted down to nothing: subpathsToPath would emit
+        // an empty string and pathBounds would have no geometry to measure.
+        if (sub.points.length <= 2) continue
+        if (deletePoint(sub, ref.index)) removed = true
+      }
+    }
+
     if (removed) {
       edit.changed = true
       commitPath('Delete point')
-      setEditor({ selectedPointIndices: [] })
+      setEditor({ selectedPoints: [] })
     }
+    return true
+  }
+  return false
+}
+
+/**
+ * Double-click an anchor to convert it corner <-> smooth.
+ *
+ * XD's binding. The existing Alt-click does the same thing and is kept: this
+ * only fires once point editing is already open, so it cannot collide with the
+ * double-click that ENTERS point editing from the selection tool.
+ */
+export function pathEditDoubleClick(e: CanvasPointerEvent, ctx: ToolContext): boolean {
+  if (!edit.nodeId) return false
+  const tolLocal = (GRAB_PX / ctx.viewport().zoom) * localScale()
+  const grab = findGrab(toLocal(e.doc), tolLocal)
+  if (!grab || grab.kind !== 'anchor') return false
+  const sub = edit.subs[grab.subpath]
+  if (!sub) return false
+  togglePointType(sub, grab.index)
+  edit.changed = true
+  commitPath('Convert point')
+  return true
+}
+
+/**
+ * Continue an open path from one of its ends.
+ *
+ * Reuses the whole editing commit path, so the node keeps its id, its style and
+ * its place in the layer tree — the alternative, starting a fresh path that
+ * happens to touch the old one, leaves the user with two objects where they
+ * drew one.
+ */
+export function pathEditExtendAt(e: CanvasPointerEvent, ctx: ToolContext): boolean {
+  if (!edit.nodeId) return false
+  const tolLocal = (GRAB_PX / ctx.viewport().zoom) * localScale()
+  const local = toLocal(e.doc)
+
+  for (let si = 0; si < edit.subs.length; si++) {
+    const sub = edit.subs[si]!
+    if (sub.closed || sub.points.length === 0) continue
+    const head = sub.points[0]!
+    const tail = sub.points[sub.points.length - 1]!
+
+    const atTail = Math.hypot(tail.x - local.x, tail.y - local.y) <= tolLocal
+    const atHead = !atTail && Math.hypot(head.x - local.x, head.y - local.y) <= tolLocal
+    if (!atTail && !atHead) continue
+
+    const point = corner(local.x, local.y)
+    const index = atTail ? sub.points.length : 0
+    if (atTail) sub.points.push(point)
+    else sub.points.unshift(point)
+
+    // Armed so the same press can pull handles out of the new anchor.
+    edit.dragging = { subpath: si, index, kind: 'anchor' }
+    edit.lastLocal = local
+    edit.changed = true
+    commitPath('Extend path')
+    setEditor({ selectedPoints: [{ subpath: si, index, kind: 'anchor' }] })
     return true
   }
   return false

@@ -22,7 +22,7 @@ import { DEFAULT_SETTINGS, type DesignDocument, type DesignNode, type ImageAsset
 import { createDocumentRoot } from '../document/NodeFactory'
 
 export const FORMAT_NAME = 'OfflineDesignDocument'
-export const FORMAT_VERSION = 1
+export const FORMAT_VERSION = 2
 export const FILE_EXTENSION = '.xdesign'
 export const MIME_TYPE = 'application/x-xdesign+zip'
 
@@ -159,6 +159,56 @@ function parseJson(text: string): XDesignFile {
  * intact — losing an afternoon's work to a single bad reference is not an
  * acceptable failure mode.
  */
+/**
+ * Brings a node written by an older build up to the current model.
+ *
+ * The only migration so far is the shape merge: Triangle and Star used to be
+ * their own node types, and are now a polygon with three corners and a polygon
+ * with a star ratio below 1. This runs on the one path every document takes into
+ * memory, so file open and crash recovery are both covered.
+ */
+export function migrateLegacyNode(node: DesignNode): DesignNode {
+  const legacy = node as DesignNode & {
+    points?: number
+    innerRatio?: number
+    sides?: number
+    starRatio?: number
+    cornerRadius?: unknown
+  }
+  const type = node.type as string
+  if (type !== 'triangle' && type !== 'star' && type !== 'polygon') return node
+
+  const sides =
+    type === 'triangle'
+      ? 3
+      : Math.min(100, Math.max(3, Math.round((type === 'star' ? legacy.points : legacy.sides) ?? 3)))
+
+  // The old innerRatio was a fraction of the CIRCUMradius; starRatio is a
+  // fraction of the apothem, which is what makes 100% a plain polygon. Without
+  // this conversion every saved star would visibly change shape on load.
+  let starRatio = 1
+  if (type === 'star') {
+    starRatio = Math.min(1, Math.max(0.01, (legacy.innerRatio ?? 0.5) / Math.cos(Math.PI / sides)))
+  } else if (typeof legacy.starRatio === 'number') {
+    starRatio = Math.min(1, Math.max(0.01, legacy.starRatio))
+  }
+
+  // Destructured out rather than left in place: dead keys would otherwise ride
+  // along into the next save forever.
+  const { points: _points, innerRatio: _innerRatio, ...rest } = legacy
+  void _points
+  void _innerRatio
+  // The layer's own name is kept as the user last saw it — silently renaming
+  // someone's "Star" layer to "Polygon" on load is worse than a stale name.
+  return {
+    ...rest,
+    type: 'polygon',
+    sides,
+    starRatio,
+    cornerRadius: typeof legacy.cornerRadius === 'number' ? legacy.cornerRadius : 0,
+  } as DesignNode
+}
+
 function buildDocument(
   payload: XDesignFile,
   zipped: Record<string, Uint8Array> | null,
@@ -177,7 +227,7 @@ function buildDocument(
 
   const nodes: Record<NodeId, DesignNode> = {}
   for (const node of payload.layers) {
-    if (node && typeof node.id === 'string') nodes[node.id] = node
+    if (node && typeof node.id === 'string') nodes[node.id] = migrateLegacyNode(node)
   }
 
   let rootId = payload.rootId

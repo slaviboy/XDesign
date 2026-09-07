@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { roundedPolygonPath, maxPolygonRadius, polygonPoints, starPoints, trianglePoints, trianglePath, polygonPath, starPath } from '@/geometry/ShapeGeometry'
+import { roundedPolygonPath, maxPolygonRadius, polygonStarPoints, polygonStarPath } from '@/geometry/ShapeGeometry'
 import { pathBounds, pointInPath, pathLength } from '@/geometry/PathUtils'
 import { cornerGeometry, radiusHandlePosition } from '@/tools/RadiusSession'
 import {
@@ -12,7 +12,6 @@ import {
   createEllipse,
   createPolygon,
   createRect,
-  createStar,
 } from '@/document/NodeFactory'
 import { addNode } from '@/document/DocumentModel'
 import { deserializeDocument, serializeDocument } from '@/persistence/FileFormat'
@@ -49,11 +48,11 @@ describe('roundedPolygonPath', () => {
 
   it('reports a sane max radius', () => {
     expect(maxPolygonRadius(square)).toBeCloseTo(50, 3)
-    expect(maxPolygonRadius(polygonPoints(100,100,6))).toBeGreaterThan(0)
+    expect(maxPolygonRadius(polygonStarPoints(100,100,6))).toBeGreaterThan(0)
   })
 
   it('rounds a star, including its reflex inner points', () => {
-    const verts = starPoints(100, 100, 5, 0.5)
+    const verts = polygonStarPoints(100, 100, 5, 0.5)
     const sharp = pathBounds(roundedPolygonPath(verts, 0))
     const d = roundedPolygonPath(verts, 4)
     const b = pathBounds(d)
@@ -68,8 +67,8 @@ describe('roundedPolygonPath', () => {
   })
 
   it('rounds a triangle symmetrically about its centre', () => {
-    const sharp = pathBounds(roundedPolygonPath(trianglePoints(80,60), 0))
-    const b = pathBounds(roundedPolygonPath(trianglePoints(80,60), 8))
+    const sharp = pathBounds(roundedPolygonPath(polygonStarPoints(80,60,3), 0))
+    const b = pathBounds(roundedPolygonPath(polygonStarPoints(80,60,3), 8))
     expect(b.width).toBeLessThan(sharp.width)
     // Symmetric: the inset is the same on both sides.
     const left = b.x - sharp.x
@@ -107,10 +106,10 @@ describe('roundedPolygonPath', () => {
   })
 
   it('shape helpers pass the radius through', () => {
-    expect(trianglePath(80,60,0)).not.toContain('A')
-    expect(trianglePath(80,60,8)).toContain('A')
-    expect(polygonPath(100,100,6,6)).toContain('A')
-    expect(starPath(100,100,5,0.5,4)).toContain('A')
+    expect(polygonStarPath(80,60,3,1,0)).not.toContain('A')
+    expect(polygonStarPath(80,60,3,1,8)).toContain('A')
+    expect(polygonStarPath(100,100,6,1,6)).toContain('A')
+    expect(polygonStarPath(100,100,5,0.5,4)).toContain('A')
   })
 })
 
@@ -138,7 +137,7 @@ describe('corner geometry for radius handles', () => {
   })
 
   it('a polygon vertex uses its angle bisector', () => {
-    const poly = createPolygon({ x: 0, y: 0, width: 100, height: 100 }, {}, 6)
+    const poly = createPolygon({ x: 0, y: 0, width: 100, height: 100 }, {}, 6, 1)
     const geo = cornerGeometry(poly, 'vertex')!
     // First vertex of a polygon sits at the top, so the bisector points down.
     expect(geo.point.y).toBeCloseTo(0, 4)
@@ -149,8 +148,8 @@ describe('corner geometry for radius handles', () => {
   })
 
   it('a star tip is sharper than a hexagon vertex', () => {
-    const star = createStar({ x: 0, y: 0, width: 100, height: 100 }, {}, 5, 0.4)
-    const poly = createPolygon({ x: 0, y: 0, width: 100, height: 100 }, {}, 6)
+    const star = createPolygon({ x: 0, y: 0, width: 100, height: 100 }, {}, 5, 0.4)
+    const poly = createPolygon({ x: 0, y: 0, width: 100, height: 100 }, {}, 6, 1)
     // A sharper vertex has a smaller half-angle, so a given handle distance
     // maps to a smaller radius — which is what sinHalf encodes.
     expect(cornerGeometry(star, 'vertex')!.sinHalf).toBeLessThan(
@@ -179,7 +178,7 @@ describe('corner geometry for radius handles', () => {
 describe('corner radius typing', () => {
   it('classifies which shapes round, and how', () => {
     expect(supportsCornerRadius(createRect({ width: 10, height: 10 }))).toBe(true)
-    expect(supportsCornerRadius(createStar({ width: 10, height: 10 }))).toBe(true)
+    expect(supportsCornerRadius(createPolygon({ width: 10, height: 10 }, {}, 5, 0.5))).toBe(true)
     expect(supportsCornerRadius(createEllipse({ width: 10, height: 10 }))).toBe(false)
 
     // A box has four addressable corners; a polygon has one scalar.
@@ -192,7 +191,7 @@ describe('corner radius typing', () => {
     rect.cornerRadius = [7, 7, 7, 7]
     expect(cornerRadiusOf(rect)).toBe(7)
 
-    const star = createStar({ width: 10, height: 10 })
+    const star = createPolygon({ width: 10, height: 10 }, {}, 5, 0.5)
     star.cornerRadius = 3
     expect(cornerRadiusOf(star)).toBe(3)
     expect(cornerRadiusOf(createEllipse({ width: 10, height: 10 }))).toBe(0)
@@ -200,7 +199,7 @@ describe('corner radius typing', () => {
 
   it('round-trips a polygon radius through the file format', () => {
     const doc = createDocument('R', false)
-    const poly = createPolygon({ width: 100, height: 100 }, {}, 7)
+    const poly = createPolygon({ width: 100, height: 100 }, {}, 7, 0.4)
     poly.cornerRadius = 9
     addNode(doc, poly, doc.rootId)
 
@@ -210,6 +209,7 @@ describe('corner radius typing', () => {
     if (node.type === 'polygon') {
       expect(node.cornerRadius).toBe(9)
       expect(node.sides).toBe(7)
+      expect(node.starRatio).toBe(0.4)
     }
   })
 })

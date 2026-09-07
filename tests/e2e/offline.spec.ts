@@ -33,7 +33,7 @@ test('boots and works after a hard reload with the network cut', async ({ page, 
 
   // 4. The whole editor must still be there and functional.
   await expect(page.locator('.topbar')).toBeVisible()
-  await expect(page.locator('.toolbar .tool-button')).toHaveCount(13)
+  await expect(page.locator('.toolbar .tool-button')).toHaveCount(11)
   await expect(page.locator('[data-node-type="artboard"]')).toHaveCount(1)
 
   await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 340, y: 300 })
@@ -41,8 +41,8 @@ test('boots and works after a hard reload with the network cut', async ({ page, 
   await setField(page, 'W', 275)
   expect(await readField(page, 'W')).toBeCloseTo(275, 0)
 
-  await drawShape(page, 'star', { x: 400, y: 200 }, { x: 500, y: 300 })
-  await expect(nodesOfType(page, 'star')).toHaveCount(1)
+  await drawShape(page, 'polygon', { x: 400, y: 200 }, { x: 500, y: 300 })
+  await expect(nodesOfType(page, 'polygon')).toHaveCount(1)
 
   await selectTool(page, 'pen')
   await page.locator(CANVAS).click({ position: { x: 250, y: 420 } })

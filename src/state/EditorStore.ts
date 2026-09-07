@@ -11,13 +11,18 @@ import { subscribeWithSelector } from 'zustand/middleware'
 import type { NodeId } from '../document/types'
 import type { Bounds } from '../geometry/Bounds'
 
+/** One path point (or one of its two handles), addressed unambiguously. */
+export interface PointRef {
+  subpath: number
+  index: number
+  kind: 'anchor' | 'in' | 'out'
+}
+
 export type ToolId =
   | 'select'
   | 'rect'
   | 'ellipse'
-  | 'triangle'
   | 'polygon'
-  | 'star'
   | 'line'
   | 'pen'
   | 'pencil'
@@ -83,7 +88,15 @@ export interface EditorState {
   gradientEditing: { nodeId: NodeId; target: 'fill' | 'stroke' } | null
   /** Path nodes whose Bezier points are shown for direct editing. */
   nodeEditingId: NodeId | null
-  selectedPointIndices: number[]
+  /**
+   * Selected path points, each carrying its SUBPATH as well as its index.
+   *
+   * The subpath is load-bearing, not decoration: a bare index meant Delete
+   * removed that index from every subpath at once, which quietly punched the
+   * hole out of a boolean-subtract donut, and made the selected highlight
+   * appear on the matching point of every ring.
+   */
+  selectedPoints: PointRef[]
 
   viewport: Viewport
   canvasSize: { width: number; height: number }
@@ -129,7 +142,7 @@ export const editorStore = createStore<EditorState>()(
     penTargetId: null,
     gradientEditing: null,
     nodeEditingId: null,
-    selectedPointIndices: [],
+    selectedPoints: [],
 
     viewport: { ...DEFAULT_VIEWPORT },
     canvasSize: { width: 1200, height: 800 },
@@ -227,7 +240,7 @@ export function setSelection(ids: readonly NodeId[]): void {
   // Drop the explicit corner mode: the new selection derives its own from data.
   editorStore.setState({
     selection: [...ids],
-    selectedPointIndices: [],
+    selectedPoints: [],
     cornerRadiusMode: null,
   })
 }
@@ -262,7 +275,7 @@ export function clearSelection(): void {
     selection: [],
     editingContext: null,
     nodeEditingId: null,
-    selectedPointIndices: [],
+    selectedPoints: [],
   })
 }
 

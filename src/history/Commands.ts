@@ -42,6 +42,7 @@ import {
   isEffectivelyLocked,
   worldMatrix,
 } from '../document/SceneGraph'
+import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
 import { createArtboard, createGroup } from '../document/NodeFactory'
 import { current, isDraft } from 'immer'
 import { invert, multiply, rotationAbout, type Mat2D } from '../geometry/Matrix'
@@ -551,8 +552,9 @@ export function setCornerRadiusAt(
   )
 }
 
+/** Corner count and star ratio, the two parameters XD exposes for a polygon. */
 export function setShapeParam(
-  patch: { sides?: number; points?: number; innerRatio?: number },
+  patch: { sides?: number; starRatio?: number },
   coalesceKey = 'shape-param',
 ): boolean {
   const ids = editableSelection()
@@ -564,19 +566,14 @@ export function setShapeParam(
       for (const id of ids) {
         const node = draft.nodes[id]
         if (!node) continue
-        if (node.type === 'polygon' && patch.sides !== undefined) {
-          node.sides = Math.max(3, Math.round(patch.sides))
+        if (node.type !== 'polygon') continue
+        if (patch.sides !== undefined) {
+          node.sides = Math.min(MAX_SIDES, Math.max(MIN_SIDES, Math.round(patch.sides)))
           touched = true
         }
-        if (node.type === 'star') {
-          if (patch.points !== undefined) {
-            node.points = Math.max(3, Math.round(patch.points))
-            touched = true
-          }
-          if (patch.innerRatio !== undefined) {
-            node.innerRatio = Math.min(1, Math.max(0.01, patch.innerRatio))
-            touched = true
-          }
+        if (patch.starRatio !== undefined) {
+          node.starRatio = Math.min(1, Math.max(0.01, patch.starRatio))
+          touched = true
         }
       }
       return touched ? undefined : false

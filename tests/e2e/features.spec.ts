@@ -155,21 +155,21 @@ test('double-click enters point editing on a path', async ({ page }) => {
 
 test('copy, paste and duplicate preserve the object', async ({ page }) => {
   await openApp(page)
-  await drawShape(page, 'star', { x: 200, y: 200 }, { x: 300, y: 300 })
+  await drawShape(page, 'polygon', { x: 200, y: 200 }, { x: 300, y: 300 })
   await selectTool(page, 'select')
-  await nodesOfType(page, 'star').first().click({ force: true })
+  await nodesOfType(page, 'polygon').first().click({ force: true })
 
   await press(page, 'd')
-  await expect(nodesOfType(page, 'star')).toHaveCount(2)
+  await expect(nodesOfType(page, 'polygon')).toHaveCount(2)
 
   await press(page, 'c')
   await press(page, 'v')
-  await expect(nodesOfType(page, 'star')).toHaveCount(3)
+  await expect(nodesOfType(page, 'polygon')).toHaveCount(3)
 
   await press(page, 'z')
-  await expect(nodesOfType(page, 'star')).toHaveCount(2)
+  await expect(nodesOfType(page, 'polygon')).toHaveCount(2)
   await page.keyboard.press(`${modifier()}+Shift+z`)
-  await expect(nodesOfType(page, 'star')).toHaveCount(3)
+  await expect(nodesOfType(page, 'polygon')).toHaveCount(3)
 })
 
 test('undo and redo restore transforms exactly', async ({ page }) => {
@@ -202,15 +202,15 @@ test('arrow keys nudge, and the run is a single undo step', async ({ page }) => 
 
 test('flip is non-destructive and reversible', async ({ page }) => {
   await openApp(page)
-  await drawShape(page, 'triangle', { x: 200, y: 200 }, { x: 320, y: 300 })
-  const before = await nodesOfType(page, 'triangle').first().getAttribute('transform')
+  await drawShape(page, 'polygon', { x: 200, y: 200 }, { x: 320, y: 300 })
+  const before = await nodesOfType(page, 'polygon').first().getAttribute('transform')
 
   await page.locator('button[aria-label="Flip horizontal"]').click()
-  const flipped = await nodesOfType(page, 'triangle').first().getAttribute('transform')
+  const flipped = await nodesOfType(page, 'polygon').first().getAttribute('transform')
   expect(flipped).not.toBe(before)
 
   await page.locator('button[aria-label="Flip horizontal"]').click()
-  const restored = await nodesOfType(page, 'triangle').first().getAttribute('transform')
+  const restored = await nodesOfType(page, 'polygon').first().getAttribute('transform')
   // Flipping twice returns to the original matrix, not an accumulated one.
   const nums = (s: string | null) => (s ?? '').match(/-?\d+(\.\d+)?/g)!.map(Number)
   nums(restored).forEach((v, i) => expect(v).toBeCloseTo(nums(before)[i]!, 3))
@@ -331,17 +331,75 @@ test('stroke alignment, caps and dashes reach the rendered SVG', async ({ page }
   expect(await path.getAttribute('stroke-dasharray')).toBe('6 3')
 })
 
-test('polygon sides and star points are editable after drawing', async ({ page }) => {
+test('one polygon tool covers triangle, polygon and star', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'polygon', { x: 200, y: 200 }, { x: 320, y: 320 })
-  await setField(page, 'Sides', 8)
-  const d = await nodesOfType(page, 'polygon').locator('path').first().getAttribute('d')
-  expect((d!.match(/L/g) ?? []).length).toBe(7)
+  const shape = nodesOfType(page, 'polygon').locator('path').first()
 
-  await drawShape(page, 'star', { x: 400, y: 200 }, { x: 520, y: 320 })
-  await setField(page, 'Pts', 7)
-  const sd = await nodesOfType(page, 'star').locator('path').first().getAttribute('d')
-  expect((sd!.match(/L/g) ?? []).length).toBe(13)
+  // The tool draws a triangle: three corners, so two L commands after the M.
+  expect(await readField(page, 'Corners')).toBe(3)
+  expect(await readField(page, 'Star')).toBe(100)
+  expect(((await shape.getAttribute('d'))!.match(/L/g) ?? []).length).toBe(2)
+
+  await setField(page, 'Corners', 8)
+  expect(((await shape.getAttribute('d'))!.match(/L/g) ?? []).length).toBe(7)
+
+  // Dropping the star ratio makes it a star, with an inner vertex per corner.
+  await setField(page, 'Star', 40)
+  expect(((await shape.getAttribute('d'))!.match(/L/g) ?? []).length).toBe(15)
+
+  // And it is reversible: 100% is the plain polygon again, not a 16-gon.
+  await setField(page, 'Star', 100)
+  expect(((await shape.getAttribute('d'))!.match(/L/g) ?? []).length).toBe(7)
+})
+
+test('a polygon fills its selection frame, with no dead margin', async ({ page }) => {
+  await openApp(page)
+  // A hexagon used to reach only 86.6% of its frame's width, so the frame, the
+  // W/H readout and the export crop all claimed area the shape did not occupy.
+  await drawShape(page, 'polygon', { x: 200, y: 200 }, { x: 400, y: 380 })
+  await setField(page, 'Corners', 6)
+
+  // getBBox is the fill outline in the node's own local units, with no stroke
+  // padding — so it compares directly against the W/H the inspector reports,
+  // which is exactly the box the frame, align/distribute and export all use.
+  const box = await nodesOfType(page, 'polygon')
+    .locator('path')
+    .first()
+    .evaluate((el) => {
+      const b = (el as unknown as SVGGraphicsElement).getBBox()
+      return { x: b.x, y: b.y, width: b.width, height: b.height }
+    })
+
+  expect(box.x).toBeCloseTo(0, 3)
+  expect(box.y).toBeCloseTo(0, 3)
+  expect(box.width).toBeCloseTo(await readField(page, 'W'), 1)
+  expect(box.height).toBeCloseTo(await readField(page, 'H'), 1)
+})
+
+test('the star ratio handle turns a polygon into a star without moving the frame', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'polygon', { x: 220, y: 200 }, { x: 420, y: 400 })
+  await setField(page, 'Corners', 5)
+
+  const w0 = await readField(page, 'W')
+  const h0 = await readField(page, 'H')
+  const handle = (await page.locator('[data-handle="star-ratio"]').boundingBox())!
+  const frame = (await page.locator('.selection-frame').boundingBox())!
+  const grab = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 }
+  const centre = { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 }
+
+  await page.mouse.move(grab.x, grab.y)
+  await page.mouse.down()
+  await page.mouse.move((grab.x + centre.x) / 2, (grab.y + centre.y) / 2, { steps: 10 })
+  await page.mouse.up()
+
+  expect(await readField(page, 'Star')).toBeLessThan(100)
+  // The frame is set by the outer ring alone, so it must not have moved.
+  expect(await readField(page, 'W')).toBeCloseTo(w0, 1)
+  expect(await readField(page, 'H')).toBeCloseTo(h0, 1)
+  const d = (await nodesOfType(page, 'polygon').locator('path').first().getAttribute('d'))!
+  expect((d.match(/L/g) ?? []).length).toBe(9)
 })
 
 test('line tool draws a real line with editable endpoints', async ({ page }) => {
@@ -506,7 +564,7 @@ test('Prototype and Share are honestly disabled, not fake', async ({ page }) => 
 
 test('every tool in the rail activates', async ({ page }) => {
   await openApp(page)
-  const tools = ['select', 'rect', 'ellipse', 'triangle', 'polygon', 'star', 'line',
+  const tools = ['select', 'rect', 'ellipse', 'polygon', 'line',
                  'pen', 'pencil', 'text', 'artboard', 'zoom', 'hand']
   for (const tool of tools) {
     await selectTool(page, tool)
@@ -517,7 +575,7 @@ test('every tool in the rail activates', async ({ page }) => {
 test('every tool keyboard shortcut selects its tool', async ({ page }) => {
   await openApp(page)
   const map: Record<string, string> = {
-    v: 'select', r: 'rect', e: 'ellipse', y: 'triangle', g: 'polygon', s: 'star',
+    v: 'select', r: 'rect', e: 'ellipse', y: 'polygon',
     l: 'line', p: 'pen', n: 'pencil', t: 'text', a: 'artboard', z: 'zoom', h: 'hand',
   }
   for (const [key, tool] of Object.entries(map)) {

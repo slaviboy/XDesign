@@ -19,13 +19,9 @@ import { applyToPoint, invert, type Mat2D, type Vec2 } from '../geometry/Matrix'
 import {
   ellipsePath,
   maxPolygonRadius,
-  polygonPath,
-  polygonPoints,
+  polygonStarPath,
+  polygonStarPoints,
   rectPath,
-  starPath,
-  starPoints,
-  trianglePath,
-  trianglePoints,
 } from '../geometry/ShapeGeometry'
 import { isEffectivelyLocked, worldMatrix } from '../document/SceneGraph'
 import { transaction } from '../state/DocumentStore'
@@ -146,9 +142,7 @@ export function cornerGeometry(node: DesignNode, corner: RadiusCorner): CornerGe
 function polygonVertices(node: DesignNode): Vec2[] | null {
   const { width, height } = node.transform
   switch (node.type) {
-    case 'triangle': return trianglePoints(width, height)
-    case 'polygon': return polygonPoints(width, height, node.sides)
-    case 'star': return starPoints(width, height, node.points, node.innerRatio)
+    case 'polygon': return polygonStarPoints(width, height, node.sides, node.starRatio)
     default: return null
   }
 }
@@ -214,9 +208,8 @@ export function beginRadiusDrag(
           : [radius, radius, radius, radius]
         return rectPath(width, height, radii)
       }
-      case 'triangle': return trianglePath(width, height, radius)
-      case 'polygon': return polygonPath(width, height, node.sides, radius)
-      case 'star': return starPath(width, height, node.points, node.innerRatio, radius)
+      case 'polygon':
+        return polygonStarPath(width, height, node.sides, node.starRatio, radius)
       default: return ellipsePath(width, height)
     }
   }

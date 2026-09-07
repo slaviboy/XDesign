@@ -164,8 +164,8 @@ test('TEST 4 — group of mixed shapes rotates and ungroups correctly', async ({
   await openApp(page)
   await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 260, y: 250 })
   await drawShape(page, 'ellipse', { x: 280, y: 200 }, { x: 340, y: 250 })
-  await drawShape(page, 'triangle', { x: 360, y: 200 }, { x: 420, y: 250 })
-  await drawShape(page, 'star', { x: 440, y: 200 }, { x: 500, y: 250 })
+  await drawShape(page, 'polygon', { x: 360, y: 200 }, { x: 420, y: 250 })
+  await drawShape(page, 'polygon', { x: 440, y: 200 }, { x: 500, y: 250 })
   await drawShape(page, 'pen', { x: 200, y: 300 }, { x: 260, y: 300 })
 
   await selectTool(page, 'select')
@@ -184,8 +184,7 @@ test('TEST 4 — group of mixed shapes rotates and ungroups correctly', async ({
   // Every child survived the round trip.
   await expect(nodesOfType(page, 'rect')).toHaveCount(1)
   await expect(nodesOfType(page, 'ellipse')).toHaveCount(1)
-  await expect(nodesOfType(page, 'triangle')).toHaveCount(1)
-  await expect(nodesOfType(page, 'star')).toHaveCount(1)
+  await expect(nodesOfType(page, 'polygon')).toHaveCount(2)
 })
 
 test('TEST 5 — layer ordering, hide and lock behave correctly', async ({ page }) => {
@@ -352,8 +351,8 @@ test('runs with no network at all', async ({ page, context }) => {
   // The editor keeps working with the network cut.
   await setField(page, 'W', 250)
   expect(await readField(page, 'W')).toBeCloseTo(250, 0)
-  await drawShape(page, 'star', { x: 400, y: 200 }, { x: 480, y: 280 })
-  await expect(nodesOfType(page, 'star')).toHaveCount(1)
+  await drawShape(page, 'polygon', { x: 400, y: 200 }, { x: 480, y: 280 })
+  await expect(nodesOfType(page, 'polygon')).toHaveCount(1)
 
   expect(attempted, `unexpected external requests: ${attempted.join(', ')}`).toHaveLength(0)
 })

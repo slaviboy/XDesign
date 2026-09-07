@@ -31,14 +31,11 @@ test('radius handles appear inside every roundable shape', async ({ page }) => {
   // A box has four independently reachable corners.
   await expect(page.locator('[data-handle="radius"]')).toHaveCount(4)
 
-  for (const shape of ['triangle', 'polygon', 'star']) {
-    await page.keyboard.press('Escape')
-    await drawShape(page, shape, { x: 600, y: 200 }, { x: 800, y: 400 })
-    await selectTool(page, 'select')
-    // A polygon's vertices are generated, so one handle drives one scalar.
-    await expect(page.locator('[data-handle="radius"]')).toHaveCount(1)
-    await page.keyboard.press('Delete')
-  }
+  await page.keyboard.press('Escape')
+  await drawShape(page, 'polygon', { x: 600, y: 200 }, { x: 800, y: 400 })
+  await selectTool(page, 'select')
+  // A polygon's vertices are generated, so one handle drives one scalar.
+  await expect(page.locator('[data-handle="radius"]')).toHaveCount(1)
 })
 
 test('ellipses and text have no radius handle', async ({ page }) => {

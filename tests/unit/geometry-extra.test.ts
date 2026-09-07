@@ -6,9 +6,9 @@ import { describe, it, expect } from 'vitest'
 import { parseHex, toHex, parseCssColor, rgbToHsv, hsvToRgb, rgbToHsl, hslToRgb, toCss, luminance, mixRgba } from '@/document/color'
 import { boundsFromPoints, contains, intersects, transformBounds, union, roundOut, fitInto, inflate, containsPoint } from '@/geometry/Bounds'
 import { rotation, translation, compose } from '@/geometry/Matrix'
-import { rectPath, ellipsePath, starPath, polygonPath, trianglePath, simplifyPoints, smoothPolylineToPath } from '@/geometry/ShapeGeometry'
+import { rectPath, ellipsePath, polygonStarPath, simplifyPoints, smoothPolylineToPath } from '@/geometry/ShapeGeometry'
 import { pathBounds, pathRenderBounds, strokeInflate, pathLength, pointAtLength, reversePath, splitSubpaths, toCubicSegments, distanceToPath } from '@/geometry/PathUtils'
-import { pathToSubpaths, subpathsToPath, insertPointAt, deletePoint, togglePointType, isSmooth, closestSegment, corner } from '@/geometry/PathPoints'
+import { pathToSubpaths, subpathsToPath, insertPointAt, deletePoint, togglePointType, isSmooth, closestSegment, corner, clearHandle } from '@/geometry/PathPoints'
 import { computeSnap, candidatesFromBounds, snapToGrid, snapValue } from '@/geometry/Snapping'
 
 describe('colour', () => {
@@ -119,10 +119,39 @@ describe('shape geometry', () => {
     expect(b.height).toBeCloseTo(60, 1)
   })
 
+  it('fills its bounding box exactly, for every corner count', () => {
+    // A regular n-gon inscribed in a circle only touches that circle at its
+    // vertices, so generating straight into the box left dead margin between the
+    // shape and its own selection frame for every n not divisible by 4 — a
+    // hexagon reached 86.6% of the width, a pentagon 90.5% of the height.
+    for (let n = 3; n <= 12; n++) {
+      const b = pathBounds(polygonStarPath(100, 100, n))
+      expect([n, b.x, b.y, b.width, b.height].map((v) => Math.round(v * 1e4) / 1e4))
+        .toEqual([n, 0, 0, 100, 100])
+    }
+  })
+
+  it('a star fills the same box as its polygon, at every ratio', () => {
+    // The bounds come from the OUTER ring alone, which is what stops the frame
+    // jumping while the Star Ratio handle is dragged.
+    for (const ratio of [1, 0.8, 0.5, 0.2, 0.01]) {
+      const b = pathBounds(polygonStarPath(100, 100, 5, ratio))
+      expect([ratio, b.x, b.y, b.width, b.height].map((v) => Math.round(v * 1e4) / 1e4))
+        .toEqual([ratio, 0, 0, 100, 100])
+    }
+  })
+
+  it('a full star ratio is the plain polygon, not a 2n-gon', () => {
+    // Ratio 1 puts every inner vertex on an edge midpoint, so the outline is
+    // identical and the collinear vertices are dropped.
+    expect(polygonStarPath(100, 100, 5, 1)).toBe(polygonStarPath(100, 100, 5))
+  })
+
   it('produces polygons and stars with the right vertex counts', () => {
-    expect(toCubicSegments(polygonPath(100, 100, 6)).filter((s) => s[0] === 'L')).toHaveLength(5)
-    expect(toCubicSegments(starPath(100, 100, 5, 0.5)).filter((s) => s[0] === 'L')).toHaveLength(9)
-    expect(pathBounds(trianglePath(80, 60))).toEqual({ x: 0, y: 0, width: 80, height: 60 })
+    expect(toCubicSegments(polygonStarPath(100, 100, 6)).filter((s) => s[0] === 'L')).toHaveLength(5)
+    expect(toCubicSegments(polygonStarPath(100, 100, 5, 0.5)).filter((s) => s[0] === 'L')).toHaveLength(9)
+    // Three corners IS the triangle, and it still fills its box exactly.
+    expect(pathBounds(polygonStarPath(80, 60, 3))).toEqual({ x: 0, y: 0, width: 80, height: 60 })
   })
 
   it('simplifies a noisy trail', () => {
@@ -240,6 +269,21 @@ describe('path points', () => {
   it('builds a subpath from bare corners', () => {
     const d = subpathsToPath([{ points: [corner(0, 0), corner(10, 0)], closed: false }])
     expect(d).toBe('M0 0 L10 0')
+  })
+
+  it('clearHandle drops one side and leaves the other', () => {
+    const subs = pathToSubpaths('M0 0 C 10 20 30 20 40 0 L60 0')
+    const sub = subs[0]!
+    expect(sub.points[1]!.inX).not.toBeNull()
+    expect(sub.points[1]!.outX).toBeNull()
+
+    const withOut = pathToSubpaths('M0 0 C 10 20 30 20 40 0 C 50 -20 70 -20 80 0')[0]!
+    expect(withOut.points[1]!.inX).not.toBeNull()
+    expect(withOut.points[1]!.outX).not.toBeNull()
+    clearHandle(withOut, 1, 'out')
+    // The incoming curve is untouched; only the next segment straightens.
+    expect(withOut.points[1]!.outX).toBeNull()
+    expect(withOut.points[1]!.inX).not.toBeNull()
   })
 })
 

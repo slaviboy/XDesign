@@ -11,13 +11,14 @@ import { memo } from 'react'
 import { docToScreen } from './Viewport'
 import {
   ellipsePath,
-  polygonPath,
+  polygonStarPath,
   rectPath,
-  starPath,
-  trianglePath,
 } from '../geometry/ShapeGeometry'
 import { transformPath } from '../geometry/PathUtils'
-import { subpathToPath } from '../geometry/PathPoints'
+import { corner, subpathToPath } from '../geometry/PathPoints'
+import {
+  POLYGON_DEFAULT_SIDES, POLYGON_DEFAULT_STAR_RATIO,
+} from '../document/NodeFactory'
 import { getDrawPreview } from '../tools/ShapeTools'
 import { getPenPreview } from '../tools/PenTool'
 import { getPencilPreview } from '../tools/PencilTool'
@@ -48,28 +49,56 @@ export const ToolOverlay = memo(function ToolOverlay() {
 
   return (
     <g className="tool-overlay" pointerEvents="none">
-      {shape && <ShapePreview bounds={toScreenBox(shape.bounds)} kind={shape.kind} />}
+      {shape && (
+        <ShapePreview
+          bounds={toScreenBox(shape.bounds)}
+          kind={shape.kind}
+          segment={{
+            a: docToScreen(viewport, shape.segment.a),
+            b: docToScreen(viewport, shape.segment.b),
+          }}
+        />
+      )}
 
       {pen && (
         <g className="pen-preview">
           <path d={screenPath(subpathToPath(pen.sub), viewport)} className="pen-path" />
           {pen.hover && pen.sub.points.length > 0 && (
-            <line
+            // The pending segment as the CURVE it will actually be, not a
+            // straight line to the pointer: subpathToPath already emits C when
+            // the last anchor has an outgoing handle and L when it does not, so
+            // what you see is what gets committed.
+            <path
               className="pen-rubber"
-              {...rubberBand(pen.sub.points[pen.sub.points.length - 1]!, pen.hover, viewport)}
+              d={screenPath(
+                subpathToPath({
+                  points: [pen.sub.points[pen.sub.points.length - 1]!, corner(pen.hover.x, pen.hover.y)],
+                  closed: false,
+                }),
+                viewport,
+              )}
             />
           )}
           {pen.sub.points.map((p, i) => {
             const s = docToScreen(viewport, p)
+            // Handle arms while drawing, so a curve can be judged before the
+            // mouse comes up.
+            const hIn = p.inX !== null && p.inY !== null ? docToScreen(viewport, { x: p.inX, y: p.inY }) : null
+            const hOut = p.outX !== null && p.outY !== null ? docToScreen(viewport, { x: p.outX, y: p.outY }) : null
             return (
-              <rect
-                key={i}
-                className={i === 0 ? 'anchor-point first' : 'anchor-point'}
-                x={s.x - 3.5}
-                y={s.y - 3.5}
-                width={7}
-                height={7}
-              />
+              <g key={i}>
+                {hIn && <line className="handle-arm" x1={s.x} y1={s.y} x2={hIn.x} y2={hIn.y} />}
+                {hOut && <line className="handle-arm" x1={s.x} y1={s.y} x2={hOut.x} y2={hOut.y} />}
+                {hIn && <circle className="bezier-handle" cx={hIn.x} cy={hIn.y} r={3.5} />}
+                {hOut && <circle className="bezier-handle" cx={hOut.x} cy={hOut.y} r={3.5} />}
+                <rect
+                  className={i === 0 ? 'anchor-point first' : 'anchor-point'}
+                  x={s.x - 3.5}
+                  y={s.y - 3.5}
+                  width={7}
+                  height={7}
+                />
+              </g>
             )
           })}
         </g>
@@ -93,12 +122,6 @@ export const ToolOverlay = memo(function ToolOverlay() {
   )
 })
 
-function rubberBand(from: { x: number; y: number }, to: { x: number; y: number }, v: Viewport) {
-  const a = docToScreen(v, from)
-  const b = docToScreen(v, to)
-  return { x1: a.x, y1: a.y, x2: b.x, y2: b.y }
-}
-
 function screenPath(d: string, v: Viewport): string {
   return transformPath(d, [v.zoom, 0, 0, v.zoom, v.x, v.y])
 }
@@ -115,16 +138,36 @@ function PreviewRect({ bounds, className }: { bounds: Bounds; className: string 
   )
 }
 
-function ShapePreview({ bounds, kind }: { bounds: Bounds; kind: string }) {
+function ShapePreview({
+  bounds,
+  kind,
+  segment,
+}: {
+  bounds: Bounds
+  kind: string
+  segment: { a: { x: number; y: number }; b: { x: number; y: number } }
+}) {
+  // A line is drawn from its own endpoints, not from a box: a box says how big
+  // the drag was but not which way round it runs, and reconstructing direction
+  // from a signed width/height is what used to send the preview a full drag
+  // delta away from the pointer.
+  if (kind === 'line') {
+    return (
+      <path
+        className="shape-preview"
+        d={`M${segment.a.x} ${segment.a.y} L${segment.b.x} ${segment.b.y}`}
+      />
+    )
+  }
+
   const w = Math.abs(bounds.width)
   const h = Math.abs(bounds.height)
   let d: string
   switch (kind) {
     case 'ellipse': d = ellipsePath(w, h); break
-    case 'triangle': d = trianglePath(w, h); break
-    case 'polygon': d = polygonPath(w, h, 6); break
-    case 'star': d = starPath(w, h, 5, 0.5); break
-    case 'line': d = `M0 0 L${bounds.width} ${bounds.height}`; break
+    // The preview must draw what the tool will actually create, so it takes the
+    // same defaults createPolygon does rather than its own hard-coded pair.
+    case 'polygon': d = polygonStarPath(w, h, POLYGON_DEFAULT_SIDES, POLYGON_DEFAULT_STAR_RATIO); break
     default: d = rectPath(w, h, 0)
   }
   return (

@@ -80,22 +80,6 @@ export function ellipsePath(width: number, height: number): string {
   return `M0 ${r(cy)} A${r(rx)} ${r(ry)} 0 1 0 ${r(width)} ${r(cy)} A${r(rx)} ${r(ry)} 0 1 0 0 ${r(cy)} Z`
 }
 
-/** Vertices of an isosceles triangle: apex centered on top, base along the bottom. */
-export function trianglePoints(width: number, height: number): Vec2[] {
-  const w = Math.max(0, width)
-  const h = Math.max(0, height)
-  return [
-    { x: w / 2, y: 0 },
-    { x: w, y: h },
-    { x: 0, y: h },
-  ]
-}
-
-/** Isosceles triangle: apex centered on the top edge, base along the bottom. */
-export function trianglePath(width: number, height: number, radius = 0): string {
-  const points = trianglePoints(width, height)
-  return radius > 0 ? roundedPolygonPath(points, radius) : pointsToClosedPath(points)
-}
 
 /**
  * Round every vertex of a closed polygon by `radius`.
@@ -194,61 +178,158 @@ export function maxPolygonRadius(points: readonly Vec2[]): number {
   return Number.isFinite(limit) ? Math.max(0, limit) : 0
 }
 
-/** Vertices of a regular n-gon inscribed in the local box, first point at top. */
-export function polygonPoints(width: number, height: number, sides: number): Vec2[] {
-  const n = Math.max(3, Math.round(sides))
-  const rx = Math.max(0, width) / 2
-  const ry = Math.max(0, height) / 2
-  const pts: Vec2[] = []
+/** Corner count limits, matching XD's Polygon tool. */
+export const MIN_SIDES = 3
+export const MAX_SIDES = 100
+
+function clampSides(sides: number): number {
+  return Math.min(MAX_SIDES, Math.max(MIN_SIDES, Math.round(sides)))
+}
+
+function clampStarRatio(ratio: number): number {
+  return Math.min(1, Math.max(0.01, ratio))
+}
+
+/**
+ * Maps the unit circle the vertices are generated on onto the local box.
+ *
+ * The map is measured from the OUTER ring alone, and deliberately not from the
+ * unit circle: a regular n-gon inscribed in a circle only touches the circle at
+ * its vertices, so generating straight into the box left dead margin between the
+ * shape and its own frame for every n not divisible by 4 (a hexagon reached only
+ * 86.6% of the width, a pentagon 95.1% across and 90.5% down). The selection
+ * frame, align/distribute, the W/H readout and the export crop all read that
+ * frame, so the shape has to fill it.
+ *
+ * Measuring the outer ring only is what keeps the frame still while the star
+ * ratio is dragged: inner vertices are always inside the outer hull, so they
+ * never contribute to the bounds.
+ */
+function unitToBox(width: number, height: number, sides: number): (p: Vec2) => Vec2 {
+  const n = clampSides(sides)
+  const w = Math.max(0, width)
+  const h = Math.max(0, height)
+
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
   for (let i = 0; i < n; i++) {
     const a = -Math.PI / 2 + (i * 2 * Math.PI) / n
-    pts.push({ x: rx + rx * Math.cos(a), y: ry + ry * Math.sin(a) })
+    const x = Math.cos(a)
+    const y = Math.sin(a)
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+  const spanX = maxX - minX
+  const spanY = maxY - minY
+
+  return (p) => ({
+    x: spanX > 0 ? ((p.x - minX) / spanX) * w : w / 2,
+    y: spanY > 0 ? ((p.y - minY) / spanY) * h : h / 2,
+  })
+}
+
+/**
+ * Vertices of a polygon or star, scaled to fill the local box exactly.
+ *
+ * `starRatio` is a fraction of the APOTHEM, not of the circumradius. That is
+ * what makes 100% a plain polygon rather than a special case: at ratio 1 every
+ * inner vertex lands exactly on the midpoint of the edge it sits under, so the
+ * outline is identical to the polygon's and dropping the now-collinear inner
+ * vertices changes nothing. Measuring against the circumradius instead would
+ * push inner vertices outside the outer hull for any ratio above cos(pi/n) — a
+ * pentagon past 0.809 — and the frame would jump mid-drag.
+ *
+ * `sides = 3` reproduces the isosceles triangle exactly: the raw bbox
+ * x in [-0.866, 0.866], y in [-1, 0.5] maps to (w/2, 0), (w, h), (0, h).
+ */
+export function polygonStarPoints(
+  width: number,
+  height: number,
+  sides: number,
+  starRatio = 1,
+): Vec2[] {
+  const n = clampSides(sides)
+  const ratio = clampStarRatio(starRatio)
+  const map = unitToBox(width, height, n)
+
+  if (ratio >= 1) {
+    const pts: Vec2[] = []
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / n
+      pts.push(map({ x: Math.cos(a), y: Math.sin(a) }))
+    }
+    return pts
+  }
+
+  const inner = ratio * Math.cos(Math.PI / n)
+  const pts: Vec2[] = []
+  for (let i = 0; i < n * 2; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI) / n
+    const f = i % 2 === 0 ? 1 : inner
+    pts.push(map({ x: f * Math.cos(a), y: f * Math.sin(a) }))
   }
   return pts
 }
 
-export function polygonPath(
+export function polygonStarPath(
   width: number,
   height: number,
   sides: number,
+  starRatio = 1,
   radius = 0,
 ): string {
-  const points = polygonPoints(width, height, sides)
+  const points = polygonStarPoints(width, height, sides, starRatio)
   return radius > 0 ? roundedPolygonPath(points, radius) : pointsToClosedPath(points)
 }
 
-/**
- * Star vertices, alternating outer and inner radius.
- * @param innerRatio inner radius as a fraction of outer, 0..1.
- */
-export function starPoints(
-  width: number,
-  height: number,
-  points: number,
-  innerRatio: number,
-): Vec2[] {
-  const n = Math.max(3, Math.round(points))
-  const ratio = Math.min(1, Math.max(0.01, innerRatio))
-  const rx = Math.max(0, width) / 2
-  const ry = Math.max(0, height) / 2
-  const out: Vec2[] = []
-  for (let i = 0; i < n * 2; i++) {
-    const a = -Math.PI / 2 + (i * Math.PI) / n
-    const f = i % 2 === 0 ? 1 : ratio
-    out.push({ x: rx + rx * f * Math.cos(a), y: ry + ry * f * Math.sin(a) })
-  }
-  return out
+/** Centre the polygon is generated about, in local space. */
+export function polygonCentre(width: number, height: number, sides: number): Vec2 {
+  return unitToBox(width, height, sides)({ x: 0, y: 0 })
 }
 
-export function starPath(
+/**
+ * Where the on-canvas Star Ratio handle sits: the first inner vertex.
+ *
+ * At ratio 1 that is the midpoint of the first edge, which is how the gesture
+ * announces itself on a shape that is not yet a star.
+ */
+export function starRatioHandlePoint(
   width: number,
   height: number,
-  points: number,
-  innerRatio: number,
-  radius = 0,
-): string {
-  const verts = starPoints(width, height, points, innerRatio)
-  return radius > 0 ? roundedPolygonPath(verts, radius) : pointsToClosedPath(verts)
+  sides: number,
+  starRatio: number,
+): Vec2 {
+  const n = clampSides(sides)
+  const a = -Math.PI / 2 + Math.PI / n
+  const f = clampStarRatio(starRatio) * Math.cos(Math.PI / n)
+  return unitToBox(width, height, n)({ x: f * Math.cos(a), y: f * Math.sin(a) })
+}
+
+/**
+ * Star ratio implied by a point, for the handle drag.
+ *
+ * The pointer is projected onto the handle's own axis, so sliding sideways along
+ * the edge does not change the ratio — the same rule the corner-radius handle
+ * follows.
+ */
+export function starRatioFromPoint(
+  width: number,
+  height: number,
+  sides: number,
+  local: Vec2,
+): number {
+  const centre = polygonCentre(width, height, sides)
+  const full = starRatioHandlePoint(width, height, sides, 1)
+  const dx = full.x - centre.x
+  const dy = full.y - centre.y
+  const len2 = dx * dx + dy * dy
+  if (len2 <= 0) return 1
+  const t = ((local.x - centre.x) * dx + (local.y - centre.y) * dy) / len2
+  return clampStarRatio(t)
 }
 
 /** Line from one local corner to the other; the transform orients it. */

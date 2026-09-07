@@ -314,9 +314,11 @@ function iconFor(node: DesignNode) {
     case 'repeat-grid': return <RepeatGridIcon size={size} />
     case 'rect': return <RectIcon size={size} />
     case 'ellipse': return <EllipseIcon size={size} />
-    case 'triangle': return <TriangleIcon size={size} />
-    case 'polygon': return <PolygonIcon size={size} />
-    case 'star': return <StarIcon size={size} />
+    // One node type, three recognisable shapes — the glyph follows the params so
+    // the tree still reads at a glance.
+    case 'polygon':
+      if (node.starRatio < 1) return <StarIcon size={size} />
+      return node.sides === 3 ? <TriangleIcon size={size} /> : <PolygonIcon size={size} />
     case 'line': return <LineIcon size={size} />
     case 'path': return <PathIcon size={size} />
     case 'text': return <TextIcon size={size} />

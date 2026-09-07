@@ -39,8 +39,16 @@ import {
   type RadiusCorner,
 } from './RadiusSession'
 import {
+  beginStarRatioDrag,
+  cancelStarRatioDrag,
+  commitStarRatioDrag,
+  isStarRatioDragging,
+  updateStarRatioDrag,
+} from './StarRatioSession'
+import {
   beginPathEditing,
   endPathEditing,
+  pathEditDoubleClick,
   pathEditKeyDown,
   pathEditPointerDown,
   pathEditPointerMove,
@@ -62,7 +70,7 @@ import type { Mat2D, Vec2 } from '../geometry/Matrix'
 import type { NodeId } from '../document/types'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
 
-type Phase = 'idle' | 'pending' | 'marquee' | 'transform' | 'radius'
+type Phase = 'idle' | 'pending' | 'marquee' | 'transform' | 'radius' | 'star-ratio'
 
 interface State {
   phase: Phase
@@ -160,6 +168,17 @@ export const selectionTool: Tool = {
       return
     }
 
+    // 1a-bis. The Star Ratio handle, for the same reason: it sits inside the
+    // shape, where a plain click would otherwise start a move.
+    if (e.targetHandle === 'star-ratio') {
+      const id = editor.selection[0]
+      if (id && beginStarRatioDrag(doc, id, e.doc)) {
+        state.phase = 'star-ratio'
+        return
+      }
+      return
+    }
+
     // 1b. A selection handle takes priority over anything underneath it.
     if (e.targetHandle) {
       const ids = editor.selection.filter((id) => !isEffectivelyLocked(doc, id))
@@ -235,6 +254,17 @@ export const selectionTool: Tool = {
       return
     }
 
+    if (state.phase === 'star-ratio') {
+      // Same self-healing guard as the radius phase above.
+      if (!isStarRatioDragging() || e.buttons === 0) {
+        cancelStarRatioDrag()
+        reset()
+        return
+      }
+      updateStarRatioDrag(e.doc, e.shiftKey)
+      return
+    }
+
     if (editorStore.getState().nodeEditingId && pathEditPointerMove(e, ctx)) return
 
     if (state.phase === 'idle') {
@@ -290,6 +320,12 @@ export const selectionTool: Tool = {
       return
     }
 
+    if (state.phase === 'star-ratio') {
+      commitStarRatioDrag()
+      reset()
+      return
+    }
+
     if (editor.nodeEditingId && pathEditPointerUp()) return
 
     if (state.phase === 'marquee') {
@@ -319,6 +355,11 @@ export const selectionTool: Tool = {
   },
 
   onDoubleClick(e: CanvasPointerEvent, ctx: ToolContext): void {
+    // Already editing points: a double-click on an anchor converts it, which is
+    // XD's binding. It cannot collide with the double-click that ENTERS point
+    // editing below, because that only runs when nothing is being edited yet.
+    if (editorStore.getState().nodeEditingId && pathEditDoubleClick(e, ctx)) return
+
     const doc = ctx.doc()
     const deep = hitTest(doc, e.doc, { tolerance: ctx.tolerance(), deep: true })
     if (!deep) return
@@ -361,6 +402,11 @@ export const selectionTool: Tool = {
         reset()
         return true
       }
+      if (isStarRatioDragging()) {
+        cancelStarRatioDrag()
+        reset()
+        return true
+      }
       if (isDragging()) {
         cancelDrag()
         reset()
@@ -381,6 +427,7 @@ export const selectionTool: Tool = {
 
   onDeactivate(): void {
     if (isRadiusDragging()) cancelRadiusDrag()
+    if (isStarRatioDragging()) cancelStarRatioDrag()
     if (isDragging()) cancelDrag()
     endPathEditing()
     setEditor({ marquee: null, hoverId: null })

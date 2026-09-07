@@ -6,8 +6,8 @@
  *
  * 1. Geometry is authored in LOCAL space, spanning (0,0)..(width,height). Where a
  *    node sits, how it is rotated, scaled or flipped lives entirely in its
- *    `transform`. Rotating a star never rewrites the star — its `points` and
- *    `innerRatio` stay editable. This is what makes "rotate a group, ungroup,
+ *    `transform`. Rotating a star never rewrites the star — its `sides` and
+ *    `starRatio` stay editable. This is what makes "rotate a group, ungroup,
  *    everything still correct" true rather than aspirational.
  *
  * 2. The graph is NORMALIZED: `nodes` is a flat id -> node map and z-order is the
@@ -31,9 +31,7 @@ export type NodeType =
   | 'group'
   | 'rect'
   | 'ellipse'
-  | 'triangle'
   | 'polygon'
-  | 'star'
   | 'line'
   | 'path'
   | 'text'
@@ -326,28 +324,29 @@ export interface EllipseNode extends StyledNode {
 }
 
 /**
- * Vertex rounding for the parametric polygons.
+ * The one parametric polygon: triangle, n-gon and star are all this node.
  *
- * A single scalar, unlike a rect's four-corner CornerRadii: a polygon's corners
- * are generated from its sides/points rather than being individually
- * addressable, so per-corner values would have nothing stable to attach to.
+ * Adobe XD has no separate Triangle or Star tool, and neither do we. Three
+ * corners is a triangle, a star ratio below 1 is a star, and every one of them
+ * stays reversible — turning a star back into a triangle is two field edits, not
+ * a different object.
+ *
+ * `cornerRadius` is a single scalar, unlike a rect's four-corner CornerRadii: a
+ * polygon's corners are generated from its side count rather than being
+ * individually addressable, so per-corner values would have nothing stable to
+ * attach to.
  */
-export interface TriangleNode extends StyledNode {
-  type: 'triangle'
-  cornerRadius: number
-}
-
 export interface PolygonNode extends StyledNode {
   type: 'polygon'
+  /** Corner count, 3..100. XD calls this Corner Count. */
   sides: number
-  cornerRadius: number
-}
-
-export interface StarNode extends StyledNode {
-  type: 'star'
-  points: number
-  /** Inner radius as a fraction of outer, 0..1. */
-  innerRatio: number
+  /**
+   * Inner radius as a fraction of the APOTHEM, 0.01..1. XD calls this Star
+   * Ratio and shows it as a percentage. 1 puts the inner vertices exactly on the
+   * edge midpoints, which is why 100% is a plain polygon rather than a special
+   * case — see polygonStarPoints.
+   */
+  starRatio: number
   cornerRadius: number
 }
 
@@ -414,9 +413,7 @@ export type DesignNode =
   | RepeatGridNode
   | RectNode
   | EllipseNode
-  | TriangleNode
   | PolygonNode
-  | StarNode
   | LineNode
   | PathNode
   | TextNode
@@ -427,7 +424,7 @@ export type ContainerNode = DocumentRootNode | ArtboardNode | GroupNode | Repeat
 /** Every union member that actually carries a `style` field. */
 export type StyledDesignNode = Exclude<DesignNode, DocumentRootNode | ArtboardNode>
 export type ShapeNode =
-  | RectNode | EllipseNode | TriangleNode | PolygonNode | StarNode | LineNode | PathNode
+  | RectNode | EllipseNode | PolygonNode | LineNode | PathNode
 
 // ---------------------------------------------------------------------------
 // Assets
@@ -547,9 +544,7 @@ export function isShape(node: DesignNode | undefined | null): node is ShapeNode 
   switch (node.type) {
     case 'rect':
     case 'ellipse':
-    case 'triangle':
     case 'polygon':
-    case 'star':
     case 'line':
     case 'path':
       return true
@@ -570,8 +565,8 @@ export function hasCornerRadius(node: DesignNode): node is RectNode | ImageNode 
 /** Types whose vertices round by a single scalar radius. */
 export function hasScalarCornerRadius(
   node: DesignNode | undefined | null,
-): node is TriangleNode | PolygonNode | StarNode {
-  return !!node && (node.type === 'triangle' || node.type === 'polygon' || node.type === 'star')
+): node is PolygonNode {
+  return !!node && node.type === 'polygon'
 }
 
 /** Any node that supports corner rounding at all. */

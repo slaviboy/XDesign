@@ -19,9 +19,20 @@ npm run preview  # serve the production build
 
 ## What it does
 
-**Drawing** — rectangle, ellipse, triangle, polygon, star, line, pen (real cubic Béziers),
-pencil (smoothed freehand), text, artboard. Every tool in the rail is implemented; none of
-them are decorative.
+**Drawing** — rectangle, ellipse, polygon, line, pen (real cubic Béziers), pencil
+(smoothed freehand), text, artboard. Every tool in the rail is implemented; none of them
+are decorative.
+
+**One Polygon tool**, as in XD — there is no separate Triangle or Star tool, because there
+is no separate shape. Corner Count 3 is a triangle, Star Ratio below 100% is a star, and
+both are reversible: turning a star back into a triangle is two field edits, not a
+different object. The Star Ratio also has an on-canvas handle (Shift snaps to 10%).
+
+**Pen** — every procedure Adobe documents. Click for corners, drag for curves, `Alt` while
+dragging to split the direction lines (two curves meeting at a cusp), `Alt`-click the last
+anchor to retract its handle (a curve followed by a straight line), `Shift` to constrain to
+45° placing and 15° dragging. Click the first point to close, or drag from it to shape the
+closing curve. `Enter`, `Escape` or a double-click ends an open path.
 
 **Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
 snapping and smart guides, per-point Bézier editing, boolean operations, alignment and
@@ -31,7 +42,7 @@ rotation cursor oriented to the corner and the object's own angle.
 **Transform panel** — W/H with an aspect-ratio lock, X/Y, rotation, flips, and match
 width / height / size across a selection. Every readout tracks a drag in real time.
 
-**Corner radius** — draggable handles inside rectangles, triangles, polygons and stars.
+**Corner radius** — draggable handles inside rectangles, polygons and stars.
 Drag inward to round, outward to sharpen. A rectangle's corners can be edited together
 (one field) or independently (four), and the handle follows whichever mode is selected.
 
@@ -64,8 +75,8 @@ only as a rasterization target when exporting PNG or JPEG. Nothing about the doc
 depends on the DOM, which is why the geometry engine is directly testable in Node.
 
 Geometry is authored in **local space** — every shape spans `(0,0)…(width,height)` and a
-transform maps it into its parent. Rotating a star never rewrites the star: its `points`
-and `innerRatio` stay editable forever. That is what makes *group → rotate → ungroup*
+transform maps it into its parent. Rotating a star never rewrites the star: its `sides`
+and `starRatio` stay editable forever. That is what makes *group → rotate → ungroup*
 round-trip exactly.
 
 ### Dragging never writes to the store
@@ -181,6 +192,49 @@ libraries removed ~1.4 MB from the build.
 System fonts can be used, but their bytes are not readable by the page, so they can only be
 referenced by name. The dialog says so when a system font is in the export.
 
+### The line tool carried its direction in a signed box
+
+A line is the one shape that is not symmetric: its bounding box says how big the drag was,
+but only its endpoints say which way round it runs. `previewBounds()` used to encode that
+by returning a min corner with a *signed* width and height, and every consumer read it as
+an ordinary AABB. One inconsistency, four bugs: the preview drew a full drag-delta away
+from the pointer in three of the four quadrants (which is what "the line moves far away
+from the cursor" was), an up-left drag satisfied `width < 0.5 && height < 0.5` and was
+silently discarded, snapping saw its right and bottom edges on the wrong side, and the
+commit read a different box from the preview so Shift-45° and Alt-from-centre never
+reached the document.
+
+The box is now unsigned for every kind, and direction lives in the segment — which is also
+what the preview draws and what the commit rebases into local space, so the three cannot
+disagree.
+
+### One polygon, and it fills its frame
+
+Triangle, polygon and star were three node types with three tools, three sets of
+parameters (`sides`, `points`, `innerRatio`) and seven near-identical geometry switches
+between them. They are now one `polygon` node with `sides` and `starRatio`, which is both
+what XD ships and what the shapes actually are.
+
+**Star Ratio is a fraction of the apothem, not of the circumradius.** That single choice is
+what makes "100% is a plain polygon" true rather than a special case: at ratio 1 every
+inner vertex lands exactly on the midpoint of the edge below it, so the outline is
+identical to the polygon's and the now-collinear inner vertices are simply dropped. Under
+the circumradius definition any ratio above `cos(π/n)` — 0.809 for a pentagon — pushes the
+inner vertices outside the outer hull, and the bounding box would jump mid-drag. Documents
+saved before this land are converted on load by `innerRatio / cos(π/n)`, so an existing
+star keeps its shape.
+
+**The vertices are normalised to span the box.** A regular n-gon inscribed in a circle only
+touches that circle at its vertices, so generating straight into the local box left dead
+margin between the shape and its own frame for every side count not divisible by four — a
+hexagon reached 86.6% of the width, a pentagon 90.5% of the height. Since
+`localGeometryBounds` reports the full box for these types, the selection frame,
+align/distribute, the W/H readout and the export crop all claimed area the shape did not
+occupy. The generator now measures the raw outer ring and maps its bounds onto
+`0..w × 0..h`. Two properties fall out: three corners reproduce the old hand-authored
+isosceles triangle *exactly*, and because only the outer ring is measured, the frame cannot
+move while the Star Ratio handle is dragged.
+
 ### Corner rounding is geometry, not a filter
 
 `roundedPolygonPath` walks each vertex back along both its edges by
@@ -198,9 +252,9 @@ The handles ride the arc's centre, at `radius / sin(theta/2)` along the inward b
 so they visibly track the curve rather than drifting off it. Dragging projects the pointer
 onto that bisector, so moving sideways along an edge does not change the radius.
 
-Rect and image carry four addressable corners; triangle, polygon and star carry a single
-scalar, because their vertices are generated from sides/points and there is nothing stable
-to key per-corner values to.
+Rect and image carry four addressable corners; a polygon carries a single scalar, because
+its vertices are generated from its corner count and there is nothing stable to key
+per-corner values to.
 
 The two-button toggle above the fields picks between one field for all four corners and
 four separate ones, and the on-canvas handle honours the same choice — dragging any dot in

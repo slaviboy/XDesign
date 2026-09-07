@@ -237,6 +237,26 @@ export function moveHandle(
   }
 }
 
+/**
+ * Drop one side's handle, leaving the other alone.
+ *
+ * This is what makes "a curve followed by a straight line" possible: retracting
+ * an anchor's outgoing handle turns the NEXT segment into a line while the
+ * incoming curve keeps its shape. cornerPoint would drop both and flatten the
+ * curve you just drew.
+ */
+export function clearHandle(sub: PenSubpath, index: number, which: 'in' | 'out'): void {
+  const p = sub.points[index]
+  if (!p) return
+  if (which === 'in') {
+    p.inX = null
+    p.inY = null
+  } else {
+    p.outX = null
+    p.outY = null
+  }
+}
+
 export function deletePoint(sub: PenSubpath, index: number): boolean {
   if (index < 0 || index >= sub.points.length) return false
   sub.points.splice(index, 1)
