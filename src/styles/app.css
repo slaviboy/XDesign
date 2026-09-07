@@ -172,6 +172,12 @@ input, textarea { -webkit-user-select: text; user-select: text; }
    but it is dimmed so the reason it will not budge is visible. */
 .artboard-guides .guide.locked { opacity: 0.45; }
 .artboard-guides .guide.active { stroke: var(--guide-active); opacity: 1; }
+/* A selected guide is thicker, so it reads as picked without changing colour —
+   the colour is the user's setting and has to stay recognisable. */
+.artboard-guides .guide.selected { stroke-width: 2; opacity: 1; }
+
+/* The tab at the artboard's edge: what a selected guide is dragged by. */
+.guide-handle { stroke: #fff; stroke-width: 1; }
 
 /* The readout that accompanies a guide being dragged: a rule along the edge
    with the distance to each side of the guide, and a chip at the cursor. */

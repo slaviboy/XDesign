@@ -699,12 +699,25 @@ export function layoutColumns(
   return out
 }
 
+/**
+ * Where a guide can be picked up.
+ *
+ * 'line'   anywhere along it, plus its handle — quickest, but the line lies
+ *          across the artwork and can be caught by accident.
+ * 'handle' only the handle at the artboard's edge, which puts the whole of the
+ *          artboard back within reach of the tools.
+ */
+export type GuideDragMode = 'line' | 'handle'
+
 export interface DocumentSettings {
   gridSize: number
   gridVisible: boolean
   snapToGrid: boolean
   snapToObjects: boolean
   guidesVisible: boolean
+  /** Guides are chrome, but their colour is the user's — see the README. */
+  guideColor: RGBA
+  guideDragMode: GuideDragMode
 }
 
 export const DEFAULT_SETTINGS: DocumentSettings = {
@@ -713,6 +726,8 @@ export const DEFAULT_SETTINGS: DocumentSettings = {
   snapToGrid: false,
   snapToObjects: true,
   guidesVisible: true,
+  guideColor: { r: 216, g: 55, b: 144, a: 1 },
+  guideDragMode: 'line',
 }
 
 export interface DesignDocument {

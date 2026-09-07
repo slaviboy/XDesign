@@ -40,6 +40,18 @@ async function pullGuide(
   await page.mouse.up()
 }
 
+/** Open Preferences from the application menu. */
+async function openPreferences(page: Page) {
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('.menu-item', { hasText: 'Preferences' }).click()
+}
+
+async function setGuideDrag(page: Page, mode: 'line' | 'handle') {
+  await openPreferences(page)
+  await page.locator('.dialog select[title="Where a guide can be picked up"]').selectOption(mode)
+  await page.locator('.dialog button', { hasText: 'Done' }).click()
+}
+
 /** Right-click the canvas and choose an item from the Guides submenu. */
 async function guidesMenu(page: Page, at: { x: number; y: number }, item: string) {
   await page.locator('.canvas-svg').click({ button: 'right', position: at })
@@ -422,4 +434,178 @@ test('the guide being dragged is distinguishable from the ones already placed', 
   await expect(page.locator('.artboard-guides .guide.active')).toHaveCount(1)
   await page.mouse.up()
   await expect(page.locator('.artboard-guides .guide.active')).toHaveCount(0)
+})
+
+// -------------------------------------------------------------- selection --
+
+test('a guide dragged clear of its artboard disappears before you let go', async ({ page }) => {
+  await openApp(page)
+  await pullGuide(page, 'x', await screenOfLocalX(page, 250))
+  const hit = page.locator('.artboard-guides .guide-hit').first()
+  const box = (await hit.boundingBox())!
+
+  await page.mouse.move(box.x + box.width / 2, box.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(box.x - 300, box.y + 200, { steps: 10 })
+  // Not merely removed on release: hidden the moment it leaves, because a guide
+  // floating outside the artboard it belongs to is a state the model cannot hold.
+  await expect(guides(page)).toHaveCount(0)
+
+  // Back inside and it returns, so this is a preview rather than a deletion.
+  await page.mouse.move(box.x + 40, box.y + 200, { steps: 6 })
+  await expect(guides(page)).toHaveCount(1)
+  await page.mouse.up()
+  await expect(guides(page)).toHaveCount(1)
+})
+
+test('clicking a guide selects it and gives it a handle', async ({ page }) => {
+  await openApp(page)
+  await pullGuide(page, 'x', await screenOfLocalX(page, 250))
+  await expect(page.locator('.guide-handle')).toHaveCount(0)
+
+  const hit = page.locator('.artboard-guides .guide-hit').first()
+  const box = (await hit.boundingBox())!
+  await page.mouse.click(box.x + box.width / 2, box.y + 300)
+
+  await expect(page.locator('.artboard-guides .guide.selected')).toHaveCount(1)
+  // The handle sits at the artboard's edge, where it cannot be lost in artwork.
+  const handle = page.locator('.guide-handle')
+  await expect(handle).toHaveCount(1)
+  const artboard = (await nodesOfType(page, 'artboard').first().boundingBox())!
+  expect(Math.abs((await handle.boundingBox())!.y + 10 - artboard.y)).toBeLessThan(4)
+
+  // Selecting artwork puts it down again: the panel shows one thing at a time.
+  await drawShape(page, 'rect', { x: 500, y: 200 }, { x: 600, y: 300 })
+  await expect(page.locator('.artboard-guides .guide.selected')).toHaveCount(0)
+  await expect(page.locator('.guide-handle')).toHaveCount(0)
+})
+
+test('the handle drags the guide, and Delete removes it', async ({ page }) => {
+  await openApp(page)
+  await pullGuide(page, 'x', await screenOfLocalX(page, 250))
+  const hit = page.locator('.artboard-guides .guide-hit').first()
+  const box = (await hit.boundingBox())!
+  await page.mouse.click(box.x + box.width / 2, box.y + 300)
+
+  const handle = (await page.locator('.guide-handle').boundingBox())!
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(handle.x + handle.width / 2 + 90, handle.y + handle.height / 2, { steps: 8 })
+  await page.mouse.up()
+  expect(Number(await guides(page).first().getAttribute('x1'))).toBeGreaterThan(250)
+
+  await page.keyboard.press('Delete')
+  await expect(guides(page)).toHaveCount(0)
+})
+
+test('the drag-from setting can put the line out of reach without hiding it', async ({ page }) => {
+  await openApp(page)
+  await setGuideDrag(page, 'handle')
+  await pullGuide(page, 'x', await screenOfLocalX(page, 250))
+
+  const hit = page.locator('.artboard-guides .guide-hit').first()
+  const box = (await hit.boundingBox())!
+  const before = await guides(page).first().getAttribute('x1')
+
+  await page.mouse.move(box.x + box.width / 2, box.y + 300)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 150, box.y + 300, { steps: 8 })
+  await page.mouse.up()
+  // The line no longer drags...
+  expect(await guides(page).first().getAttribute('x1')).toBe(before)
+  // ...but it still selects, so the guide is never unreachable.
+  await expect(page.locator('.artboard-guides .guide.selected')).toHaveCount(1)
+
+  // And the handle it just revealed does drag it.
+  const handle = (await page.locator('.guide-handle').boundingBox())!
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(handle.x + handle.width / 2 + 80, handle.y + handle.height / 2, { steps: 8 })
+  await page.mouse.up()
+  expect(await guides(page).first().getAttribute('x1')).not.toBe(before)
+})
+
+// --------------------------------------------------------- guide inspector --
+
+test('a selected guide can be positioned from the panel', async ({ page }) => {
+  await openApp(page)
+  await pullGuide(page, 'x', await screenOfLocalX(page, 250))
+  const hit = page.locator('.artboard-guides .guide-hit').first()
+  const box = (await hit.boundingBox())!
+  await page.mouse.click(box.x + box.width / 2, box.y + 300)
+
+  const guideSection = page.locator('.section', {
+    has: page.locator('.section-title:text-is("Guide")'),
+  })
+  await expect(guideSection).toHaveCount(1)
+  // Labelled for the axis it constrains: a vertical guide has an X and no Y.
+  await expect(guideSection.locator('.field-label')).toHaveText('X')
+  expect(Number(await guideSection.locator('input').inputValue())).toBeCloseTo(250, 0)
+
+  await guideSection.locator('input').fill('400')
+  await guideSection.locator('input').press('Enter')
+  expect(Number(await guides(page).first().getAttribute('x1'))).toBe(400)
+
+  await guideSection.locator('button', { hasText: 'Delete Guide' }).click()
+  await expect(guides(page)).toHaveCount(0)
+  // The section goes with it rather than pointing at nothing.
+  await expect(page.locator('.section-title:text-is("Guide")')).toHaveCount(0)
+})
+
+test('a horizontal guide is labelled Y', async ({ page }) => {
+  await openApp(page)
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  await pullGuide(page, 'y', canvas.y + 300)
+  const hit = page.locator('.artboard-guides .guide-hit').first()
+  const box = (await hit.boundingBox())!
+  await page.mouse.click(box.x + 200, box.y + box.height / 2)
+  await expect(
+    page
+      .locator('.section', { has: page.locator('.section-title:text-is("Guide")') })
+      .locator('.field-label'),
+  ).toHaveText('Y')
+})
+
+// ------------------------------------------------------------ guide colour --
+
+test('the guide colour is a setting, and is saved with the document', async ({ page }) => {
+  await openApp(page)
+  await pullGuide(page, 'x', await screenOfLocalX(page, 250))
+
+  await openPreferences(page)
+  await page.locator('[data-testid="guide-color"]').click()
+  const hex = page.locator('.popover .field', { has: page.locator('.field-label:text-is("#")') }).locator('input')
+  await hex.fill('1188ff')
+  await hex.press('Enter')
+  // Clicking outside the popover closes it; Escape would close the dialog too.
+  await page.locator('.dialog h4').first().click()
+  await page.locator('.dialog button', { hasText: 'Done' }).click()
+
+  const stroke = await page.locator('.artboard-guides').evaluate((el) => getComputedStyle(el).stroke)
+  expect(stroke).toBe('rgb(17, 136, 255)')
+
+  // Document data, not chrome: it does not follow the theme.
+  await page.locator('[data-testid="theme-toggle"]').click()
+  expect(await page.locator('.artboard-guides').evaluate((el) => getComputedStyle(el).stroke)).toBe(
+    'rgb(17, 136, 255)',
+  )
+})
+
+// ------------------------------------------------- readout and the artboard --
+
+test('the measurement rule takes the artboard title\'s place while it is needed', async ({ page }) => {
+  await openApp(page)
+  await expect(page.locator('.artboard-label')).toHaveCount(1)
+
+  await holdGuide(page, 'x', await screenOfLocalX(page, 280))
+  // Both want the strip above the artboard's top border, and the rule has to
+  // line up with the border it is measuring.
+  await expect(page.locator('.artboard-label')).toHaveCount(0)
+
+  const artboard = (await nodesOfType(page, 'artboard').first().boundingBox())!
+  const rule = (await page.locator('.guide-rule').boundingBox())!
+  expect(Math.abs(rule.y - artboard.y)).toBeLessThan(2)
+
+  await page.mouse.up()
+  await expect(page.locator('.artboard-label')).toHaveCount(1)
 })

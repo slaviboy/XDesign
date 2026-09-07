@@ -14,6 +14,9 @@ import { supportsFileSystemAccess } from '../persistence/FileSystem'
 import { ALT_LABEL, MOD_LABEL, shortcutGroups } from '../shortcuts/bindings'
 import { InfoIcon } from './icons'
 import { NumberField, Select, TextField } from './primitives'
+import { PaintPopover, PAINT_POPOVER_WIDTH } from './ColorPicker'
+import { toCss } from '../document/color'
+import type { GuideDragMode } from '../document/types'
 import type { RecoveryOffer } from '../persistence/Autosave'
 
 // ---------------------------------------------------------------------------
@@ -190,6 +193,7 @@ export function PreferencesDialog() {
   const doc = useDocument()
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const marqueeMode = useEditorStore((s) => s.marqueeMode)
+  const [guideColorAt, setGuideColorAt] = useState<{ x: number; y: number } | null>(null)
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
 
   useEffect(() => {
@@ -266,6 +270,44 @@ export function PreferencesDialog() {
         </div>
       </PreferenceRow>
 
+      <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>Guides</h4>
+      <PreferenceRow
+        name="guide-drag"
+        info="A guide's line lies across the artwork, so dragging it is easy to do by accident when you meant to grab a shape. Restricting it to the handle puts the whole artboard back within reach of the tools; the line still selects the guide either way, and the handle appears on whichever guide is selected."
+      >
+        <div className="dialog-row">
+          <label>Guides drag from</label>
+          <Select
+            value={doc.settings.guideDragMode}
+            options={[
+              { value: 'line', label: 'The line or its handle' },
+              { value: 'handle', label: 'Only the handle' },
+            ]}
+            onChange={(v) => updateSettings({ guideDragMode: v as GuideDragMode })}
+            title="Where a guide can be picked up"
+          />
+        </div>
+      </PreferenceRow>
+      <PreferenceRow
+        name="guide-color"
+        info="The colour guides are drawn in. It is saved with the document rather than following the theme, because it is a choice about the artwork you are working on — a magenta guide is invisible over magenta artwork."
+      >
+        <div className="dialog-row">
+          <label>Guide colour</label>
+          <button
+            type="button"
+            className="swatch"
+            aria-label="Guide colour"
+            data-testid="guide-color"
+            style={{ background: toCss(doc.settings.guideColor) }}
+            onClick={(e) => {
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+              setGuideColorAt({ x: rect.left - (PAINT_POPOVER_WIDTH + 10), y: rect.top })
+            }}
+          />
+        </div>
+      </PreferenceRow>
+
       <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>Selection</h4>
       <PreferenceRow
         name="marquee-mode"
@@ -308,6 +350,21 @@ export function PreferencesDialog() {
       >
         Clear recent documents
       </button>
+
+      {guideColorAt && (
+        <PaintPopover
+          paint={{ type: 'solid', color: doc.settings.guideColor }}
+          anchor={guideColorAt}
+          // A guide is a line: it has a colour, not a paint.
+          allowGradient={false}
+          onChange={(paint, committing) => {
+            if (paint.type === 'solid') {
+              updateSettings({ guideColor: paint.color }, committing ? undefined : 'guide-color')
+            }
+          }}
+          onClose={() => setGuideColorAt(null)}
+        />
+      )}
     </DialogShell>
   )
 }

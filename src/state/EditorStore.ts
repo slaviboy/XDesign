@@ -108,6 +108,14 @@ export interface EditorState {
   editingContext: NodeId | null
   /** How much of an object a marquee must cover to select it. */
   marqueeMode: MarqueeMode
+  /**
+   * The selected guide, if any.
+   *
+   * Not part of `selection`: that holds NodeIds, and a guide is not a node. Two
+   * separate fields rather than one union because almost everything that reads
+   * a selection means nodes, and would have to filter guides back out.
+   */
+  selectedGuide: { artboardId: NodeId; guideId: string } | null
   /** Text node currently being edited inline. */
   editingTextId: NodeId | null
   /** Artboard whose on-canvas name label is being renamed inline. */
@@ -171,6 +179,7 @@ export const editorStore = createStore<EditorState>()(
     hoverId: null,
     editingContext: null,
     marqueeMode: readStoredMarqueeMode(),
+    selectedGuide: null,
     editingTextId: null,
     renamingArtboardId: null,
     penTargetId: null,
@@ -256,6 +265,15 @@ export function readDefaultGrid(): ArtboardGrid | null {
   }
 }
 
+/** Selecting a guide clears the node selection, and the reverse. */
+export function selectGuide(artboardId: NodeId, guideId: string): void {
+  editorStore.setState({ selectedGuide: { artboardId, guideId }, selection: [] })
+}
+
+export function clearGuideSelection(): void {
+  if (editorStore.getState().selectedGuide) editorStore.setState({ selectedGuide: null })
+}
+
 export const getEditor = () => editorStore.getState()
 export const setEditor = (partial: Partial<EditorState>) => editorStore.setState(partial)
 
@@ -312,13 +330,23 @@ export function popTemporaryTool(): void {
 // ---------------------------------------------------------------------------
 
 export function setSelection(ids: readonly NodeId[]): void {
-  const current = editorStore.getState().selection
-  if (current.length === ids.length && current.every((id, i) => id === ids[i])) return
+  const state = editorStore.getState()
+  const current = state.selection
+  if (
+    current.length === ids.length &&
+    current.every((id, i) => id === ids[i]) &&
+    !state.selectedGuide
+  ) {
+    return
+  }
   // Drop the explicit corner mode: the new selection derives its own from data.
   editorStore.setState({
     selection: [...ids],
     selectedPoints: [],
     cornerRadiusMode: null,
+    // Selecting artwork puts a selected guide down: the inspector shows one
+    // thing at a time, and a guide is not part of a multi-selection.
+    selectedGuide: null,
   })
 }
 
@@ -347,12 +375,13 @@ export function toggleSelection(id: NodeId): void {
 
 export function clearSelection(): void {
   const s = editorStore.getState()
-  if (s.selection.length === 0 && !s.editingContext) return
+  if (s.selection.length === 0 && !s.editingContext && !s.selectedGuide) return
   editorStore.setState({
     selection: [],
     editingContext: null,
     nodeEditingId: null,
     selectedPoints: [],
+    selectedGuide: null,
   })
 }
 

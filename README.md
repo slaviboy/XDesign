@@ -52,7 +52,12 @@ and the guide belongs to that artboard. Dragging one snaps to the artboard's edg
 to every object on it, and to its other guides; hold `⌘`/`Ctrl` to suspend that, `Shift` to move
 in tens. While you drag, a chip at the cursor gives the guide's own coordinate — `X 138` — and a
 rule along the artboard's edge gives the distance to each side of it, which is usually what you
-are actually placing: a margin, or a column. Drag a guide off the artboard to remove it. `⌘;` hides them, `⇧⌘;` locks them, and
+are actually placing: a margin, or a column. Drag a guide off the artboard and it disappears
+before you let go, because a guide outside the artboard it belongs to is a state the model cannot
+hold. Click a guide to select it — it thickens and grows a handle at the artboard's edge, its
+position appears in the panel as a scrubbable `X` or `Y`, and `Delete` removes it. Preferences
+sets the guide colour and whether guides can be dragged by the line itself or only by that
+handle. `⌘;` hides them, `⇧⌘;` locks them, and
 right-clicking an artboard offers Copy, Paste, Remove All and Lock All Guides — pasting applies
 one set of guides across as many artboards as you have selected.
 
@@ -537,6 +542,18 @@ is dropped: keeping it would mean keeping the document-level list alive for the 
 longer serves. Where two artboards overlap the **topmost** claims it, which is the same artboard
 a click would have resolved to.
 
+### The line and the handle answer different problems
+
+A guide's line lies right across the artwork, which makes it easy to grab when you meant a shape
+underneath it. The obvious fix — make guides harder to hit — trades one problem for another.
+
+So there are two targets and a setting that chooses between them. The line always *selects*; what
+the setting controls is whether it also *drags*. Selecting is what reveals the handle at the
+artboard's edge, which always drags, so a guide is never unreachable in either mode and the
+restrictive setting costs one click rather than access. The selected guide also thickens rather
+than changing colour, because the colour is the user's setting now and has to stay recognisable
+as theirs.
+
 ### A guide drag writes nothing until you let go
 
 The obvious implementation calls `moveGuide` on every pointermove, and that is what this one did
@@ -809,7 +826,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 283 unit tests (Vitest)
-npm run test:e2e   # 203 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 211 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

@@ -17,6 +17,8 @@ import {
   distributeSelection,
   flipSelection,
   setCornerRadius,
+  moveGuide,
+  removeGuide,
   setArtboardGrid,
   setBlur,
   setFill,
@@ -47,7 +49,14 @@ import { getLiveRadius } from '../tools/RadiusSession'
 import { getLiveStarRatio } from '../tools/StarRatioSession'
 import { toCss, toHex } from '../document/color'
 import { fontsByCategory, isBundledFont, nearestWeight } from '../text/FontRegistry'
-import { openDialog, saveDefaultGrid, setCornerRadiusMode, setEditor } from '../state/EditorStore'
+import {
+  clearGuideSelection,
+  openDialog,
+  saveDefaultGrid,
+  setCornerRadiusMode,
+  setEditor,
+} from '../state/EditorStore'
+import { liveGuide } from '../tools/GuideDrag'
 import { useDocument, useEditorStore, useLiveTransformTick, useSelectedNodes } from '../state/hooks'
 import { IconSelect, NumberField, Section, Select, TextField, common, IconButton } from './primitives'
 import { PaintPopover, PAINT_POPOVER_WIDTH } from './ColorPicker'
@@ -90,10 +99,81 @@ import {
 
 export function PropertyInspector() {
   const selected = useSelectedNodes()
+  const guide = useEditorStore((s) => s.selectedGuide)
   return (
     <div className="inspector-scroll">
-      {selected.length === 0 ? <DocumentSection /> : <SelectionSections nodes={selected} />}
+      {guide ? (
+        <GuideSection selected={guide} />
+      ) : selected.length === 0 ? (
+        <DocumentSection />
+      ) : (
+        <SelectionSections nodes={selected} />
+      )}
     </div>
+  )
+}
+
+/**
+ * The selected guide's position, editable.
+ *
+ * One field, labelled for the axis the guide actually constrains — a vertical
+ * guide has an X and no Y. The label scrubs like every other numeric field in
+ * the panel, so a guide can be nudged without going back to the canvas.
+ */
+function GuideSection({ selected }: { selected: { artboardId: string; guideId: string } }) {
+  const doc = useDocument()
+  // A drag writes nothing until release, so the readout would sit frozen
+  // through the gesture without this.
+  useEditorStore((s) => s.overlayTick)
+  const board = doc.nodes[selected.artboardId]
+  const guide =
+    board?.type === 'artboard' ? board.guides?.find((g) => g.id === selected.guideId) : undefined
+
+  useEffect(() => {
+    // The guide can be removed from the canvas while its section is open.
+    if (!guide) clearGuideSelection()
+  }, [guide])
+  if (!board || board.type !== 'artboard' || !guide) return null
+
+  const live = liveGuide()
+  const position =
+    live && live.guideId === guide.id && live.artboardId === board.id
+      ? live.position
+      : guide.position
+  const extent = guide.axis === 'x' ? board.transform.width : board.transform.height
+
+  return (
+    <Section title="Guide">
+      <div className="multi-note">{guide.axis === 'x' ? 'Vertical' : 'Horizontal'} · {board.name}</div>
+      <div className="field-row cols-3">
+        <NumberField
+          label={guide.axis.toUpperCase()}
+          title={`Position on the ${guide.axis.toUpperCase()} axis, within the artboard`}
+          value={round2(position)}
+          min={0}
+          max={extent}
+          disabled={board.guidesLocked}
+          onChange={(v, committing) =>
+            moveGuide(
+              board.id,
+              guide.id,
+              Math.min(extent, Math.max(0, v)),
+              committing ? undefined : `guide:${guide.id}`,
+            )
+          }
+        />
+      </div>
+      <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
+        <button
+          type="button"
+          className="button"
+          disabled={board.guidesLocked}
+          onClick={() => removeGuide(board.id, guide.id)}
+        >
+          Delete Guide
+        </button>
+      </div>
+    </Section>
   )
 }
 

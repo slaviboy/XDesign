@@ -18,6 +18,7 @@ import {
   deleteSelection,
   groupSelection,
   maskWithShape,
+  removeGuide,
   setGuidesLocked,
   outlineStrokeSelection,
   moveSelection,
@@ -250,10 +251,16 @@ export function installKeyboard(ctx: ToolContext, handlers: KeyboardHandlers): (
     // ---- Unmodified keys --------------------------------------------------
     switch (key) {
       case 'Delete':
-      case 'Backspace':
+      case 'Backspace': {
         e.preventDefault()
-        deleteSelection()
+        // A selected guide is not part of `selection`, so deleteSelection would
+        // not see it — and with a guide selected there is no node selection to
+        // delete anyway.
+        const guide = editorStore.getState().selectedGuide
+        if (guide) removeGuide(guide.artboardId, guide.guideId)
+        else deleteSelection()
         return
+      }
       case 'Escape':
         e.preventDefault()
         if (editorStore.getState().editingContext) setEditor({ editingContext: null })

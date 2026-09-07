@@ -23,6 +23,8 @@ import { artboardIds, geometryBounds, localMatrix } from '../document/SceneGraph
 import { beginGuideDrag, liveGuide, type LiveGuide } from '../tools/GuideDrag'
 import { docToScreen } from './Viewport'
 import { useDocument, useDocumentStore, useEditorStore } from '../state/hooks'
+import { selectGuide } from '../state/EditorStore'
+import { toCss } from '../document/color'
 import type { ArtboardNode, Guide, NodeId } from '../document/types'
 
 /** How far a grab strip reaches outside and inside its artboard edge, in px. */
@@ -43,10 +45,20 @@ function isLive(guide: Guide, live: LiveGuide | null): boolean {
 function guidesOf(board: ArtboardNode, live: LiveGuide | null): Guide[] {
   const stored = board.guides ?? []
   if (!live || live.artboardId !== board.id) return stored
+
+  // Dragged clear of the artboard: hidden, because releasing here removes it.
+  // Showing a guide floating outside the artboard it belongs to would be a
+  // picture of a state the model cannot hold.
+  const extent = live.axis === 'x' ? board.transform.width : board.transform.height
+  const outside = live.position < 0 || live.position > extent
+
   if (!live.guideId) {
-    return [...stored, { id: 'live', axis: live.axis, position: live.position }]
+    return outside ? stored : [...stored, { id: 'live', axis: live.axis, position: live.position }]
   }
-  return stored.map((g) => (g.id === live.guideId ? { ...g, position: live.position } : g))
+  return stored.flatMap((g) => {
+    if (g.id !== live.guideId) return [g]
+    return outside ? [] : [{ ...g, position: live.position }]
+  })
 }
 
 /** Everything a guide press needs from the DOM, in one place. */
@@ -57,10 +69,13 @@ function useStartDrag() {
       artboardId: NodeId,
       axis: 'x' | 'y',
       guideId: string | null,
+      drag = true,
     ) => {
       // Kept from the tools entirely: a guide is chrome, and dragging one must
       // work whichever instrument is selected.
       e.stopPropagation()
+      if (guideId) selectGuide(artboardId, guideId)
+      if (!drag) return
       const svg = e.currentTarget.ownerSVGElement
       if (!svg) return
       beginGuideDrag(artboardId, axis, guideId, e.nativeEvent, e.currentTarget, svg)
@@ -74,6 +89,9 @@ function useStartDrag() {
 export const ArtboardGuides = memo(function ArtboardGuides() {
   const doc = useDocument()
   const visible = useDocumentStore((s) => s.doc.settings.guidesVisible)
+  const color = useDocumentStore((s) => s.doc.settings.guideColor)
+  const dragMode = useDocumentStore((s) => s.doc.settings.guideDragMode)
+  const selected = useEditorStore((s) => s.selectedGuide)
   // A drag writes nothing to the document until it is released, so this is the
   // only thing that says the guide has moved. See GuideDrag.
   useEditorStore((s) => s.overlayTick)
@@ -93,7 +111,7 @@ export const ArtboardGuides = memo(function ArtboardGuides() {
   if (boards.length === 0) return null
 
   return (
-    <g className="artboard-guides">
+    <g className="artboard-guides" style={{ stroke: toCss(color) }}>
       {boards.map((board) => (
         <g key={board.id} transform={toSvgMatrix(localMatrix(board.transform))}>
           {guidesOf(board, live).map((g) => {
@@ -101,27 +119,32 @@ export const ArtboardGuides = memo(function ArtboardGuides() {
             const from = vertical
               ? { x1: g.position, y1: 0, x2: g.position, y2: board.transform.height }
               : { x1: 0, y1: g.position, x2: board.transform.width, y2: g.position }
+            const isSelected =
+              selected?.artboardId === board.id && selected.guideId === g.id
             return (
               <g key={g.id} data-guide={g.id}>
                 {/* The grab target: invisible, and far wider than the line, so
                     a guide can be caught without pixel-hunting. Same idiom as
                     the radius handles — a transparent hit shape in front of art
-                    that takes no pointer events. */}
+                    that takes no pointer events.
+                    In handle-only mode it still SELECTS, so a guide is always
+                    reachable by clicking it; only the drag moves to the handle. */}
                 {!board.guidesLocked && (
                   <line
                     {...from}
                     className="guide-hit"
                     vectorEffect="non-scaling-stroke"
                     pointerEvents="stroke"
-                    style={{ cursor: vertical ? 'ew-resize' : 'ns-resize' }}
-                    onPointerDown={(e) => startDrag(e, board.id, g.axis, g.id)}
+                    style={{ cursor: dragMode === 'line' ? (vertical ? 'ew-resize' : 'ns-resize') : 'pointer' }}
+                    onPointerDown={(e) => startDrag(e, board.id, g.axis, g.id, dragMode === 'line')}
                   />
                 )}
                 <line
                   {...from}
                   className={
                     `guide${board.guidesLocked ? ' locked' : ''}` +
-                    (isLive(g, live) ? ' active' : '')
+                    (isLive(g, live) ? ' active' : '') +
+                    (isSelected ? ' selected' : '')
                   }
                   vectorEffect="non-scaling-stroke"
                   pointerEvents="none"
@@ -201,12 +224,13 @@ export const GuideStrips = memo(function GuideStrips() {
 // ------------------------------------------------------------ the readout --
 
 /**
- * How far the measurement rule sits outside the artboard edge, in px.
+ * The rule sits ON the artboard's border, with its numbers just above it.
  *
- * Clear of the artboard's name label, which sits 7px above the same edge — the
- * numbers go above the rule, so the name stays legible underneath it.
+ * The artboard's name label occupies the same strip, so it is hidden for the
+ * length of the drag rather than the rule being pushed off the edge it is
+ * measuring — the whole point of the rule is that it lines up with the border.
  */
-const RULE_OFFSET = 20
+const RULE_OFFSET = 0
 
 /**
  * What a guide being dragged tells you: where it is, and what it divides.
@@ -307,3 +331,76 @@ function GuideChip({
     </g>
   )
 }
+
+// ------------------------------------------------------------- the handle --
+
+/** The grab tab on a selected guide, in px. */
+const HANDLE_LENGTH = 26
+const HANDLE_THICKNESS = 10
+
+/**
+ * The drag handle on the selected guide.
+ *
+ * Two jobs at once, which is why it is worth its own element: it shows WHICH
+ * guide is selected, at the artboard's edge where it cannot be lost among the
+ * artwork, and it is a target that can always be dragged — including when the
+ * line itself has been set not to be.
+ *
+ * Screen space, beside the strips, so it stays the same comfortable size at any
+ * zoom rather than becoming a speck or a slab.
+ */
+export const GuideHandle = memo(function GuideHandle() {
+  const doc = useDocument()
+  const viewport = useEditorStore((s) => s.viewport)
+  const visible = useDocumentStore((s) => s.doc.settings.guidesVisible)
+  const color = useDocumentStore((s) => s.doc.settings.guideColor)
+  const selected = useEditorStore((s) => s.selectedGuide)
+  // Follows the guide while it is being dragged, like everything else here.
+  useEditorStore((s) => s.overlayTick)
+  const live = liveGuide()
+  const startDrag = useStartDrag()
+  if (!visible || !selected) return null
+
+  const board = doc.nodes[selected.artboardId]
+  if (!board || board.type !== 'artboard' || board.guidesLocked) return null
+  const guide = board.guides?.find((g) => g.id === selected.guideId)
+  if (!guide) return null
+
+  const position =
+    live && live.guideId === guide.id && live.artboardId === board.id
+      ? live.position
+      : guide.position
+  const extent = guide.axis === 'x' ? board.transform.width : board.transform.height
+  // Hidden along with the guide when it has been dragged clear of the artboard.
+  if (position < 0 || position > extent) return null
+
+  const bounds = geometryBounds(doc, selected.artboardId)
+  const origin = docToScreen(viewport, { x: bounds.x, y: bounds.y })
+  const vertical = guide.axis === 'x'
+  const at = (vertical ? origin.x : origin.y) + position * viewport.zoom
+
+  const rect = vertical
+    ? {
+        x: at - HANDLE_LENGTH / 2,
+        y: origin.y - HANDLE_THICKNESS,
+        width: HANDLE_LENGTH,
+        height: HANDLE_THICKNESS,
+      }
+    : {
+        x: origin.x - HANDLE_THICKNESS,
+        y: at - HANDLE_LENGTH / 2,
+        width: HANDLE_THICKNESS,
+        height: HANDLE_LENGTH,
+      }
+
+  return (
+    <rect
+      {...rect}
+      rx={2}
+      className="guide-handle"
+      data-guide-handle={guide.id}
+      style={{ fill: toCss(color), cursor: vertical ? 'ew-resize' : 'ns-resize' }}
+      onPointerDown={(e) => startDrag(e, board.id, guide.axis, guide.id)}
+    />
+  )
+})

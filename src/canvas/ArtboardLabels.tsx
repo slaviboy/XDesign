@@ -24,6 +24,7 @@ import { transformBounds } from '../geometry/Bounds'
 import { renameNode } from '../history/Commands'
 import { beginArtboardLabelDrag } from '../tools/ArtboardLabelDrag'
 import { getLiveMatrix } from '../tools/DragSession'
+import { liveGuide } from '../tools/GuideDrag'
 import { setEditor, setSelection } from '../state/EditorStore'
 import { useDocument, useEditorStore, useLiveTransformTick } from '../state/hooks'
 import type { DesignDocument, DesignNode, NodeId } from '../document/types'
@@ -33,11 +34,16 @@ export const ArtboardLabels = memo(function ArtboardLabels() {
   const viewport = useEditorStore((s) => s.viewport)
   const selection = useEditorStore((s) => s.selection)
   const renaming = useEditorStore((s) => s.renamingArtboardId)
+  // The guide readout draws its rule along the artboard's top border, where the
+  // name sits. Two things cannot share that strip, and the measurement is the
+  // one that is only there for a moment.
+  useEditorStore((s) => s.overlayTick)
+  const measuring = !!liveGuide()
   // Re-renders on every live-transform frame, so a label tracks the artboard
   // through a drag instead of jumping to it on release.
   void useLiveTransformTick()
   const boards = artboardIds(doc)
-  if (boards.length === 0) return null
+  if (boards.length === 0 || measuring) return null
 
   return (
     <g className="artboard-labels">
