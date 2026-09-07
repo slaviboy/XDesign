@@ -27,6 +27,7 @@ import {
   type Paint,
   type PathNode,
   type PolygonNode,
+  type RepeatGridNode,
   type RadialGradientPaint,
   type RectNode,
   type RGBA,
@@ -174,6 +175,25 @@ export function createGroup(
     ...base('group', 'Group', transform),
     type: 'group',
     children,
+    style: cloneStyle({ fill: { type: 'none' } }),
+  }
+}
+
+export function createRepeatGrid(
+  children: NodeId[],
+  cell: { width: number; height: number },
+  transform: Partial<Transform> = {},
+): RepeatGridNode {
+  return {
+    ...base('repeat-grid', 'Repeat Grid', transform),
+    type: 'repeat-grid',
+    children,
+    rows: 1,
+    columns: 1,
+    gutterX: 16,
+    gutterY: 16,
+    cellWidth: Math.max(1, cell.width),
+    cellHeight: Math.max(1, cell.height),
     style: cloneStyle({ fill: { type: 'none' } }),
   }
 }

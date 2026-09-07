@@ -22,8 +22,9 @@ import {
   worldMatrix,
 } from '../document/SceneGraph'
 import { docToScreen } from './Viewport'
+import { angleBetween, rotationCursor } from './cursors'
 import { liveTransform } from './LiveTransform'
-import { getDragMode, getLiveMatrix, getLiveSize, isDragging } from '../tools/DragSession'
+import { getDragMode, getLiveMatrix, getLiveRotation, getLiveSize, isDragging } from '../tools/DragSession'
 import { getEditingSubpaths } from '../tools/PathEditing'
 import { useDocument, useEditorStore } from '../state/hooks'
 import { RESIZE_HANDLES, type ResizeHandle } from '../tools/DragSession'
@@ -31,7 +32,18 @@ import type { NodeId } from '../document/types'
 import type { Viewport } from '../state/EditorStore'
 
 const HANDLE_SIZE = 7
-const ROTATE_ZONE = 14
+/**
+ * Rotation grab area, just outside each corner.
+ *
+ * Bigger than the resize handle so the corner is easy to reach, and drawn
+ * BEFORE the handles so that when the two overlap the handle wins the hit test
+ * — resizing is the more common intent when the pointer is exactly on a handle.
+ *
+ * Sized as a trade-off: large enough to grab without precision, small enough
+ * that a drag starting on nearby empty canvas is still a marquee rather than an
+ * accidental rotation of whatever happens to be selected.
+ */
+const ROTATE_ZONE = 18
 
 /** Where each handle sits, as a 0..1 fraction of the frame. */
 const HANDLE_POS: Record<ResizeHandle, Vec2> = {
@@ -113,7 +125,9 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
       {nodeEditingId ? (
         <PathPointOverlay viewport={viewport} tick={tick} />
       ) : (
-        frame && <TransformFrame frame={frame} multiple={selection.length > 1} dragging={dragging} />
+        frame && (
+          <TransformFrame frame={frame} dragging={dragging} multiple={selection.length > 1} />
+        )
       )}
 
       <MarqueeBox viewport={viewport} />
@@ -233,12 +247,12 @@ function outlineFor(
 
 function TransformFrame({
   frame,
-  multiple,
   dragging,
+  multiple,
 }: {
   frame: Frame
-  multiple: boolean
   dragging: boolean
+  multiple: boolean
 }) {
   const [tl, tr, , bl] = frame.corners as [Vec2, Vec2, Vec2, Vec2]
 
@@ -246,6 +260,8 @@ function TransformFrame({
     x: tl.x + (tr.x - tl.x) * f.x + (bl.x - tl.x) * f.y,
     y: tl.y + (tr.y - tl.y) * f.x + (bl.y - tl.y) * f.y,
   })
+
+  const frameCenter = at({ x: 0.5, y: 0.5 })
 
   const mode = getDragMode()
   const showBadge = dragging && (mode === 'resize' || mode === 'move')
@@ -257,27 +273,33 @@ function TransformFrame({
         points={frame.corners.map((p) => `${p.x},${p.y}`).join(' ')}
       />
 
-      {/* Rotation zones sit just outside each corner. Drawn first so the
-          resize handle on the same corner wins the hit test. */}
-      {!multiple &&
-        (['nw', 'ne', 'se', 'sw'] as ResizeHandle[]).map((h) => {
-          const p = at(HANDLE_POS[h])
-          const ox = h.includes('w') ? -ROTATE_ZONE / 2 : ROTATE_ZONE / 2
-          const oy = h.includes('n') ? -ROTATE_ZONE / 2 : ROTATE_ZONE / 2
-          return (
-            <rect
-              key={`rot-${h}`}
-              data-handle="rotate"
-              className="rotate-zone"
-              x={p.x + ox - ROTATE_ZONE / 2}
-              y={p.y + oy - ROTATE_ZONE / 2}
-              width={ROTATE_ZONE}
-              height={ROTATE_ZONE}
-              pointerEvents="all"
-              style={{ cursor: 'crosshair' }}
-            />
-          )
-        })}
+      {/* Rotation zones sit just outside each corner. Drawn before the resize
+          handles so the handle wins where the two overlap. Rendered for
+          multi-selection too — rotating a group of objects about their shared
+          centre is exactly what the frame implies. */}
+      {(['nw', 'ne', 'se', 'sw'] as ResizeHandle[]).map((h) => {
+        const p = at(HANDLE_POS[h])
+        const ox = h.includes('w') ? -ROTATE_ZONE / 2 : ROTATE_ZONE / 2
+        const oy = h.includes('n') ? -ROTATE_ZONE / 2 : ROTATE_ZONE / 2
+        // Direction from the frame's centre out to this corner, in screen
+        // space — so the cursor already reflects the object's rotation and the
+        // viewport, not just which corner was nominally grabbed.
+        const outward = angleBetween(frameCenter, p)
+        return (
+          <rect
+            key={`rot-${h}`}
+            data-handle="rotate"
+            data-corner={h}
+            className="rotate-zone"
+            x={p.x + ox - ROTATE_ZONE / 2}
+            y={p.y + oy - ROTATE_ZONE / 2}
+            width={ROTATE_ZONE}
+            height={ROTATE_ZONE}
+            pointerEvents="all"
+            style={{ cursor: rotationCursor(outward) }}
+          />
+        )
+      })}
 
       {RESIZE_HANDLES.map((h) => {
         const p = at(HANDLE_POS[h])
@@ -307,11 +329,22 @@ function TransformFrame({
         <SizeBadge
           x={frame.screenBounds.x + frame.screenBounds.width / 2}
           y={frame.screenBounds.y - 14}
-          text={`${Math.round(frame.rotation)}°`}
+          // A multi-selection's frame is axis-aligned, so its own angle is
+          // always 0 — the turn so far is the only meaningful figure there.
+          // A single object reports its resulting absolute angle.
+          text={
+            multiple
+              ? `${signed(Math.round(getLiveRotation()))}°`
+              : `${Math.round(frame.rotation)}°`
+          }
         />
       )}
     </g>
   )
+}
+
+function signed(n: number): string {
+  return n > 0 ? `+${n}` : String(n)
 }
 
 function SizeBadge({ x, y, text }: { x: number; y: number; text: string }) {

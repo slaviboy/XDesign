@@ -11,7 +11,7 @@
  * only the effective value is meaningful across both.
  */
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   alignSelection,
   distributeSelection,
@@ -27,8 +27,9 @@ import {
   setTextStyle,
   updateSettings,
   renameDocument,
+  matchSize,
 } from '../history/Commands'
-import { runBooleanOperation } from '../history/BooleanCommands'
+import { setRepeatGridParams } from '../history/RepeatGridCommands'
 import { geometryBounds, worldMatrix } from '../document/SceneGraph'
 import { decompose } from '../geometry/Matrix'
 import { toCss, toHex } from '../document/color'
@@ -39,9 +40,9 @@ import { NumberField, Section, Select, TextField, common, IconButton } from './p
 import { PaintPopover } from './ColorPicker'
 import {
   AlignBottomIcon, AlignCenterHIcon, AlignCenterVIcon, AlignLeftIcon, AlignRightIcon,
-  AlignTopIcon, DistributeHIcon, DistributeVIcon, ExcludeIcon, FlipHIcon, FlipVIcon,
-  IntersectIcon, SubtractIcon, TextAlignCenterIcon, TextAlignLeftIcon, TextAlignRightIcon,
-  UnionIcon,
+  AlignTopIcon, DistributeHIcon, DistributeVIcon, FlipHIcon, FlipVIcon,
+  LinkBracket, MatchHeightIcon, MatchSizeIcon, MatchWidthIcon,
+  RotateIcon, TextAlignCenterIcon, TextAlignLeftIcon, TextAlignRightIcon,
 } from './icons'
 import { hasStyle, type DesignNode, type Paint, type Style } from '../document/types'
 
@@ -144,6 +145,8 @@ function DocumentSection() {
 function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
   const doc = useDocument()
   const multiple = nodes.length > 1
+  const [aspectLocked, setAspectLocked] = useState(false)
+  const aspectRatioRef = useRef<number | null>(null)
   const styled = nodes.filter(hasStyle)
 
   // World-space geometry, so the readout matches what is on screen even for a
@@ -180,31 +183,92 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
     }
   }
 
+  // The ratio is captured at the MOMENT the lock is engaged (or the selection
+  // changes) and then held. Recomputing it from the live W/H on every render
+  // would feed each rounded result into the next ratio, so proportions visibly
+  // drift as you type. Latest sizes are kept in a ref so the capture can read
+  // them without making them dependencies.
+  const selectionKey = nodes.map((n) => n.id).join(',')
+  const liveSizeRef = useRef({ w: effectiveW, h: effectiveH })
+  liveSizeRef.current = { w: effectiveW, h: effectiveH }
+
+  useEffect(() => {
+    const { w, h } = liveSizeRef.current
+    aspectRatioRef.current = aspectLocked && w && h ? w / h : null
+  }, [aspectLocked, selectionKey])
+
+  const applyWidth = (value: number) => {
+    applySize('width', value)
+    const ratio = aspectRatioRef.current
+    if (ratio) applySize('height', Math.max(0.5, value / ratio))
+  }
+  const applyHeight = (value: number) => {
+    applySize('height', value)
+    const ratio = aspectRatioRef.current
+    if (ratio) applySize('width', Math.max(0.5, value * ratio))
+  }
+
   return (
     <>
-      <Section title={multiple ? `${nodes.length} objects` : nodes[0]!.name}>
-        <div className="field-row">
-          <NumberField label="X" value={x} onChange={applyX} scrubStep={0.5} />
-          <NumberField label="Y" value={y} onChange={applyY} scrubStep={0.5} />
-        </div>
-        <div className="field-row">
-          <NumberField label="W" value={effectiveW} min={0.5} onChange={(v) => applySize('width', v)} scrubStep={0.5} />
-          <NumberField label="H" value={effectiveH} min={0.5} onChange={(v) => applySize('height', v)} scrubStep={0.5} />
-        </div>
-        <div className="field-row">
+      <div className="selection-name" title={multiple ? undefined : nodes[0]!.name}>
+        <span className="truncate">{multiple ? `${nodes.length} objects selected` : nodes[0]!.name}</span>
+      </div>
+
+      <Section title="Transform">
+        <div className="transform-grid">
+          <NumberField className="tf-w" label="W" value={effectiveW} min={0.5} onChange={(v) => applyWidth(v)} scrubStep={0.5} />
+          <button
+            type="button"
+            className={`aspect-lock${aspectLocked ? ' locked' : ''}`}
+            aria-label={aspectLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+            aria-pressed={aspectLocked}
+            data-testid="aspect-lock"
+            title={aspectLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+            onClick={() => setAspectLocked((v) => !v)}
+          >
+            <LinkBracket locked={aspectLocked} />
+          </button>
+          <NumberField className="tf-x" label="X" value={x} onChange={applyX} scrubStep={0.5} />
           <NumberField
-            label="∠"
+            className="tf-rot"
+            label={<RotateIcon size={13} />}
+            title="Rotation"
             value={rotation}
             suffix="°"
             scrubStep={0.5}
-            onChange={(v) => {
-              for (const node of nodes) setNodeTransform(node.id, { rotation: v }, `rot:${node.id}`)
+            onChange={(v, committing) => {
+              for (const node of nodes) {
+                setNodeTransform(node.id, { rotation: v }, committing ? undefined : `rot:${node.id}`)
+              }
             }}
           />
-          <div className="icon-row">
-            <IconButton icon={<FlipHIcon />} label="Flip horizontal" onClick={() => flipSelection('h')} />
-            <IconButton icon={<FlipVIcon />} label="Flip vertical" onClick={() => flipSelection('v')} />
-          </div>
+
+          <NumberField className="tf-h" label="H" value={effectiveH} min={0.5} onChange={(v) => applyHeight(v)} scrubStep={0.5} />
+          <NumberField className="tf-y" label="Y" value={y} onChange={applyY} scrubStep={0.5} />
+        </div>
+
+        <div className="transform-actions">
+          <IconButton icon={<FlipHIcon />} label="Flip horizontal" onClick={() => flipSelection('h')} />
+          <IconButton icon={<FlipVIcon />} label="Flip vertical" onClick={() => flipSelection('v')} />
+          <span className="transform-actions-gap" />
+          <IconButton
+            icon={<MatchWidthIcon />}
+            label="Match width"
+            disabled={!multiple}
+            onClick={() => matchSize('width')}
+          />
+          <IconButton
+            icon={<MatchHeightIcon />}
+            label="Match height"
+            disabled={!multiple}
+            onClick={() => matchSize('height')}
+          />
+          <IconButton
+            icon={<MatchSizeIcon />}
+            label="Match size"
+            disabled={!multiple}
+            onClick={() => matchSize('both')}
+          />
         </div>
       </Section>
 
@@ -231,35 +295,12 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
         </div>
       </Section>
 
-      {multiple && <BooleanSection count={nodes.length} />}
-
       {styled.length > 0 && <AppearanceSection nodes={styled} />}
+      <RepeatGridSection nodes={nodes} />
       <ShapeSection nodes={nodes} />
       <TextSection nodes={nodes} />
       <ExportSection nodes={nodes} />
     </>
-  )
-}
-
-function BooleanSection({ count }: { count: number }) {
-  const [busy, setBusy] = useState(false)
-  const run = async (op: 'union' | 'subtract' | 'intersect' | 'exclude') => {
-    setBusy(true)
-    try {
-      await runBooleanOperation(op)
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <Section title={`Combine (${count})`}>
-      <div className="icon-row">
-        <IconButton icon={<UnionIcon />} label="Union" disabled={busy} onClick={() => void run('union')} />
-        <IconButton icon={<SubtractIcon />} label="Subtract" disabled={busy} onClick={() => void run('subtract')} />
-        <IconButton icon={<IntersectIcon />} label="Intersect" disabled={busy} onClick={() => void run('intersect')} />
-        <IconButton icon={<ExcludeIcon />} label="Exclude" disabled={busy} onClick={() => void run('exclude')} />
-      </div>
-    </Section>
   )
 }
 
@@ -400,7 +441,7 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
 
 function Swatch({ paint, onClick }: { paint: Paint | null; onClick: (e: React.MouseEvent) => void }) {
   const background = !paint
-    ? 'repeating-linear-gradient(45deg, #bbb 0 4px, #eee 4px 8px)'
+    ? 'repeating-linear-gradient(45deg, var(--checker) 0 4px, var(--checker-bg) 4px 8px)'
     : paint.type === 'solid'
       ? toCss(paint.color)
       : paint.type === 'linear'
@@ -408,7 +449,7 @@ function Swatch({ paint, onClick }: { paint: Paint | null; onClick: (e: React.Mo
         : paint.type === 'radial'
           ? `radial-gradient(circle, ${paint.stops.map((s) => toCss(s.color)).join(', ')})`
           : paint.type === 'ref'
-            ? 'repeating-linear-gradient(45deg, #ddd 0 3px, #fff 3px 6px)'
+            ? 'repeating-linear-gradient(45deg, var(--checker) 0 3px, var(--checker-bg) 3px 6px)'
             : 'transparent'
 
   const title = !paint ? 'Mixed' : paint.type === 'solid' ? toHex(paint.color) : titleCase(paint.type)
@@ -424,7 +465,7 @@ function Swatch({ paint, onClick }: { paint: Paint | null; onClick: (e: React.Mo
       <span className="swatch-fill" style={{ background }} />
       {paint?.type === 'none' && (
         <svg viewBox="0 0 20 20" style={{ position: 'absolute', inset: 0 }}>
-          <line x1="2" y1="18" x2="18" y2="2" stroke="#d7373f" strokeWidth="1.5" />
+          <line x1="2" y1="18" x2="18" y2="2" style={{ stroke: 'var(--error)' }} strokeWidth="1.5" />
         </svg>
       )}
     </button>
@@ -434,6 +475,63 @@ function Swatch({ paint, onClick }: { paint: Paint | null; onClick: (e: React.Mo
 // ---------------------------------------------------------------------------
 // Shape-specific
 // ---------------------------------------------------------------------------
+
+function RepeatGridSection({ nodes }: { nodes: DesignNode[] }) {
+  const grids = nodes.filter((n) => n.type === 'repeat-grid')
+  if (grids.length === 0) return null
+
+  const rows = common(grids, (n) => (n.type === 'repeat-grid' ? n.rows : 1))
+  const columns = common(grids, (n) => (n.type === 'repeat-grid' ? n.columns : 1))
+  const gutterX = common(grids, (n) => (n.type === 'repeat-grid' ? n.gutterX : 0))
+  const gutterY = common(grids, (n) => (n.type === 'repeat-grid' ? n.gutterY : 0))
+
+  const apply = (patch: Parameters<typeof setRepeatGridParams>[1], committing: boolean) => {
+    for (const grid of grids) {
+      setRepeatGridParams(grid.id, patch, committing ? undefined : `grid:${grid.id}`)
+    }
+  }
+
+  return (
+    <Section title="Repeat Grid">
+      <div className="field-row">
+        <NumberField
+          label="Cols"
+          value={columns}
+          min={1}
+          max={200}
+          precision={0}
+          onChange={(v, committing) => apply({ columns: v }, committing)}
+        />
+        <NumberField
+          label="Rows"
+          value={rows}
+          min={1}
+          max={200}
+          precision={0}
+          onChange={(v, committing) => apply({ rows: v }, committing)}
+        />
+      </div>
+      <div className="field-row">
+        <NumberField
+          label="Gap X"
+          value={gutterX}
+          scrubStep={0.5}
+          onChange={(v, committing) => apply({ gutterX: v }, committing)}
+        />
+        <NumberField
+          label="Gap Y"
+          value={gutterY}
+          scrubStep={0.5}
+          onChange={(v, committing) => apply({ gutterY: v }, committing)}
+        />
+      </div>
+      <div className="multi-note">
+        Every cell shows the same content — edit it once and all repeats follow.
+        Use Expand Grid to make them independent.
+      </div>
+    </Section>
+  )
+}
 
 function ShapeSection({ nodes }: { nodes: DesignNode[] }) {
   const rects = nodes.filter((n) => n.type === 'rect' || n.type === 'image')

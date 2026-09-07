@@ -133,7 +133,8 @@ function clamp(value: number, lo: number, hi: number): number {
 // ------------------------------------------------------------- number field
 
 export interface NumberFieldProps {
-  label?: string
+  /** A node, not just a string, so a field can be labelled with an icon. */
+  label?: ReactNode
   value: number | null
   onChange: (value: number, committing: boolean) => void
   min?: number
@@ -145,6 +146,8 @@ export interface NumberFieldProps {
   suffix?: string
   disabled?: boolean
   title?: string
+  /** Extra class on the field wrapper, so a grid parent can place it. */
+  className?: string
 }
 
 export function NumberField({
@@ -159,6 +162,7 @@ export function NumberField({
   suffix,
   disabled,
   title,
+  className,
 }: NumberFieldProps) {
   // `null` means a mixed multi-selection; show a dash rather than a lie.
   const [draft, setDraft] = useState<string | null>(null)
@@ -223,7 +227,7 @@ export function NumberField({
   }
 
   return (
-    <div className={`field${disabled ? ' disabled' : ''}`} title={title}>
+    <div className={`field${disabled ? ' disabled' : ''}${className ? ` ${className}` : ''}`} title={title}>
       {label && (
         <span
           className="field-label"

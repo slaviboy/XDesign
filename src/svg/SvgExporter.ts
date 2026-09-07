@@ -21,7 +21,7 @@ import { gradientId, isGradient, sortedStops } from '../canvas/paint'
 import { layoutText, lineOffsetX } from '../text/TextLayout'
 import { fontStack } from '../text/FontRegistry'
 import { canEmbed, embedFontCss } from '../text/FontEmbedder'
-import { hasStyle } from '../document/types'
+import { hasStyle, repeatGridOffsets, repeatGridSize } from '../document/types'
 import type {
   DesignDocument,
   DesignNode,
@@ -221,6 +221,26 @@ function emitBody(ctx: EmitContext, node: DesignNode): string {
 
     case 'group':
       return node.children.map((c) => emitNode(ctx, c, false)).join('')
+
+    case 'repeat-grid': {
+      // Emitted as real repeated vector, one <g> per cell. The source markup is
+      // built once and reused, so a 10x10 grid does not serialise its contents
+      // a hundred times over.
+      const cellMarkup = node.children.map((c) => emitNode(ctx, c, false)).join('')
+      if (!cellMarkup) return ''
+      const size = repeatGridSize(node)
+      const clipId = `rgclip-${safeId(node.id)}`
+      ctx.defs.push(
+        `<clipPath id="${clipId}"><rect width="${round(size.width, 3)}" height="${round(size.height, 3)}"/></clipPath>`,
+      )
+      const cells = repeatGridOffsets(node)
+        .map(
+          (o) =>
+            `<g transform="translate(${round(o.x, 3)} ${round(o.y, 3)})">${cellMarkup}</g>`,
+        )
+        .join('')
+      return `<g clip-path="url(#${clipId})">${cells}</g>`
+    }
 
     case 'image':
       return emitImage(ctx, node)

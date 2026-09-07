@@ -1,13 +1,25 @@
 /**
- * Design tokens.
+ * Design tokens, light and dark.
  *
  * Tuned to read as a desktop creative application rather than a web dashboard:
  * hairline borders instead of shadows, 11-12px type, 22-26px control heights,
  * and a narrow neutral palette so the artwork on the canvas is the only
  * saturated thing on screen.
+ *
+ * THEMING RULE: the theme colours the CHROME only. Artboard backgrounds are
+ * document data — a white artboard stays white in dark mode, because the
+ * artwork is not part of the UI and must look the same to everyone who opens
+ * the file. That is also why the selection handles and the grid keep values
+ * that read against artwork rather than against the panels.
+ *
+ * Every colour used anywhere in the app is declared here. A literal colour in
+ * app.css would silently survive the theme switch and break in dark mode.
  */
 
-:root {
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
   /* Neutrals — the app chrome */
   --bg-app: #f0f0f0;
   --bg-panel: #ffffff;
@@ -23,30 +35,66 @@
   --border: #d6d6d6;
   --border-strong: #bfbfbf;
   --border-subtle: #e8e8e8;
+  --hairline: rgba(0, 0, 0, 0.12);
 
+  /*
+   * A three-step ramp, each step clearing AA on every panel surface. The
+   * original had --text-muted (#757575) LIGHTER than --text-faint (#9a9a9a)
+   * only by accident of naming — faint was the lighter of the two and failed
+   * AA outright at 2.81:1. Now muted really is stronger than faint, and both
+   * pass on --bg-panel, --bg-panel-alt and --bg-toolbar.
+   */
   --text: #2c2c2c;
-  --text-muted: #757575;
-  --text-faint: #9a9a9a;
-  --text-inverse: #ffffff;
+  --text-muted: #5c5c5c;
+  --text-faint: #6e6e6e;
 
   /* Selection / interaction — a single blue, used sparingly */
   --accent: #1473e6;
   --accent-hover: #0d66d0;
-  --accent-soft: #e5f0fd;
   --accent-contrast: #ffffff;
 
-  --magenta: #d83790;
-  --warn: #d97706;
-  --error: #d7373f;
-  --success: #268e6c;
+  /*
+   * Status colours here are FOREGROUND values — they have to clear 4.5:1 as
+   * text on --bg-panel. The originals (#d97706 / #268e6c / #d83790) measured
+   * 3.19 / 4.06 / 4.31 on white and failed.
+   *
+   * They cannot double as notification backgrounds: a colour light enough to
+   * read as text on white is far too light to sit under white text. That is
+   * what --notify-*-bg below is for, and why the two sets differ.
+   */
+  --magenta: #bd2a7b;  /* 5.55:1 on white */
+  --warn: #a1620a;     /* 4.92:1 */
+  --error: #d7373f;    /* 4.66:1 */
 
-  /* Canvas chrome */
+  /* Notification chips: white text sits on these, in BOTH themes. */
+  --notify-warn-bg: #a1620a;    /* white 4.92:1 */
+  --notify-error-bg: #b8353c;   /* white 5.81:1 */
+  --notify-success-bg: #1c7a5c; /* white 5.27:1 */
+
+  /* Floating surfaces that sit above everything and stay dark in both themes */
+  --overlay-strong: #2f2f2f;
+  --overlay-strong-text: #ffffff;
+  --backdrop: rgba(0, 0, 0, 0.28);
+
+  /* Canvas chrome. These read against ARTWORK, not against the panels. */
   --handle-fill: #ffffff;
   --handle-stroke: #1473e6;
   --guide: #d83790;
   --snap-guide: #ff3b8d;
   --grid-line: rgba(0, 0, 0, 0.07);
   --artboard-label: #6e6e6e;
+
+  /* Alpha checkerboard, behind translucent swatches */
+  --checker: #cccccc;
+  --checker-bg: #ffffff;
+  --thumb-bg: #ffffff;
+  /* Freehand preview, drawn over the pasteboard as well as over artboards. */
+  --preview-stroke: #000000;
+  /* Branding glyph on the app mark tile. */
+  --mark-fg: #e35ba6;
+
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
 
   /* Metrics */
   --topbar-height: 44px;
@@ -66,4 +114,90 @@
 
   --shadow-panel: 0 2px 8px rgba(0, 0, 0, 0.12);
   --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.16);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-app: #1e1e1e;
+  --bg-panel: #262626;
+  --bg-panel-alt: #2b2b2b;
+  /* Deliberately darker than the panels so white artboards read as lit objects
+     sitting on the pasteboard rather than merging into the chrome. */
+  --bg-workspace: #141414;
+  --bg-input: #333333;
+  --bg-input-hover: #3a3a3a;
+  --bg-hover: #333333;
+  --bg-active: #404040;
+  --bg-selected: #16375c;
+  --bg-toolbar: #232323;
+
+  --border: #3d3d3d;
+  --border-strong: #565656;
+  --border-subtle: #313131;
+  --hairline: rgba(255, 255, 255, 0.14);
+
+  --text: #e6e6e6;          /* 12.13:1 on --bg-panel */
+  --text-muted: #a3a3a3;    /* 6.00:1 */
+  /* #767676 measured 3.33:1 and failed AA for every section title and field
+     label in the inspector, which is most of the small text in the app. */
+  --text-faint: #949494;    /* 4.99:1 */
+
+  /*
+   * The accent does NOT get lighter in dark mode, which is the intuitive move
+   * but the wrong one here: it is a FILL under white text (primary buttons,
+   * menu hover, the selected layer row). Lightening it to #2680eb drops white
+   * to 3.91:1 — worse than the light theme's own 4.54:1. Held at #1473e6, which
+   * keeps white at 4.54:1 and still clears the 3:1 non-text threshold (3.33:1)
+   * against the panel.
+   */
+  --accent: #1473e6;
+  /*
+   * Hover DEEPENS rather than lightens, in dark mode as well as light. The
+   * instinct is to lighten on a dark ground, but the accent is a fill under
+   * white text: every blue lighter than #1473e6 drops white below 4.5:1. And
+   * #1473e6 is already the lightest blue that also clears 3:1 against the
+   * panel, so there is no headroom above it. Deepening is the only direction
+   * that satisfies both.
+   */
+  --accent-hover: #0d66d0;
+  --accent-contrast: #ffffff;
+
+  /* Foreground values again — measured on --bg-panel #262626, not on white.
+     There is no --success here: "success" only ever appears as a notification
+     chip, which uses --notify-success-bg. A foreground token nothing renders
+     is a token that silently rots. */
+  --magenta: #e35bab;  /* 4.58:1 */
+  --warn: #e68619;     /* 5.61:1 */
+  --error: #f0787f;    /* 5.55:1 — #ec5b62 sat exactly on 4.50 */
+
+  --overlay-strong: #454545;
+  --overlay-strong-text: #ffffff;
+  --backdrop: rgba(0, 0, 0, 0.5);
+
+  /* Unchanged on purpose: handles sit on top of artwork, which is usually a
+     white artboard, so they must keep reading against the artwork. */
+  --handle-fill: #ffffff;
+  --handle-stroke: #2680eb;
+  --guide: #e35bab;
+  --snap-guide: #ff5ba0;
+  /* Mid-grey rather than black: the grid crosses both the near-black pasteboard
+     and white artboards, and has to stay visible on both. */
+  --grid-line: rgba(128, 128, 128, 0.28);
+  --artboard-label: #9a9a9a;
+
+  --checker: #4a4a4a;
+  --checker-bg: #2b2b2b;
+  --thumb-bg: #e6e6e6;
+  /* Black is invisible on the near-black pasteboard, and this preview is
+     transient chrome: being visible matters more than matching the final
+     stroke colour, which the shape adopts the moment it is committed. */
+  --preview-stroke: #e6e6e6;
+  --mark-fg: #f07ac0;
+
+  --scrollbar-thumb: rgba(255, 255, 255, 0.22);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.34);
+
+  --shadow-panel: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-popover: 0 6px 20px rgba(0, 0, 0, 0.55);
 }

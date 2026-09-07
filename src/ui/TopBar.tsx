@@ -10,7 +10,7 @@
  * says so is honest; one that looks live and does nothing is not.
  */
 
-import { memo, useCallback, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import {
   importFilesFlow, newDocument, openDocumentFlow, saveDocumentFlow,
 } from '../app/fileOperations'
@@ -25,8 +25,16 @@ import { openDialog, setEditor, type WorkspaceTab } from '../state/EditorStore'
 import { useDocumentStore, useEditorStore } from '../state/hooks'
 import { MOD_LABEL } from '../shortcuts/bindings'
 import { MenuHost, useMenuState, type MenuItemSpec } from './Menu'
+import {
+  getResolvedTheme,
+  getThemePreference,
+  setThemePreference,
+  subscribeTheme,
+  toggleTheme,
+  type ThemePreference,
+} from '../state/theme'
 import { Tooltip } from './primitives'
-import { MenuIcon, PlayIcon, GridIcon, MagnetIcon } from './icons'
+import { MenuIcon, PlayIcon, GridIcon, MagnetIcon, SunIcon, MoonIcon, MonitorIcon } from './icons'
 
 const MOD = MOD_LABEL
 
@@ -40,6 +48,8 @@ export const TopBar = memo(function TopBar() {
   const selectionCount = useEditorStore((s) => s.selection.length)
   const menu = useMenuState()
   const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const [themePreference, setLocalThemePreference] = useState<ThemePreference>(() => getThemePreference())
+  useEffect(() => subscribeTheme((_, pref) => setLocalThemePreference(pref)), [])
 
   const buildMenu = useCallback((): MenuItemSpec[] => {
     const hasSelection = selectionCount > 0
@@ -103,19 +113,28 @@ export const TopBar = memo(function TopBar() {
         ],
       },
       { label: 'New Artboard…', onSelect: () => openDialog('artboard-preset') },
+      {
+        kind: 'submenu',
+        label: 'Theme',
+        items: [
+          { label: 'Light', checked: themePreference === 'light', onSelect: () => setThemePreference('light') },
+          { label: 'Dark', checked: themePreference === 'dark', onSelect: () => setThemePreference('dark') },
+          { label: 'Follow system', checked: themePreference === 'system', onSelect: () => setThemePreference('system') },
+        ],
+      },
       { kind: 'separator' },
       { label: 'Preferences…', onSelect: () => openDialog('preferences') },
       { label: 'Keyboard Shortcuts', shortcut: `${MOD}/`, onSelect: () => openDialog('shortcuts') },
       { label: 'About XDesign', onSelect: () => openDialog('about') },
     ]
-  }, [gridVisible, history.canRedo, history.canUndo, selectionCount, snapEnabled])
+  }, [gridVisible, history.canRedo, history.canUndo, selectionCount, snapEnabled, themePreference])
 
   return (
     <header className="topbar">
       <div className="topbar-left">
         <span className="app-mark" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 32 32">
-            <path d="M9 9l14 14M23 9L9 23" stroke="#e35ba6" strokeWidth="3.4" strokeLinecap="round" />
+            <path d="M9 9l14 14M23 9L9 23" strokeWidth="3.4" strokeLinecap="round" />
           </svg>
         </span>
         <input
@@ -140,6 +159,7 @@ export const TopBar = memo(function TopBar() {
       </nav>
 
       <div className="topbar-right">
+        <ThemeToggle />
         <Tooltip label="Show grid" shortcut={`${MOD}'`}>
           <button
             type="button"
@@ -189,6 +209,52 @@ export const TopBar = memo(function TopBar() {
     </header>
   )
 })
+
+/**
+ * Cycles light -> dark -> follow-system.
+ *
+ * Three states rather than two because "follow the OS" is a real preference:
+ * a two-way switch would silently stop tracking the system the first time it
+ * is touched. The icon shows the CURRENT state, and the tooltip names what a
+ * click will do next.
+ */
+function ThemeToggle() {
+  const [preference, setPreference] = useState<ThemePreference>(() => getThemePreference())
+  const [resolved, setResolved] = useState(() => getResolvedTheme())
+
+  useEffect(
+    () =>
+      subscribeTheme((nextResolved, nextPreference) => {
+        setResolved(nextResolved)
+        setPreference(nextPreference)
+      }),
+    [],
+  )
+
+  // The icon shows where a click will take you, which is the convention users
+  // read fastest: a moon means "switch to dark".
+  const goingDark = resolved === 'light'
+  const label =
+    preference === 'system'
+      ? `Following system theme (${resolved}) — switch to ${goingDark ? 'dark' : 'light'}`
+      : `Switch to ${goingDark ? 'dark' : 'light'} theme`
+
+  return (
+    <Tooltip label={label}>
+      <button
+        type="button"
+        className="icon-button"
+        aria-label={label}
+        data-testid="theme-toggle"
+        data-theme-preference={preference}
+        data-theme={resolved}
+        onClick={() => toggleTheme()}
+      >
+        {preference === 'system' ? <MonitorIcon /> : goingDark ? <MoonIcon /> : <SunIcon />}
+      </button>
+    </Tooltip>
+  )
+}
 
 function TabButton({
   id, label, active, disabled,

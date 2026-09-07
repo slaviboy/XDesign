@@ -25,7 +25,19 @@ them are decorative.
 
 **Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
 snapping and smart guides, per-point Bézier editing, boolean operations, alignment and
-distribution, z-ordering, grouping, locking, hiding, guides and a grid.
+distribution, z-ordering, grouping, locking, hiding, guides and a grid. Corners carry a
+rotation cursor oriented to the corner and the object's own angle.
+
+**Transform panel** — W/H with an aspect-ratio lock, X/Y, rotation, flips, and match
+width / height / size across a selection.
+
+**Repeat Grid** — repeat a selection in a grid. Edit any cell and every cell follows,
+because the grid holds one source rather than N copies. Expand turns it into independent
+objects.
+
+**Dark theme** — a full dark palette, with "follow system" in the app menu. Artboard
+backgrounds deliberately do NOT follow the theme: they are document data, and the artwork
+has to look the same to everyone who opens the file.
 
 **Import** — SVG and raster images (PNG, JPEG, GIF, WebP, BMP, AVIF) by drag-and-drop,
 paste, or File ▸ Import. Imported SVG becomes real editable nodes: shapes stay shapes,
@@ -158,6 +170,35 @@ libraries removed ~1.4 MB from the build.
 System fonts can be used, but their bytes are not readable by the page, so they can only be
 referenced by name. The dialog says so when a system font is in the export.
 
+### The theme colours the chrome, never the artwork
+
+A dark UI must not repaint the document. A white artboard stays white in dark mode,
+because its background is a `Paint` in the scene graph rather than a CSS token — the
+artwork is not part of the UI. That also constrains the canvas chrome: selection handles
+and the grid sit on top of artwork, so their colours are tuned to read against a white
+artboard rather than against the panels, and the grid uses a mid-grey that survives both.
+
+The palette is measured, not eyeballed. `tests/unit/theme.test.ts` parses `tokens.css` and
+asserts WCAG AA on every text/surface pair, white-on-accent for the accent fill, 3:1 for
+the accent as a graphical element, and that no colour token is declared without being
+used. It caught four real failures on the first pass, including a light-theme token that
+had been failing at 2.81:1 since the initial release, and an accent that had been
+*lightened* for dark mode — the intuitive move, but wrong, because the accent is a fill
+under white text and lightening it dropped white below AA.
+
+The preference lives in `localStorage`, not IndexedDB, specifically because
+`localStorage` is synchronous: the theme must be applied before the first paint, and an
+async read cannot do that. An inline script in `<head>` does it, and the `try` wraps only
+the storage read so a blocked `localStorage` still falls through to `prefers-color-scheme`.
+
+### Repeat Grid holds one source, not N copies
+
+The grid node stores a single set of children and the renderer tiles them. That is what
+makes editing propagate to every cell for free — there is only one copy of the content, so
+a change to it is a change to every repeat — and it keeps a 10×10 grid the same size in the
+saved file as a single cell. The trade-off is that cells cannot differ; **Expand Grid**
+materialises them into independent objects when they need to.
+
 ### `.xdesign` is a zip
 
 A ZIP holding `document.json` plus the raw bytes of every image under `assets/`. Base64
@@ -214,8 +255,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 103 unit tests (Vitest)
-npm run test:e2e   # 52 end-to-end tests (Playwright, real Chromium)
+npm test           # 139 unit tests (Vitest)
+npm run test:e2e   # 76 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

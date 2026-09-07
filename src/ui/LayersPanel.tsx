@@ -27,8 +27,8 @@ import { useDocument, useEditorStore } from '../state/hooks'
 import {
   ArtboardIcon, ChevronDownIcon, ChevronRightIcon, EllipseIcon, ExportBadgeIcon,
   EyeIcon, EyeOffIcon, GroupIcon, ImageIcon, LineIcon, LockIcon, PathIcon,
-  PenIcon, PolygonIcon, RectIcon, StarIcon, TextIcon, TrashIcon, TriangleIcon,
-  UnlockIcon,
+  PenIcon, PolygonIcon, RectIcon, RepeatGridIcon, StarIcon, TextIcon, TrashIcon,
+  TriangleIcon, UnlockIcon,
 } from './icons'
 import { IconButton } from './primitives'
 
@@ -311,6 +311,7 @@ function iconFor(node: DesignNode) {
   switch (node.type) {
     case 'artboard': return <ArtboardIcon size={size} />
     case 'group': return <GroupIcon size={size} />
+    case 'repeat-grid': return <RepeatGridIcon size={size} />
     case 'rect': return <RectIcon size={size} />
     case 'ellipse': return <EllipseIcon size={size} />
     case 'triangle': return <TriangleIcon size={size} />

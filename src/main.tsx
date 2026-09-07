@@ -12,6 +12,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './app/App'
 import { documentStore } from './state/DocumentStore'
+import { initTheme } from './state/theme'
 import './styles/tokens.css'
 import './styles/fonts'
 import './styles/app.css'
@@ -21,6 +22,11 @@ import './styles/app.css'
 documentStore.subscribe((state) => {
   ;(window as unknown as { __xdesignDirty?: boolean }).__xdesignDirty = state.dirty
 })
+
+// The inline script in index.html has already set data-theme to avoid a flash;
+// this re-applies it and starts following the OS setting when the preference
+// is 'system'.
+initTheme()
 
 const container = document.getElementById('root')
 if (!container) throw new Error('Root element missing')

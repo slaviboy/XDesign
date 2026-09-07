@@ -40,3 +40,4 @@ interface Window {
     excludeAcceptAllOption?: boolean
   }): Promise<FileSystemFileHandle>
 }
+

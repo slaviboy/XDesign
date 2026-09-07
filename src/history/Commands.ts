@@ -256,6 +256,50 @@ export function alignSelection(mode: AlignMode): boolean {
   })
 }
 
+export type MatchDimension = 'width' | 'height' | 'both'
+
+/**
+ * Size every selected object to match the largest one.
+ *
+ * Measured as EFFECTIVE size (width x |scaleX|), the same number the inspector
+ * shows — not the world AABB, which for a rotated object is bigger than the
+ * object and would grow it on every press.
+ *
+ * Matching to the largest rather than to "the first selected" makes the result
+ * independent of click order, so pressing it twice is a no-op.
+ */
+export function matchSize(dimension: MatchDimension): boolean {
+  const ids = editableSelection()
+  if (ids.length < 2) return false
+  const doc = getDoc()
+
+  let maxWidth = 0
+  let maxHeight = 0
+  for (const id of ids) {
+    const t = doc.nodes[id]!.transform
+    maxWidth = Math.max(maxWidth, t.width * Math.abs(t.scaleX))
+    maxHeight = Math.max(maxHeight, t.height * Math.abs(t.scaleY))
+  }
+  if (maxWidth <= 0 && maxHeight <= 0) return false
+
+  const label =
+    dimension === 'width' ? 'Match width' : dimension === 'height' ? 'Match height' : 'Match size'
+
+  return transaction(label, (draft) => {
+    for (const id of ids) {
+      const node = draft.nodes[id]
+      if (!node) continue
+      const sx = Math.abs(node.transform.scaleX) || 1
+      const sy = Math.abs(node.transform.scaleY) || 1
+      node.transform = {
+        ...node.transform,
+        width: dimension === 'height' ? node.transform.width : Math.max(0.5, maxWidth / sx),
+        height: dimension === 'width' ? node.transform.height : Math.max(0.5, maxHeight / sy),
+      }
+    }
+  })
+}
+
 export function distributeSelection(mode: DistributeMode): boolean {
   const ids = editableSelection()
   if (ids.length < 3) return false

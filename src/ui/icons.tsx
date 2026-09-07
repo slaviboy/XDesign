@@ -132,6 +132,85 @@ export const UnlinkIcon = (p: IconProps) => (
   <Icon {...p}><path d="M6.2 9.8L4.6 11.4a2.4 2.4 0 003.4 3.4" opacity="0.5" /><path d="M6.5 9.5a2.4 2.4 0 010-3.4l1.8-1.8a2.4 2.4 0 013.4 3.4l-.9.9" /><path d="M2.5 2.5l11 11" /></Icon>
 )
 
+/* ----------------------------------------------------------- transform */
+
+/** The rotation field's leading glyph: a circular arrow. */
+export const RotateIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M13.1 8a5.1 5.1 0 11-1.6-3.7" />
+    <path d="M13.4 2.2v2.9h-2.9" />
+  </Icon>
+)
+
+export const RotateLeftIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.9 8a5.1 5.1 0 101.6-3.7" />
+    <path d="M2.6 2.2v2.9h2.9" />
+  </Icon>
+)
+
+/**
+ * Aspect-ratio link, drawn as the bracket that spans the W and H fields.
+ * Sized to the two-row grid cell rather than the usual 16px box.
+ */
+export const LinkBracket = ({
+  locked,
+  height = 54,
+}: {
+  locked: boolean
+  height?: number
+}) => (
+  <svg
+    width={13}
+    height={height}
+    viewBox={`0 0 13 ${height}`}
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1}
+    strokeLinecap="round"
+  >
+    {/* Tick into the W row, down the side, and back into the H row. */}
+    <path d={`M0 6h5.5M12.5 6v${height / 2 - 6 - 8}M0 ${height - 6}h5.5M12.5 ${height - 6}v-${height / 2 - 6 - 8}`} />
+    <path d={`M5.5 6h7M5.5 ${height - 6}h7`} opacity={0} />
+    {locked ? (
+      <g transform={`translate(3.5 ${height / 2 - 5})`}>
+        <rect x="0.6" y="4.2" width="8" height="6" rx="1" fill="currentColor" stroke="none" />
+        <path d="M2.4 4.2V2.9a2.2 2.2 0 014.4 0v1.3" />
+      </g>
+    ) : (
+      <g transform={`translate(3.5 ${height / 2 - 5})`}>
+        <rect x="0.6" y="4.2" width="8" height="6" rx="1" />
+        <path d="M2.4 4.2V2.9a2.2 2.2 0 014.1-1.1" />
+      </g>
+    )}
+  </svg>
+)
+
+/** Make every selected object as wide as the widest. */
+export const MatchWidthIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.2 3v10M13.8 3v10" />
+    <path d="M4.6 8h6.8M4.6 8l1.6-1.6M4.6 8l1.6 1.6M11.4 8l-1.6-1.6M11.4 8l-1.6 1.6" />
+  </Icon>
+)
+
+/** Make every selected object as tall as the tallest. */
+export const MatchHeightIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 2.2h10M3 13.8h10" />
+    <path d="M8 4.6v6.8M8 4.6L6.4 6.2M8 4.6l1.6 1.6M8 11.4l-1.6-1.6M8 11.4l1.6-1.6" />
+  </Icon>
+)
+
+/** Make every selected object the same width AND height. */
+export const MatchSizeIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="2.4" y="2.4" width="11.2" height="11.2" rx="1" />
+    <path d="M2.4 5.6h11.2M5.6 2.4v11.2" opacity="0.45" />
+    <rect x="5.6" y="5.6" width="4.6" height="4.6" fill="currentColor" stroke="none" opacity="0.8" />
+  </Icon>
+)
+
 /* --------------------------------------------------------------- align */
 
 export const AlignLeftIcon = (p: IconProps) => (
@@ -161,17 +240,58 @@ export const DistributeVIcon = (p: IconProps) => (
 
 /* ---------------------------------------------------------------- boolean */
 
+/*
+ * Two overlapping rounded squares, where the SOLID region is the result of the
+ * operation and the outline shows the operand that was consumed. Built from
+ * three shared paths so the four icons read as one family.
+ *
+ * A: back square (2,2)-(10,10)   B: front square (6,6)-(14,14)
+ * The overlap is (6,6)-(10,10), which lets subtract and intersect be expressed
+ * exactly with fill-rule rather than needing real boolean geometry in an icon.
+ */
+const BOOL_A = 'M3.6 2h4.8a1.6 1.6 0 0 1 1.6 1.6v4.8a1.6 1.6 0 0 1-1.6 1.6H3.6A1.6 1.6 0 0 1 2 8.4V3.6A1.6 1.6 0 0 1 3.6 2z'
+const BOOL_B = 'M7.6 6h4.8a1.6 1.6 0 0 1 1.6 1.6v4.8a1.6 1.6 0 0 1-1.6 1.6H7.6A1.6 1.6 0 0 1 6 12.4V7.6A1.6 1.6 0 0 1 7.6 6z'
+const BOOL_OVERLAP = 'M6 6h2.4a1.6 1.6 0 0 1 1.6 1.6V10H6z'
+
+/** Both shapes merged into one solid region. */
 export const UnionIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M3 3h6v4h4v6H7V9H3z" fill="currentColor" fillOpacity=".18" /></Icon>
+  <Icon {...p}>
+    <path d={`${BOOL_A}${BOOL_B}`} fill="currentColor" fillRule="nonzero" stroke="none" />
+  </Icon>
 )
+
+/** The back shape with the front shape's overlap removed. */
 export const SubtractIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M3 3h6v6H3z" fill="currentColor" fillOpacity=".18" /><rect x="7" y="7" width="6" height="6" strokeDasharray="2 2" /></Icon>
+  <Icon {...p}>
+    <path d={`${BOOL_A}${BOOL_OVERLAP}`} fill="currentColor" fillRule="evenodd" stroke="none" />
+    <path d={BOOL_B} fill="none" opacity="0.5" />
+  </Icon>
 )
+
+/** Only the region common to both. */
 export const IntersectIcon = (p: IconProps) => (
-  <Icon {...p}><rect x="3" y="3" width="6" height="6" strokeDasharray="2 2" /><rect x="7" y="7" width="6" height="6" strokeDasharray="2 2" /><rect x="7" y="7" width="2" height="2" fill="currentColor" fillOpacity=".35" /></Icon>
+  <Icon {...p}>
+    <path d={BOOL_A} fill="none" opacity="0.5" />
+    <path d={BOOL_B} fill="none" opacity="0.5" />
+    <path d={BOOL_OVERLAP} fill="currentColor" stroke="none" />
+  </Icon>
 )
+
+/** Both shapes minus the region they share. */
 export const ExcludeIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M3 3h6v4H7v2H3z" fill="currentColor" fillOpacity=".18" /><path d="M9 7h4v6H7V9h2z" fill="currentColor" fillOpacity=".18" /></Icon>
+  <Icon {...p}>
+    <path d={`${BOOL_A}${BOOL_B}`} fill="currentColor" fillRule="evenodd" stroke="none" />
+  </Icon>
+)
+
+/** 2x2 grid of squares — the Repeat Grid mark. */
+export const RepeatGridIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="2.2" y="2.2" width="5" height="5" rx="0.9" />
+    <rect x="8.8" y="2.2" width="5" height="5" rx="0.9" />
+    <rect x="2.2" y="8.8" width="5" height="5" rx="0.9" />
+    <rect x="8.8" y="8.8" width="5" height="5" rx="0.9" />
+  </Icon>
 )
 
 /* ---------------------------------------------------------------- layers */
@@ -239,6 +359,29 @@ export const TextAlignLeftIcon = (p: IconProps) => (
 export const TextAlignCenterIcon = (p: IconProps) => (
   <Icon {...p}><path d="M3 4h10M5 7h6M2.5 10h11M5.5 13h5" /></Icon>
 )
+/* ------------------------------------------------------------------ theme */
+
+export const SunIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="8" cy="8" r="3.1" />
+    <path d="M8 1.4v1.6M8 13v1.6M1.4 8h1.6M13 8h1.6M3.3 3.3l1.15 1.15M11.55 11.55l1.15 1.15M12.7 3.3l-1.15 1.15M4.45 11.55L3.3 12.7" />
+  </Icon>
+)
+
+export const MoonIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M13.4 9.6A5.8 5.8 0 016.4 2.6a5.9 5.9 0 107 7z" />
+  </Icon>
+)
+
+/** "Follow the system setting" — a display, not a sun or a moon. */
+export const MonitorIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="1.8" y="3" width="12.4" height="8.2" rx="1" />
+    <path d="M5.6 13.6h4.8M8 11.2v2.4" />
+  </Icon>
+)
+
 export const TextAlignRightIcon = (p: IconProps) => (
   <Icon {...p}><path d="M3 4h10M7 7h6M4 10h9M8 13h5" /></Icon>
 )

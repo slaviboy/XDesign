@@ -1,0 +1,1 @@
+{"root":["./tests/unit/document.test.ts","./tests/unit/features.test.ts","./tests/unit/geometry-extra.test.ts","./tests/unit/geometry.test.ts","./tests/unit/setup.ts","./tests/unit/svg.test.ts","./tests/unit/theme.test.ts","./tests/unit/transform.test.ts"],"version":"6.0.3"}

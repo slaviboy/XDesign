@@ -12,6 +12,7 @@ import { Canvas } from '../canvas/Canvas'
 import { Toolbar } from '../ui/Toolbar'
 import { TopBar } from '../ui/TopBar'
 import { PropertyInspector } from '../ui/PropertyInspector'
+import { InspectorToolbar } from '../ui/InspectorToolbar'
 import { LayersPanel } from '../ui/LayersPanel'
 import { Notifications } from '../ui/Notifications'
 import { ExportDialog } from '../ui/ExportDialog'
@@ -162,6 +163,7 @@ export function App() {
         <Canvas onFilesDropped={onFilesDropped} onContextMenu={onContextMenu} />
         <aside className="inspector" style={{ width: inspectorWidth }}>
           <InspectorResizer />
+          <InspectorToolbar />
           <PropertyInspector />
           <LayersResizer />
           <div style={{ height: layersHeight, display: 'flex', flexDirection: 'column' }}>

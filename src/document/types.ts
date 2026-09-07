@@ -38,9 +38,10 @@ export type NodeType =
   | 'text'
   | 'image'
   | 'svg'
+  | 'repeat-grid'
 
 /** Types that hold children. */
-export const CONTAINER_TYPES = ['document', 'artboard', 'group'] as const
+export const CONTAINER_TYPES = ['document', 'artboard', 'group', 'repeat-grid'] as const
 export type ContainerType = (typeof CONTAINER_TYPES)[number]
 
 // ---------------------------------------------------------------------------
@@ -291,6 +292,29 @@ export interface GroupNode extends StyledNode {
   children: NodeId[]
 }
 
+/**
+ * A repeating grid of one source cell.
+ *
+ * The node holds ONE set of children — the source cell — and the renderer draws
+ * it `rows` x `columns` times, offset by the cell size plus the gutter. That is
+ * what gives the feature its defining behaviour for free: editing the source
+ * updates every repeat, because there is only ever one copy of the content.
+ *
+ * `cellWidth`/`cellHeight` are the size of one cell, so the node's overall
+ * transform.width/height are derived, never authored directly.
+ */
+export interface RepeatGridNode extends StyledNode {
+  type: 'repeat-grid'
+  children: NodeId[]
+  rows: number
+  columns: number
+  /** Space BETWEEN cells, not around them. */
+  gutterX: number
+  gutterY: number
+  cellWidth: number
+  cellHeight: number
+}
+
 export interface RectNode extends StyledNode {
   type: 'rect'
   cornerRadius: CornerRadii
@@ -376,6 +400,7 @@ export type DesignNode =
   | DocumentRootNode
   | ArtboardNode
   | GroupNode
+  | RepeatGridNode
   | RectNode
   | EllipseNode
   | TriangleNode
@@ -387,7 +412,7 @@ export type DesignNode =
   | ImageNode
   | SvgNode
 
-export type ContainerNode = DocumentRootNode | ArtboardNode | GroupNode
+export type ContainerNode = DocumentRootNode | ArtboardNode | GroupNode | RepeatGridNode
 /** Every union member that actually carries a `style` field. */
 export type StyledDesignNode = Exclude<DesignNode, DocumentRootNode | ArtboardNode>
 export type ShapeNode =
@@ -458,7 +483,48 @@ export interface DesignDocument {
 // ---------------------------------------------------------------------------
 
 export function isContainer(node: DesignNode | undefined | null): node is ContainerNode {
-  return !!node && (node.type === 'document' || node.type === 'artboard' || node.type === 'group')
+  return (
+    !!node &&
+    (node.type === 'document' ||
+      node.type === 'artboard' ||
+      node.type === 'group' ||
+      node.type === 'repeat-grid')
+  )
+}
+
+/**
+ * Containers whose bounds come from their OWN box rather than from the union of
+ * their children. An artboard is a frame that clips; a repeat grid tiles its
+ * source, so its extent is rows/columns/gutters, not one cell's children.
+ */
+export function usesOwnBox(node: DesignNode | undefined | null): boolean {
+  return !!node && (node.type === 'artboard' || node.type === 'repeat-grid')
+}
+
+/** Overall size implied by a repeat grid's rows, columns, cell size and gutters. */
+export function repeatGridSize(node: RepeatGridNode): { width: number; height: number } {
+  const cols = Math.max(1, Math.round(node.columns))
+  const rows = Math.max(1, Math.round(node.rows))
+  return {
+    width: cols * node.cellWidth + (cols - 1) * node.gutterX,
+    height: rows * node.cellHeight + (rows - 1) * node.gutterY,
+  }
+}
+
+/** Top-left offset of each cell, in the grid's local space. */
+export function repeatGridOffsets(node: RepeatGridNode): Array<{ x: number; y: number }> {
+  const cols = Math.max(1, Math.round(node.columns))
+  const rows = Math.max(1, Math.round(node.rows))
+  const out: Array<{ x: number; y: number }> = []
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      out.push({
+        x: c * (node.cellWidth + node.gutterX),
+        y: r * (node.cellHeight + node.gutterY),
+      })
+    }
+  }
+  return out
 }
 
 export function hasStyle(node: DesignNode | undefined | null): node is StyledDesignNode {

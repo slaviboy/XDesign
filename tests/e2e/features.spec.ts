@@ -241,10 +241,12 @@ test('marquee selects only fully contained objects', async ({ page }) => {
   await drawShape(page, 'rect', { x: 400, y: 200 }, { x: 460, y: 260 })
   await selectTool(page, 'select')
 
-  await dragOnCanvas(page, { x: 180, y: 180 }, { x: 300, y: 300 })
+  await dragOnCanvas(page, { x: 150, y: 150 }, { x: 300, y: 300 })
   await expect(page.locator('.layer-row.selected')).toHaveCount(1)
 
-  await dragOnCanvas(page, { x: 180, y: 180 }, { x: 500, y: 300 })
+  // Start clear of the first rect's corner: with something already selected,
+  // a drag beginning just outside its corner is a rotation, not a marquee.
+  await dragOnCanvas(page, { x: 150, y: 150 }, { x: 520, y: 320 })
   await expect(page.locator('.layer-row.selected')).toHaveCount(2)
 })
 

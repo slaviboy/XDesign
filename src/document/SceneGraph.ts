@@ -47,6 +47,7 @@ import {
 import {
   isContainer,
   hasStyle,
+  usesOwnBox,
   type DesignDocument,
   type DesignNode,
   type NodeId,
@@ -163,6 +164,7 @@ export function nodePathData(node: DesignNode): string | null {
     case 'svg':
     case 'text':
     case 'artboard':
+    case 'repeat-grid':
       return rectPath(width, height, 0)
     default:
       return null
@@ -213,8 +215,9 @@ export function geometryBounds(
   if (!node) return EMPTY_BOUNDS
   const m = cache ? cache.world(doc, id) : worldMatrix(doc, id)
 
-  if (isContainer(node) && node.type !== 'artboard') {
-    // A group's bounds are its children's, not its own nominal box.
+  if (isContainer(node) && !usesOwnBox(node)) {
+    // A group's bounds are its children's, not its own nominal box. An artboard
+    // or repeat grid uses its own box instead — see usesOwnBox.
     const kids = node.children
       .map((k) => geometryBounds(doc, k, cache))
       .filter((b) => b.width > 0 || b.height > 0)
@@ -235,7 +238,7 @@ export function renderBounds(doc: DesignDocument, id: NodeId, cache?: MatrixCach
   if (!node) return EMPTY_BOUNDS
   const m = cache ? cache.world(doc, id) : worldMatrix(doc, id)
 
-  if (isContainer(node) && node.type !== 'artboard') {
+  if (isContainer(node) && !usesOwnBox(node)) {
     const kids = node.children
       .map((k) => renderBounds(doc, k, cache))
       .filter((b) => b.width > 0 || b.height > 0)
@@ -431,7 +434,12 @@ export function hitTestNode(
     styled && styled.style.stroke.paint.type !== 'none' ? styled.style.stroke.width : 0
 
   // Text and images are solid targets regardless of fill.
-  if (node.type === 'text' || node.type === 'image' || node.type === 'svg') {
+  if (
+    node.type === 'text' ||
+    node.type === 'image' ||
+    node.type === 'svg' ||
+    node.type === 'repeat-grid'
+  ) {
     return containsPoint(localGeometryBounds(node), local, tolerance)
   }
 
@@ -482,6 +490,16 @@ export function hitTestAll(
     if (!node) return
     if (!node.visible) return
     if (options.skip?.has(id)) return
+
+    if (node.type === 'repeat-grid') {
+      // The grid is a single object on canvas: clicking a cell selects the
+      // grid, not the source child inside it.
+      if (hitTestNode(doc, id, worldPoint, options, mc)) {
+        const resolved = options.deep ? id : (topLevelAncestor ?? id)
+        if (!isEffectivelyLocked(doc, resolved)) out.push({ id: resolved, order: order++ })
+      }
+      return
+    }
 
     if (isContainer(node)) {
       const before = out.length

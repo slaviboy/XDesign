@@ -112,6 +112,20 @@ export function getLiveSize(id: NodeId): { width: number; height: number } | und
   return session?.liveSizes.get(id)
 }
 
+/**
+ * How far the current rotate gesture has turned, in degrees.
+ *
+ * The overlay needs this because a multi-selection's frame is axis-aligned, so
+ * its own angle is always 0 — reading the frame would show "0°" for the whole
+ * rotation. A single selection still reports its absolute angle from the frame;
+ * this is the delta, which is the only meaningful figure for a group.
+ */
+let liveRotationDelta = 0
+
+export function getLiveRotation(): number {
+  return liveRotationDelta
+}
+
 export function isDragging(): boolean {
   return session !== null
 }
@@ -167,6 +181,7 @@ export function beginDrag(
   }
 
   liveMatrices = new Map()
+  liveRotationDelta = 0
   liveTransform.begin()
   editorStore.setState({ isDragging: true })
   return true
@@ -253,6 +268,7 @@ function applyRotate(
   const a1 = Math.atan2(currentDoc.y - cy, currentDoc.x - cx)
   let deg = ((a1 - a0) * 180) / Math.PI
   if (options.constrain) deg = Math.round(deg / 15) * 15
+  liveRotationDelta = deg
 
   const m = rotationAbout(deg, cx, cy)
   for (const snap of s.nodes) {

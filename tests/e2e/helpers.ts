@@ -109,8 +109,17 @@ export function layerRows(page: Page): Locator {
   return page.locator('.layer-row')
 }
 
-/** Inspector numeric field by its label. */
+/**
+ * Inspector numeric field by its label.
+ *
+ * The rotation field is labelled with an icon rather than text, so it is
+ * addressed by its grid class. '∠' is kept as the spelling callers use so the
+ * intent still reads at the call site.
+ */
 export function inspectorField(page: Page, label: string): Locator {
+  if (label === '∠' || label.toLowerCase() === 'rotation') {
+    return page.locator('.tf-rot input')
+  }
   return page.locator('.field', { has: page.locator(`.field-label:text-is("${label}")`) }).locator('input').first()
 }
 

@@ -36,9 +36,10 @@ import {
   sortedStops,
 } from './paint'
 import { toHex } from '../document/color'
-import { hasStyle } from '../document/types'
+import { hasStyle, repeatGridOffsets, repeatGridSize } from '../document/types'
 import type {
   ArtboardNode,
+  RepeatGridNode,
   DesignNode,
   GroupNode,
   ImageNode,
@@ -329,6 +330,42 @@ function SvgBody({ node }: { node: SvgNode }): ReactNode {
   )
 }
 
+/**
+ * A repeat grid draws its ONE set of source children once per cell, translated.
+ *
+ * This is what makes editing propagate: there is only ever a single copy of the
+ * content in the document, so a change to it is a change to every cell. The
+ * alternative — materialising N copies — would need change-propagation logic
+ * and would bloat the file by the repeat count.
+ */
+function RepeatGridBody({ node }: { node: RepeatGridNode }): ReactNode {
+  const offsets = repeatGridOffsets(node)
+  const size = repeatGridSize(node)
+  const clipId = `rg-clip-${node.id}`
+
+  return (
+    <>
+      <defs>
+        <clipPath id={clipId}>
+          <rect width={Math.max(0, size.width)} height={Math.max(0, size.height)} />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${clipId})`}>
+        {offsets.map((offset, i) => (
+          <g key={i} transform={`translate(${offset.x} ${offset.y})`}>
+            {node.children.map((childId) => (
+              // Cell 0 owns the live element refs; later cells are pure
+              // repeats, so they must not re-register the same node id with
+              // LiveTransform or a drag would write to whichever mounted last.
+              <NodeRenderer key={childId} id={childId} repeat={i > 0} />
+            ))}
+          </g>
+        ))}
+      </g>
+    </>
+  )
+}
+
 function GroupBody({ node }: { node: GroupNode }): ReactNode {
   return (
     <>
@@ -370,16 +407,27 @@ function ArtboardBody({ node }: { node: ArtboardNode }): ReactNode {
 // Entry point
 // ---------------------------------------------------------------------------
 
-export const NodeRenderer = memo(function NodeRenderer({ id }: { id: NodeId }): ReactNode {
+export const NodeRenderer = memo(function NodeRenderer({
+  id,
+  repeat = false,
+}: {
+  id: NodeId
+  /** True for the 2nd..Nth copy inside a repeat grid — see RepeatGridBody. */
+  repeat?: boolean
+}): ReactNode {
   const node = useNode(id)
 
   const groupRef = useCallback(
-    (el: SVGGElement | null) => liveTransform.register(id, el),
-    [id],
+    (el: SVGGElement | null) => {
+      if (!repeat) liveTransform.register(id, el)
+    },
+    [id, repeat],
   )
   const geomRef = useCallback(
-    (el: SVGElement | null) => liveTransform.register(geomKey(id), el),
-    [id],
+    (el: SVGElement | null) => {
+      if (!repeat) liveTransform.register(geomKey(id), el)
+    },
+    [id, repeat],
   )
 
   if (!node) return null
@@ -401,6 +449,9 @@ export const NodeRenderer = memo(function NodeRenderer({ id }: { id: NodeId }): 
       break
     case 'group':
       body = <GroupBody node={node} />
+      break
+    case 'repeat-grid':
+      body = <RepeatGridBody node={node} />
       break
     case 'text':
       body = <TextBody node={node} />
@@ -439,8 +490,8 @@ export const NodeRenderer = memo(function NodeRenderer({ id }: { id: NodeId }): 
       transform={transform}
       opacity={opacity === 1 ? undefined : opacity}
       style={blend}
-      data-node-id={id}
-      data-node-type={node.type}
+      data-node-id={repeat ? undefined : id}
+      data-node-type={repeat ? undefined : node.type}
       // Locked nodes stay visible but must not swallow pointer events on canvas.
       pointerEvents={node.locked ? 'none' : undefined}
     >
