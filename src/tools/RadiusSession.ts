@@ -152,6 +152,19 @@ function normalize(v: Vec2): Vec2 {
   return { x: v.x / len, y: v.y / len }
 }
 
+/**
+ * Distance along the bisector, per unit of radius, from the corner to the arc.
+ *
+ * The arc's centre is `r / sin(theta/2)` from the vertex and the arc is `r`
+ * back from that, so the nearest point of the curve is `r * (1/sin - 1)`. Both
+ * the handle's placement and the drag's inverse go through here, so they cannot
+ * drift apart. Floored because a straight-through vertex (sin -> 1) has no
+ * corner to round and would otherwise divide by zero on the way back.
+ */
+function handleSpread(sinHalf: number): number {
+  return Math.max(0.05, 1 / sinHalf - 1)
+}
+
 /** Where a handle sits, in local space, for a given radius. */
 export function radiusHandlePosition(
   node: DesignNode,
@@ -161,9 +174,16 @@ export function radiusHandlePosition(
 ): Vec2 | null {
   const geo = cornerGeometry(node, corner)
   if (!geo) return null
-  // The handle rides the arc's centre, which is r / sin(theta/2) along the
-  // bisector — so it visibly tracks the curve rather than drifting off it.
-  const distance = Math.max(minDistance, radius / geo.sinHalf)
+  // A constant gap INSIDE the corner it is rounding.
+  //
+  // The arc's nearest point to the vertex is `r * (1/sin - 1)` along the
+  // bisector; going `minDistance` further along it lands exactly `minDistance`
+  // perpendicular from the curve, because the bisector passes through the arc's
+  // centre. So the dot keeps the same visual gap from the outline at every
+  // radius, instead of riding the outline itself or — as it did before, sitting
+  // at the arc's CENTRE, `r / sin` out — drifting toward the middle of the shape
+  // as the corner grew.
+  const distance = radius * handleSpread(geo.sinHalf) + minDistance
   return {
     x: geo.point.x + geo.inward.x * distance,
     y: geo.point.y + geo.inward.y * distance,
@@ -261,8 +281,9 @@ export function updateRadiusDrag(currentDoc: Vec2, doc: DesignDocument): number 
     (local.x - geo.point.x) * geo.inward.x + (local.y - geo.point.y) * geo.inward.y
 
   // Relative to where the handle was grabbed, so the radius does not jump to
-  // the handle's minimum stand-off on the first frame.
-  const delta = (along - session.grabAlong) * geo.sinHalf
+  // the handle's minimum stand-off on the first frame. Divided by the same
+  // spread the handle is placed with, so the arc stays under the pointer.
+  const delta = (along - session.grabAlong) / handleSpread(geo.sinHalf)
   const radius = Math.min(session.maxRadius, Math.max(0, session.startRadius + delta))
 
   if (!session.changed && Math.abs(radius - session.startRadius) < RADIUS_DRAG_THRESHOLD) {

@@ -13,6 +13,7 @@
  * picker's own fields updating as the pointer moves.
  */
 
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { exportNodesToSvg } from '../svg/SvgExporter'
 import { rasterizeSvgToImageData } from '../export/Rasterizer'
 import { screenToDoc } from '../canvas/Viewport'
@@ -74,4 +75,76 @@ export async function armEyedropper(): Promise<EyedropperSampler | null> {
       return { r: pixels.data[i]!, g: pixels.data[i + 1]!, b: pixels.data[i + 2]!, a }
     },
   }
+}
+
+/**
+ * The eyedropper as a control: arm it, sample while the pointer moves, commit on
+ * click, and get out of the way on Escape or on any pan or zoom.
+ *
+ * Shared by the picker popover and the inspector's Fill and Stroke rows so there
+ * is one implementation of "pick a colour off the canvas", not two that drift.
+ */
+export function useEyedropper(onPick: (color: RGBA, committing: boolean) => void): {
+  armed: boolean
+  arming: boolean
+  toggle: () => void
+  disarm: () => void
+} {
+  const [sampler, setSampler] = useState<EyedropperSampler | null>(null)
+  const [arming, setArming] = useState(false)
+  const pick = useRef(onPick)
+  pick.current = onPick
+
+  const disarm = useCallback(() => setSampler(null), [])
+
+  const toggle = useCallback(() => {
+    setSampler((current) => {
+      if (current) return null
+      setArming(true)
+      void armEyedropper()
+        .then((s) => setSampler(s))
+        .catch(() => setSampler(null))
+        .finally(() => setArming(false))
+      return null
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!sampler) return
+    const sample = (e: PointerEvent, committing: boolean) => {
+      const rgba = sampler.sample(e.clientX, e.clientY)
+      if (rgba) pick.current(rgba, committing)
+    }
+    const onMove = (e: PointerEvent) => sample(e, false)
+    const onDown = (e: PointerEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      sample(e, true)
+      disarm()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        disarm()
+      }
+    }
+    document.body.classList.add('eyedropping')
+    window.addEventListener('pointermove', onMove, true)
+    window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener('keydown', onKey, true)
+    // The raster is a snapshot of the current view, so a pan or zoom would make
+    // it silently lie about what is under the pointer.
+    const unsubscribe = editorStore.subscribe((s, prev) => {
+      if (s.viewport !== prev.viewport) disarm()
+    })
+    return () => {
+      document.body.classList.remove('eyedropping')
+      window.removeEventListener('pointermove', onMove, true)
+      window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener('keydown', onKey, true)
+      unsubscribe()
+    }
+  }, [sampler, disarm])
+
+  return { armed: !!sampler, arming, toggle, disarm }
 }

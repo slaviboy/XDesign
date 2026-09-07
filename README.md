@@ -54,6 +54,12 @@ radial one, a centre and an angle handle for an angular one. Stops ride the widg
 add one, drag it along to reposition, drag it off to delete, or select it and press Delete. Arrow
 keys nudge, Tab cycles.
 
+**Fill and stroke** — each row leads with an on/off box and ends with an eyedropper. Off *is* `none`
+in the model, so unchecking a paint also hides the controls that only apply when it exists — the
+blend mode for a fill, the whole cap/join/align/dash block for a stroke — and checking it back
+restores the colour that was there rather than a default. The eyedropper samples straight from the
+canvas without opening the picker at all.
+
 **Colour** — a paint-type dropdown (solid, linear, radial, angular, none), Hex / RGB / HSL / HSV
 numeric modes, an opacity field, an eyedropper that samples any rendered pixel on the canvas
 including images and gradients, and a document palette that starts empty and fills up as you
@@ -386,9 +392,15 @@ Rounding a sharp apex necessarily pulls the outline in — a triangle rounded at
 longer touches the top of its box, though a square still does, because its flat edges do.
 The node's own width and height never change; only the drawn path insets.
 
-The handles ride the arc's centre, at `radius / sin(theta/2)` along the inward bisector,
-so they visibly track the curve rather than drifting off it. Dragging projects the pointer
-onto that bisector, so moving sideways along an edge does not change the radius.
+The handles sit a constant gap INSIDE the corner they round: `radius * (1/sin(theta/2) - 1)` along
+the inward bisector — the nearest point of the curve to the vertex — plus a fixed stand-off. Because
+the bisector runs through the arc's centre, going that extra distance along it lands exactly that far
+perpendicular from the curve, so the visual gap is the same at every radius. Measuring from the arc's
+*centre* instead, at `radius / sin(theta/2)`, is what the code used to do: for a square corner that is
+`r * 1.414` against the curve's `r * 0.414`, so the dot sat more than three times too far toward the
+middle of the shape and drifted further the more you rounded it. One helper produces both that
+placement and the drag's inverse, so the two cannot come apart. Dragging projects the pointer onto
+the bisector, so moving sideways along an edge does not change the radius.
 
 Rect and image carry four addressable corners; a polygon carries a single scalar, because
 its vertices are generated from its corner count and there is nothing stable to key

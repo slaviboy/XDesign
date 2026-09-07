@@ -20,11 +20,11 @@ import {
 import { createStop } from '../document/NodeFactory'
 import { sampleGradientAt } from '../canvas/paint'
 import { addSwatch, removeSwatch } from '../history/Commands'
-import { editorStore, setEditor } from '../state/EditorStore'
+import { setEditor } from '../state/EditorStore'
 import { useDocument, useEditorStore } from '../state/hooks'
 import { NumberField, Select } from './primitives'
 import { CloseIcon, EyedropperIcon, PlusIcon, TrashIcon } from './icons'
-import { armEyedropper, type EyedropperSampler } from './eyedropper'
+import { useEyedropper } from './eyedropper'
 import type { GradientStop, Paint, RGBA } from '../document/types'
 
 
@@ -646,8 +646,6 @@ export function PaintPopover({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState(anchor)
-  const [sampler, setSampler] = useState<EyedropperSampler | null>(null)
-  const [arming, setArming] = useState(false)
 
   useEffect(() => {
     const el = ref.current
@@ -671,49 +669,18 @@ export function PaintPopover({
   lastColor.current = solidColor
 
   // ---- eyedropper --------------------------------------------------------
-  const disarm = useCallback(() => setSampler(null), [])
-
-  const toggleEyedropper = useCallback(() => {
-    if (sampler) return disarm()
-    setArming(true)
-    void armEyedropper()
-      .then((s) => setSampler(s))
-      .catch(() => setSampler(null))
-      .finally(() => setArming(false))
-  }, [sampler, disarm])
-
-  useEffect(() => {
-    if (!sampler) return
-    const pick = (e: PointerEvent, committing: boolean) => {
-      const rgba = sampler.sample(e.clientX, e.clientY)
-      if (rgba) onChange({ type: 'solid', color: rgba }, committing)
-    }
-    const onMove = (e: PointerEvent) => pick(e, false)
-    const onDown = (e: PointerEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-      pick(e, true)
-      disarm()
-    }
-    document.body.classList.add('eyedropping')
-    window.addEventListener('pointermove', onMove, true)
-    window.addEventListener('pointerdown', onDown, true)
-    // The raster is a snapshot of the current view, so a pan or zoom would make
-    // it silently lie about what is under the pointer.
-    const unsubscribe = editorStore.subscribe((s, prev) => {
-      if (s.viewport !== prev.viewport) disarm()
-    })
-    return () => {
-      document.body.classList.remove('eyedropping')
-      window.removeEventListener('pointermove', onMove, true)
-      window.removeEventListener('pointerdown', onDown, true)
-      unsubscribe()
-    }
-  }, [sampler, onChange, disarm])
+  // The same hook the inspector's Fill and Stroke rows use, so there is one
+  // implementation of "pick a colour off the canvas".
+  const eyedropper = useEyedropper(
+    useCallback(
+      (rgba: RGBA, committing: boolean) => onChange({ type: 'solid', color: rgba }, committing),
+      [onChange],
+    ),
+  )
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (sampler) return
+      if (eyedropper.armed) return
       // The on-canvas gradient editor is part of this picker, so pressing one of
       // its handles must not count as clicking away. Without this exemption the
       // widget was unreachable: the first press closed the popover, which is
@@ -724,7 +691,7 @@ export function PaintPopover({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation()
-        if (sampler) disarm()
+        if (eyedropper.armed) eyedropper.disarm()
         else onClose()
       }
     }
@@ -734,7 +701,7 @@ export function PaintPopover({
       window.removeEventListener('pointerdown', onDown, true)
       window.removeEventListener('keydown', onKey, true)
     }
-  }, [onClose, sampler, disarm])
+  }, [onClose, eyedropper])
 
   const options = allowGradient
     ? PAINT_OPTIONS
@@ -758,12 +725,12 @@ export function PaintPopover({
         <div className="spacer" />
         <button
           type="button"
-          className={`icon-button${sampler ? ' active' : ''}`}
+          className={`icon-button${eyedropper.armed ? ' active' : ''}`}
           title="Pick a color from the canvas"
           aria-label="Eyedropper"
-          aria-pressed={!!sampler}
-          disabled={arming}
-          onClick={toggleEyedropper}
+          aria-pressed={eyedropper.armed}
+          disabled={eyedropper.arming}
+          onClick={eyedropper.toggle}
         >
           <EyedropperIcon />
         </button>

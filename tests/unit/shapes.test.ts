@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { roundedPolygonPath, maxPolygonRadius, polygonStarPoints, polygonStarPath } from '@/geometry/ShapeGeometry'
-import { pathBounds, pointInPath, pathLength } from '@/geometry/PathUtils'
+import { roundedPolygonPath, maxPolygonRadius, polygonStarPoints, polygonStarPath, rectPath } from '@/geometry/ShapeGeometry'
+import { pathBounds, pointInPath, pathLength, distanceToPath } from '@/geometry/PathUtils'
 import { cornerGeometry, radiusHandlePosition } from '@/tools/RadiusSession'
 import {
   cornerRadiusOf,
@@ -157,16 +157,35 @@ describe('corner geometry for radius handles', () => {
     )
   })
 
-  it('the handle sits on the arc centre, and never closer than the minimum', () => {
+  it('the handle sits a constant gap inside the corner it rounds', () => {
     const rect = createRect({ x: 0, y: 0, width: 200, height: 200 })
-    const atZero = radiusHandlePosition(rect, 'nw', 0, 10)!
-    // With no radius the handle still stands off the corner so it is grabbable.
-    expect(Math.hypot(atZero.x, atZero.y)).toBeCloseTo(10, 4)
+    const inset = 10
 
-    const at40 = radiusHandlePosition(rect, 'nw', 40, 10)!
-    // r / sin(45deg) = 40 * sqrt(2) along the diagonal, i.e. 40 on each axis.
-    expect(at40.x).toBeCloseTo(40, 4)
-    expect(at40.y).toBeCloseTo(40, 4)
+    const atZero = radiusHandlePosition(rect, 'nw', 0, inset)!
+    // With no radius the handle still stands off the corner so it is grabbable.
+    expect(Math.hypot(atZero.x, atZero.y)).toBeCloseTo(inset, 4)
+
+    // At every radius it is the SAME distance in from the drawn outline, and on
+    // the inside of it — not on the curve, and not drifting toward the middle.
+    // From r = 0 up, because a sharp corner has no arc: there the nearest bit of
+    // outline is an edge, so the perpendicular gap is inset * sin(45deg), not
+    // inset. That is the stand-off asserted above, measured along the bisector.
+    for (const r of [10, 25, 60, 100]) {
+      const at = radiusHandlePosition(rect, 'nw', r, inset)!
+      const outline = rectPath(200, 200, [r, 0, 0, 0])
+      // To half a unit: distanceToPath samples the outline as a polyline, which
+      // cuts the corner slightly on a small arc.
+      expect(distanceToPath(outline, at), `radius ${r}`).toBeCloseTo(inset, 0)
+      expect(pointInPath(outline, at), `radius ${r}`).toBe(true)
+    }
+  })
+
+  it('tracks the corner rather than the shape centre as the radius grows', () => {
+    const rect = createRect({ x: 0, y: 0, width: 200, height: 200 })
+    // The arc's centre would be at r * sqrt(2); the handle is r * (sqrt(2) - 1)
+    // plus the stand-off, which is a little over a third as far in.
+    const at = radiusHandlePosition(rect, 'nw', 60, 0)!
+    expect(Math.hypot(at.x, at.y)).toBeCloseTo(60 * (Math.SQRT2 - 1), 4)
   })
 
   it('returns nothing for a shape with no corners', () => {

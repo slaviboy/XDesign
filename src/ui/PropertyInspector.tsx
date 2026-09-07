@@ -47,10 +47,11 @@ import { openDialog, setCornerRadiusMode, setEditor } from '../state/EditorStore
 import { useDocument, useEditorStore, useLiveTransformTick, useSelectedNodes } from '../state/hooks'
 import { NumberField, Section, Select, TextField, common, IconButton } from './primitives'
 import { PaintPopover, PAINT_POPOVER_WIDTH } from './ColorPicker'
+import { useEyedropper } from './eyedropper'
 import {
   AlignBottomIcon, AlignCenterHIcon, AlignCenterVIcon, AlignLeftIcon, AlignRightIcon,
   AlignTopIcon, DistributeHIcon, DistributeVIcon, FlipHIcon, FlipVIcon,
-  CornersIndependentIcon, CornersUniformIcon,
+  CornersIndependentIcon, CornersUniformIcon, EyedropperIcon,
   LinkBracket, MatchHeightIcon, MatchSizeIcon, MatchWidthIcon, RadiusIcon,
   RotateIcon, TextAlignCenterIcon, TextAlignLeftIcon, TextAlignRightIcon,
 } from './icons'
@@ -65,6 +66,7 @@ import {
   type DesignDocument,
   type DesignNode,
   type Paint,
+  type RGBA,
   type Style,
 } from '../document/types'
 
@@ -490,6 +492,38 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
     return () => setEditor({ gradientEditing: null, activeGradientStop: null })
   }, [gradientNodeId, gradientTarget])
 
+  // Unchecking a paint sets it to `none`, which is what "no fill" means in the
+  // model — but `none` carries no colour, so the last real paint is remembered
+  // here and put back when it is checked again. A ref, not state: it must not
+  // cause a render, and it is a convenience rather than document data.
+  const lastPaint = useRef<{ fill: Paint | null; stroke: Paint | null }>({ fill: null, stroke: null })
+  const fillOn = first.style.fill.type !== 'none'
+  const strokeOn = first.style.stroke.paint.type !== 'none'
+  if (fillOn) lastPaint.current.fill = first.style.fill
+  if (strokeOn) lastPaint.current.stroke = first.style.stroke.paint
+
+  const togglePaint = useCallback((target: 'fill' | 'stroke', on: boolean) => {
+    const restored: Paint = on
+      ? (lastPaint.current[target] ?? {
+          type: 'solid',
+          color: target === 'fill' ? { r: 217, g: 217, b: 217, a: 1 } : { r: 0, g: 0, b: 0, a: 1 },
+        })
+      : { type: 'none' }
+    if (target === 'fill') setFill(restored)
+    else setStroke({ paint: restored })
+  }, [])
+
+  const fillDropper = useEyedropper(
+    useCallback((color: RGBA, committing: boolean) => {
+      setFill({ type: 'solid', color }, committing ? undefined : 'paint:fill')
+    }, []),
+  )
+  const strokeDropper = useEyedropper(
+    useCallback((color: RGBA, committing: boolean) => {
+      setStroke({ paint: { type: 'solid', color } }, committing ? undefined : 'paint:stroke')
+    }, []),
+  )
+
   const openPicker = useCallback((target: 'fill' | 'stroke', e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     // Flip left of the swatch; the width comes from the popover itself so the
@@ -501,6 +535,11 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
     <>
       <Section title="Fill">
         <div className="paint-row">
+          <PaintToggle
+            on={fillOn}
+            label="Fill"
+            onChange={(on) => togglePaint('fill', on)}
+          />
           <Swatch paint={fill === null ? null : first.style.fill} onClick={(e) => openPicker('fill', e)} />
           <div className="field">
             <span className="field-label">%</span>
@@ -515,19 +554,29 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
               }}
             />
           </div>
+          <DropperButton control={fillDropper} label="Pick a fill color from the canvas" />
         </div>
-        <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
-          <Select
-            value={blend ?? 'normal'}
-            options={BLEND_MODES.map((m) => ({ value: m, label: titleCase(m) }))}
-            onChange={(v) => setStyleProperty('blendMode', v as Style['blendMode'])}
-            title="Blend mode"
-          />
-        </div>
+        {/* Hidden while the fill is off: none of it applies to a shape with no
+            fill, and leaving it there invites edits that do nothing. */}
+        {fillOn && (
+          <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
+            <Select
+              value={blend ?? 'normal'}
+              options={BLEND_MODES.map((m) => ({ value: m, label: titleCase(m) }))}
+              onChange={(v) => setStyleProperty('blendMode', v as Style['blendMode'])}
+              title="Blend mode"
+            />
+          </div>
+        )}
       </Section>
 
       <Section title="Stroke">
         <div className="paint-row">
+          <PaintToggle
+            on={strokeOn}
+            label="Stroke"
+            onChange={(on) => togglePaint('stroke', on)}
+          />
           <Swatch
             paint={strokePaint === null ? null : first.style.stroke.paint}
             onClick={(e) => openPicker('stroke', e)}
@@ -539,8 +588,10 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
             step={0.5}
             onChange={(v, committing) => setStroke({ width: v }, committing ? undefined : 'stroke-w')}
           />
+          <DropperButton control={strokeDropper} label="Pick a stroke color from the canvas" />
         </div>
-        <div className="field-row cols-3">
+        {strokeOn && (
+        <><div className="field-row cols-3">
           <Select
             value={cap ?? 'butt'}
             options={[
@@ -588,7 +639,8 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
             value={common(nodes, (n) => n.style.stroke.dashOffset)}
             onChange={(v, committing) => setStroke({ dashOffset: v }, committing ? undefined : 'dash-off')}
           />
-        </div>
+        </div></>
+        )}
       </Section>
 
       {popover && (
@@ -604,6 +656,56 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
         />
       )}
     </>
+  )
+}
+
+/**
+ * The on/off box in front of a paint.
+ *
+ * Off IS `none` in the model — there is no separate enabled flag — so this is a
+ * view onto the paint's type rather than state of its own.
+ */
+function PaintToggle({
+  on,
+  label,
+  onChange,
+}: {
+  on: boolean
+  label: string
+  onChange: (on: boolean) => void
+}) {
+  return (
+    <input
+      type="checkbox"
+      className="paint-toggle"
+      checked={on}
+      aria-label={`${label} enabled`}
+      title={on ? `Turn ${label.toLowerCase()} off` : `Turn ${label.toLowerCase()} on`}
+      onChange={(e) => onChange(e.target.checked)}
+    />
+  )
+}
+
+/** Arms the canvas eyedropper for one paint target. */
+function DropperButton({
+  control,
+  label,
+}: {
+  control: ReturnType<typeof useEyedropper>
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      className={`icon-button${control.armed ? ' active' : ''}`}
+      title={label}
+      aria-label={label}
+      aria-pressed={control.armed}
+      disabled={control.arming}
+      onClick={control.toggle}
+    >
+      <EyedropperIcon />
+    </button>
   )
 }
 

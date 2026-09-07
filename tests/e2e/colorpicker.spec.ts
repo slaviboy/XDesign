@@ -202,3 +202,73 @@ test('angular joins the same dropdown and keeps the stops', async ({ page }) => 
   const first = await page.locator('.document-layer linearGradient stop').first().getAttribute('stop-color')
   expect(first?.toLowerCase()).toBe('#e8a33d')
 })
+
+// -------------------------------------------------------- fill/stroke rows --
+
+test('unchecking Fill turns it off and hides what only applies to a fill', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 220, y: 200 }, { x: 420, y: 360 })
+  await openFillPicker(page)
+  await setHex(page, 'e8a33d')
+  await page.keyboard.press('Escape')
+
+  const fill = page.locator('.section', { hasText: 'FILL' })
+  const toggle = fill.locator('.paint-toggle')
+  await expect(toggle).toBeChecked()
+  // The blend mode belongs to the fill, so it is only shown while there is one.
+  await expect(fill.locator('select')).toHaveCount(1)
+
+  await toggle.uncheck()
+  const painted = page.locator('.document-layer [data-node-type="rect"] path').first()
+  expect(await painted.getAttribute('fill')).toBe('none')
+  await expect(fill.locator('select')).toHaveCount(0)
+
+  // Checking it back restores the colour that was there, not a default.
+  await toggle.check()
+  expect((await painted.getAttribute('fill'))?.toLowerCase()).toBe('#e8a33d')
+  await expect(fill.locator('select')).toHaveCount(1)
+})
+
+test('unchecking Stroke hides the whole stroke section', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 220, y: 200 }, { x: 420, y: 360 })
+
+  const stroke = page.locator('.section', { hasText: 'STROKE' })
+  const toggle = stroke.locator('.paint-toggle')
+  // A new shape has no stroke, so it starts off and its controls are not shown.
+  await expect(toggle).not.toBeChecked()
+  await expect(stroke.locator('select')).toHaveCount(0)
+
+  await toggle.check()
+  await expect(stroke.locator('select')).toHaveCount(3)
+  const painted = page.locator('.document-layer [data-node-type="rect"] path').first()
+  expect(await painted.getAttribute('stroke')).not.toBe('none')
+
+  await toggle.uncheck()
+  await expect(stroke.locator('select')).toHaveCount(0)
+})
+
+test('the Fill row has its own eyedropper', async ({ page }) => {
+  await openApp(page)
+  // A shape with a known colour to sample from...
+  await drawShape(page, 'rect', { x: 520, y: 200 }, { x: 700, y: 360 })
+  await openFillPicker(page)
+  await setHex(page, '1e9e4f')
+  await page.keyboard.press('Escape')
+
+  // ...and a second to paint, without opening the picker at all.
+  await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 380, y: 360 })
+  const dropper = page
+    .locator('.section', { hasText: 'FILL' })
+    .locator('button[aria-label="Pick a fill color from the canvas"]')
+  await dropper.click()
+  await expect(dropper).toHaveAttribute('aria-pressed', 'true', { timeout: 10_000 })
+
+  const box = (await page.locator(CANVAS).boundingBox())!
+  await page.mouse.move(box.x + 610, box.y + 280)
+  await page.mouse.down()
+  await page.mouse.up()
+
+  const painted = page.locator('.document-layer [data-node-type="rect"]').nth(1).locator('path').first()
+  expect((await painted.getAttribute('fill'))?.toLowerCase()).toBe('#1e9e4f')
+})

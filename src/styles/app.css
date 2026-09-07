@@ -393,6 +393,17 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 }
 .paint-row:last-child { margin-bottom: 0; }
 .paint-row .field { flex: 1; }
+/* The on/off box leads the row and the eyedropper closes it, so the swatch and
+   its value sit between them the way the reference lays it out. */
+.paint-toggle {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.paint-row > .icon-button:last-child { flex: none; margin-left: auto; }
 
 .checkbox-row {
   display: flex;

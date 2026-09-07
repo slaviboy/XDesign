@@ -390,13 +390,20 @@ export const TrashIcon = (p: IconProps) => (
 export const CloseIcon = (p: IconProps) => (
   <Icon {...p}><path d="M4 4l8 8M12 4l-8 8" /></Icon>
 )
-/** Pipette: the barrel on the diagonal, the tip pointing at what it samples. */
-export const EyedropperIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M10.5 6.5 3 14v2h2l7.5-7.5" />
-    <path d="M9.6 5.6 11 4.2a1.7 1.7 0 0 1 2.4 0l.4.4a1.7 1.7 0 0 1 0 2.4l-1.4 1.4z" />
-    <path d="M4.5 12.5h2.2" />
-  </Icon>
+/**
+ * Pipette, from the supplied artwork.
+ *
+ * A filled glyph on a 32-unit grid rather than the 16-unit stroked one the other
+ * panel icons use, so it keeps its own viewBox instead of going through Icon.
+ */
+export const EyedropperIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 32 32" fill="currentColor" {...rest}>
+    <path d="M27.7,3.3c-1.5-1.5-3.9-1.5-5.4,0L17,8.6l-1.3-1.3c-0.4-0.4-1-0.4-1.4,0s-0.4,1,0,1.4l1.3,1.3L5,20.6
+      c-0.6,0.6-1,1.4-1.1,2.3C3.3,23.4,3,24.2,3,25c0,1.7,1.3,3,3,3c0.8,0,1.6-0.3,2.2-0.9C9,27,9.8,26.6,10.4,26L21,15.4l1.3,1.3
+      c0.2,0.2,0.5,0.3,0.7,0.3s0.5-0.1,0.7-0.3c0.4-0.4,0.4-1,0-1.4L22.4,14l5.3-5.3C29.2,7.2,29.2,4.8,27.7,3.3z M9,24.6
+      c-0.4,0.4-0.8,0.6-1.3,0.5c-0.4,0-0.7,0.2-0.9,0.5C6.7,25.8,6.3,26,6,26c-0.6,0-1-0.4-1-1c0-0.3,0.2-0.7,0.5-0.8
+      c0.3-0.2,0.5-0.5,0.5-0.9c0-0.5,0.2-1,0.5-1.3L17,11.4l2.6,2.6L9,24.6z" />
+  </svg>
 )
 
 export const GridIcon = (p: IconProps) => (
