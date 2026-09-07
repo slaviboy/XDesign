@@ -37,11 +37,12 @@ export type WorkspaceTab = 'design' | 'prototype' | 'share'
 /**
  * What a marquee has to do to an object before it counts as selected.
  *
- * 'enclose'  the whole object must be inside the rectangle. Precise, and the
- *            default, because it is the only mode where dragging across a busy
- *            canvas cannot pick up things you did not mean.
+ * 'enclose'  the whole object must be inside the rectangle. Precise, but it
+ *            means surrounding everything you want.
  * 'touch'    anything the rectangle so much as clips is selected — dragging a
- *            line through a row of objects takes all of them.
+ *            line through a row of objects takes all of them. The default,
+ *            because reaching for a selection is far more common than needing
+ *            to exclude a neighbour, and the neighbour is one key away.
  *
  * Alt inverts whichever is chosen, so both are always one key away.
  */
@@ -51,10 +52,10 @@ export const MARQUEE_MODE_STORAGE_KEY = 'xdesign.marqueeMode'
 
 function readStoredMarqueeMode(): MarqueeMode {
   try {
-    return localStorage.getItem(MARQUEE_MODE_STORAGE_KEY) === 'touch' ? 'touch' : 'enclose'
+    return localStorage.getItem(MARQUEE_MODE_STORAGE_KEY) === 'enclose' ? 'enclose' : 'touch'
   } catch {
-    // Private mode, or storage blocked. The default is the safe one.
-    return 'enclose'
+    // Private mode, or storage blocked: fall through to the default.
+    return 'touch'
   }
 }
 

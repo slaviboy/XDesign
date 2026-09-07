@@ -1228,3 +1228,42 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
 /* The shadow row's type dropdown takes the space the width field has in the
    stroke row above it, so the two rows read as one column of controls. */
 .paint-row > select { min-width: 0; flex: 1; }
+
+/* A preference and the (i) that explains it. The control takes the width and
+   the button sits hard against the right edge, so the icons line up in a
+   column whatever the rows contain. */
+.pref-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pref-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.info-button {
+  appearance: none;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.info-button:hover { background: var(--bg-hover); color: var(--text); }
+.info-button.active { background: var(--accent); color: #fff; }
+
+/* The explanation, indented under the row it belongs to. */
+.pref-note {
+  margin: 2px 30px 8px 2px;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+}

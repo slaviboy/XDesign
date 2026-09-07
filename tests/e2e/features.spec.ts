@@ -943,25 +943,11 @@ async function threeInARow(page: import('@playwright/test').Page) {
   await selectTool(page, 'select')
 }
 
-test('a marquee selects only what it encloses, by default', async ({ page }) => {
+test('a marquee selects everything it touches, by default', async ({ page }) => {
   await openApp(page)
   await threeInARow(page)
 
-  // A thin sweep through all three encloses none of them.
-  await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 })
-  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
-
-  // A rectangle round the first two takes exactly those.
-  await marquee(page, { x: 210, y: 170 }, { x: 500, y: 330 })
-  await expect(page.locator('.layer-row.selected')).toHaveCount(2)
-})
-
-test('the Touch mode selects everything the marquee crosses', async ({ page }) => {
-  await openApp(page)
-  await threeInARow(page)
-  await setMarqueeMode(page, 'touch')
-
-  // One stroke through the row now takes the whole row — no vertex of any
+  // One stroke through the row takes the whole row — no vertex of any
   // rectangle is inside the band, so this only works if crossed EDGES count.
   await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 })
   await expect(page.locator('.layer-row.selected')).toHaveCount(3)
@@ -972,24 +958,38 @@ test('the Touch mode selects everything the marquee crosses', async ({ page }) =
   await expect(page.locator('.layer-row.selected')).toHaveCount(1)
 })
 
+test('the Enclose mode takes only what the marquee surrounds', async ({ page }) => {
+  await openApp(page)
+  await threeInARow(page)
+  await setMarqueeMode(page, 'enclose')
+
+  // The same sweep now encloses none of them.
+  await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 })
+  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
+
+  // A rectangle round the first two takes exactly those.
+  await marquee(page, { x: 210, y: 170 }, { x: 500, y: 330 })
+  await expect(page.locator('.layer-row.selected')).toHaveCount(2)
+})
+
 test('Alt uses the other mode for one selection, whichever is set', async ({ page }) => {
   await openApp(page)
   await threeInARow(page)
 
+  // Touch is the default: Alt encloses.
+  await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 }, true)
+  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
+
+  await page.keyboard.press('Escape')
+  await setMarqueeMode(page, 'enclose')
   // Enclose is set: Alt crosses.
   await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 }, true)
   await expect(page.locator('.layer-row.selected')).toHaveCount(3)
-
-  await page.keyboard.press('Escape')
-  await setMarqueeMode(page, 'touch')
-  // Touch is set: Alt encloses.
-  await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 }, true)
-  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
 })
 
 test('the marquee mode outlives the tab', async ({ page }) => {
   await openApp(page)
-  await setMarqueeMode(page, 'touch')
+  await setMarqueeMode(page, 'enclose')
 
   await page.reload()
   await page.waitForSelector(CANVAS)
@@ -999,6 +999,40 @@ test('the marquee mode outlives the tab', async ({ page }) => {
   // document, and the point here is the preference, not the artwork.
   await threeInARow(page)
 
+  // Set to Enclose before the reload, so the sweep must still take nothing.
   await marquee(page, { x: 200, y: 250 }, { x: 660, y: 260 })
-  await expect(page.locator('.layer-row.selected')).toHaveCount(3)
+  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
+})
+
+// ------------------------------------------------------ preference notes --
+
+test('every preference explains itself behind an (i)', async ({ page }) => {
+  await openApp(page)
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('.menu-item', { hasText: 'Preferences' }).click()
+
+  // One button per setting, and nothing explained until asked.
+  const buttons = page.locator('.dialog .info-button')
+  await expect(buttons).toHaveCount(7)
+  await expect(page.locator('.dialog .pref-note')).toHaveCount(0)
+
+  const snap = page.locator('[data-testid="info-snap-objects"]')
+  await expect(snap).toHaveAttribute('aria-expanded', 'false')
+  await snap.click()
+  await expect(snap).toHaveAttribute('aria-expanded', 'true')
+
+  const note = page.locator('.dialog .pref-note')
+  await expect(note).toHaveCount(1)
+  await expect(note).toContainText('edges and centres')
+  // Named by the button that opened it, so a screen reader reads the two together.
+  expect(await note.getAttribute('id')).toBe(await snap.getAttribute('aria-controls'))
+
+  // A second one opens alongside rather than replacing it.
+  await page.locator('[data-testid="info-marquee-mode"]').click()
+  await expect(page.locator('.dialog .pref-note')).toHaveCount(2)
+
+  // And pressing again puts it away.
+  await snap.click()
+  await expect(page.locator('.dialog .pref-note')).toHaveCount(1)
+  await expect(snap).toHaveAttribute('aria-expanded', 'false')
 })

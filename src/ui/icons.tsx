@@ -409,6 +409,13 @@ export const EyedropperIcon = ({ size = 16, ...rest }: IconProps) => (
 export const GridIcon = (p: IconProps) => (
   <Icon {...p}><path d="M6 2.5v11M10 2.5v11M2.5 6h11M2.5 10h11" /></Icon>
 )
+export const InfoIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M8 7.2v4" />
+    <path d="M8 4.9v.1" />
+  </Icon>
+)
 export const MagnetIcon = (p: IconProps) => (
   <Icon {...p}><path d="M4 12V6.5a4 4 0 018 0V12" /><path d="M4 12h3V9.5M12 12H9V9.5" /></Icon>
 )

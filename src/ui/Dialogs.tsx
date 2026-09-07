@@ -2,7 +2,7 @@
  * Preferences, keyboard shortcuts, About, New document, and crash recovery.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ARTBOARD_PRESETS, createDocument } from '../document/NodeFactory'
 import { updateSettings } from '../history/Commands'
 import { createArtboardCommand } from '../history/Commands'
@@ -11,7 +11,8 @@ import { closeDialog, setEditor, setMarqueeMode, setViewport, type MarqueeMode }
 import { useDocument, useEditorStore } from '../state/hooks'
 import { getStorageEstimate, clearRecent } from '../persistence/IndexedDbStore'
 import { supportsFileSystemAccess } from '../persistence/FileSystem'
-import { ALT_LABEL, shortcutGroups } from '../shortcuts/bindings'
+import { ALT_LABEL, MOD_LABEL, shortcutGroups } from '../shortcuts/bindings'
+import { InfoIcon } from './icons'
 import { NumberField, Select, TextField } from './primitives'
 import type { RecoveryOffer } from '../persistence/Autosave'
 
@@ -202,50 +203,79 @@ export function PreferencesDialog() {
       footer={<button type="button" className="button primary" onClick={closeDialog}>Done</button>}
     >
       <h4 style={{ margin: '0 0 8px', fontSize: 12 }}>Canvas</h4>
-      <label className="checkbox-row">
-        <input type="checkbox" checked={doc.settings.gridVisible} onChange={(e) => updateSettings({ gridVisible: e.target.checked })} />
-        Show grid
-      </label>
-      <label className="checkbox-row">
-        <input type="checkbox" checked={doc.settings.snapToGrid} onChange={(e) => updateSettings({ snapToGrid: e.target.checked })} />
-        Snap to grid
-      </label>
-      <label className="checkbox-row">
-        <input type="checkbox" checked={doc.settings.snapToObjects} onChange={(e) => updateSettings({ snapToObjects: e.target.checked })} />
-        Snap to objects
-      </label>
-      <label className="checkbox-row">
-        <input type="checkbox" checked={doc.settings.guidesVisible} onChange={(e) => updateSettings({ guidesVisible: e.target.checked })} />
-        Show guides
-      </label>
-      <label className="checkbox-row">
-        <input type="checkbox" checked={snapEnabled} onChange={(e) => setEditor({ snapEnabled: e.target.checked })} />
-        Snapping enabled
-      </label>
-      <div className="dialog-row" style={{ marginTop: 10 }}>
-        <label>Grid size</label>
-        <NumberField value={doc.settings.gridSize} min={1} max={500} precision={0} onChange={(v) => updateSettings({ gridSize: Math.round(v) })} />
-      </div>
+      <PreferenceRow
+        name="grid-visible"
+        info="Draws a ruled grid over the canvas as a drawing aid. It is never part of the document and never appears in an export."
+      >
+        <label className="checkbox-row">
+          <input type="checkbox" checked={doc.settings.gridVisible} onChange={(e) => updateSettings({ gridVisible: e.target.checked })} />
+          Show grid
+        </label>
+      </PreferenceRow>
+      <PreferenceRow
+        name="snap-grid"
+        info={`While you drag, an object's edges and centre jump to the nearest grid line once they come within a few pixels of one. Grid size below sets the spacing, and the grid does not have to be visible for this to work.`}
+      >
+        <label className="checkbox-row">
+          <input type="checkbox" checked={doc.settings.snapToGrid} onChange={(e) => updateSettings({ snapToGrid: e.target.checked })} />
+          Snap to grid
+        </label>
+      </PreferenceRow>
+      <PreferenceRow
+        name="snap-objects"
+        info="Aligns what you are dragging to the edges and centres of everything else, drawing a magenta guide where it lands. Objects win over the grid when both are in range."
+      >
+        <label className="checkbox-row">
+          <input type="checkbox" checked={doc.settings.snapToObjects} onChange={(e) => updateSettings({ snapToObjects: e.target.checked })} />
+          Snap to objects
+        </label>
+      </PreferenceRow>
+      <PreferenceRow
+        name="guides-visible"
+        info="Shows the guides dragged out from the rulers. Hiding them leaves them in place and still snapping — it only takes them off screen."
+      >
+        <label className="checkbox-row">
+          <input type="checkbox" checked={doc.settings.guidesVisible} onChange={(e) => updateSettings({ guidesVisible: e.target.checked })} />
+          Show guides
+        </label>
+      </PreferenceRow>
+      <PreferenceRow
+        name="snap-enabled"
+        info={`The master switch over both kinds of snapping above: with it off, neither applies. Holding ${MOD_LABEL} suspends snapping for a single drag without changing this.`}
+      >
+        <label className="checkbox-row">
+          <input type="checkbox" checked={snapEnabled} onChange={(e) => setEditor({ snapEnabled: e.target.checked })} />
+          Snapping enabled
+        </label>
+      </PreferenceRow>
+      <PreferenceRow
+        name="grid-size"
+        info="The spacing between grid lines, in document units — the same units as the W and H fields."
+      >
+        <div className="dialog-row" style={{ marginTop: 10 }}>
+          <label>Grid size</label>
+          <NumberField value={doc.settings.gridSize} min={1} max={500} precision={0} onChange={(v) => updateSettings({ gridSize: Math.round(v) })} />
+        </div>
+      </PreferenceRow>
 
       <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>Selection</h4>
-      <div className="dialog-row">
-        <label>Marquee selects</label>
-        <Select
-          value={marqueeMode}
-          options={[
-            { value: 'enclose', label: 'Objects fully inside' },
-            { value: 'touch', label: 'Anything it touches' },
-          ]}
-          onChange={(v) => setMarqueeMode(v as MarqueeMode)}
-          title="What a drag-selection has to cover before an object counts as selected"
-        />
-      </div>
-      <div className="multi-note" style={{ marginTop: 6 }}>
-        Dragging a rectangle over the canvas selects whatever falls inside it. “Anything it
-        touches” selects an object the moment the rectangle clips any part of it, so a single
-        stroke through a row picks up the whole row. Holding {ALT_LABEL} while you drag uses the
-        other mode for that one selection.
-      </div>
+      <PreferenceRow
+        name="marquee-mode"
+        info={`Dragging a rectangle over the canvas selects whatever falls inside it. “Anything it touches” selects an object the moment the rectangle clips any part of it, so a single stroke through a row picks up the whole row. “Objects fully inside” takes only what the rectangle completely surrounds. Holding ${ALT_LABEL} while you drag uses the other mode for that one selection.`}
+      >
+        <div className="dialog-row">
+          <label>Marquee selects</label>
+          <Select
+            value={marqueeMode}
+            options={[
+              { value: 'touch', label: 'Anything it touches' },
+              { value: 'enclose', label: 'Objects fully inside' },
+            ]}
+            onChange={(v) => setMarqueeMode(v as MarqueeMode)}
+            title="What a drag-selection has to cover before an object counts as selected"
+          />
+        </div>
+      </PreferenceRow>
 
       <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>Storage</h4>
       <div className="multi-note">
@@ -271,6 +301,49 @@ export function PreferencesDialog() {
         Clear recent documents
       </button>
     </DialogShell>
+  )
+}
+
+/**
+ * One preference, with an (i) that opens its explanation.
+ *
+ * Behind a press rather than a hover: the notes are a sentence or two each, and
+ * six of them stacked permanently would bury the settings they describe — while
+ * a hover tooltip is unreadable at that length and unreachable by touch.
+ */
+function PreferenceRow({
+  name,
+  info,
+  children,
+}: {
+  name: string
+  info: string
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const noteId = `pref-note-${name}`
+  return (
+    <>
+      <div className="pref-row">
+        {children}
+        <button
+          type="button"
+          className={`info-button${open ? ' active' : ''}`}
+          aria-label={open ? 'Hide explanation' : 'What does this do?'}
+          aria-expanded={open}
+          aria-controls={noteId}
+          data-testid={`info-${name}`}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <InfoIcon size={14} />
+        </button>
+      </div>
+      {open && (
+        <p className="pref-note" id={noteId}>
+          {info}
+        </p>
+      )}
+    </>
   )
 }
 

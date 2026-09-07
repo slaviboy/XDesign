@@ -54,9 +54,12 @@ so it takes the pointer itself and no tool ever sees the press. It is positioned
 matrix, so it travels with the artboard instead of jumping to it on release.
 
 **Marquee selection, two ways** — Preferences > Selection chooses what a drag-selection has to
-cover: *Objects fully inside* (the default) or *Anything it touches*, where one stroke through a
-row picks up the whole row. `⌥` uses the other mode for a single selection, whichever is set, and
-the choice is remembered between sessions.
+cover: *Anything it touches* (the default), where one stroke through a row picks up the whole
+row, or *Objects fully inside*, which takes only what the rectangle completely surrounds. `⌥`
+uses the other mode for a single selection, whichever is set, and the choice is remembered
+between sessions. Every preference carries an **(i)** that opens a sentence or two on what it
+actually does — behind a press rather than a hover, because six notes stacked permanently would
+bury the settings they describe, and a hover tooltip is unreadable at that length.
 
 **Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
 snapping and smart guides, per-point Bézier editing, boolean operations, alignment and
