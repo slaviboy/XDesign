@@ -28,7 +28,7 @@ import {
 import { ancestorIds, nodePathData, worldMatrix } from '../document/SceneGraph'
 import { convertNodeToPath } from '../document/DocumentModel'
 import { liveTransform } from '../canvas/LiveTransform'
-import { geomKey } from '../canvas/NodeRenderer'
+import { geomKey } from '../canvas/liveKeys'
 import { transaction, getDoc } from '../state/DocumentStore'
 import { editorStore, refreshOverlay, setEditor } from '../state/EditorStore'
 import type { PointRef } from '../state/EditorStore'

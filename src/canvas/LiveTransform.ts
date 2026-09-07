@@ -30,7 +30,16 @@ type Listener = () => void
 class LiveTransformChannel {
   private elements = new Map<NodeId, Set<SVGElement>>()
   private pending = new Map<NodeId, LiveOverride>()
-  private originals = new Map<NodeId, Map<string, string | null>>()
+  /**
+   * Per ELEMENT, not per key.
+   *
+   * One key can hold several elements that do not agree on an attribute — an
+   * image's <image> has a width, the clip path beside it does not — and a
+   * snapshot shared across them would restore one element's value onto
+   * another's, or remove an attribute that was only ever missing from a
+   * sibling. Cancelling a resize would then leave the picture with no width.
+   */
+  private originals = new Map<SVGElement, Map<string, string | null>>()
   private listeners = new Set<Listener>()
   private rafHandle = 0
   private active = false
@@ -99,14 +108,10 @@ class LiveTransformChannel {
       cancelAnimationFrame(this.rafHandle)
       this.rafHandle = 0
     }
-    for (const [id, attrs] of this.originals) {
-      const set = this.elements.get(id)
-      if (!set) continue
-      for (const el of set) {
-        for (const [name, value] of attrs) {
-          if (value === null) el.removeAttribute(name)
-          else el.setAttribute(name, value)
-        }
+    for (const [el, attrs] of this.originals) {
+      for (const [name, value] of attrs) {
+        if (value === null) el.removeAttribute(name)
+        else el.setAttribute(name, value)
       }
     }
     this.active = false
@@ -143,13 +148,12 @@ class LiveTransformChannel {
       const set = this.elements.get(id)
       if (!set) continue
 
-      let snapshot = this.originals.get(id)
-      if (!snapshot) {
-        snapshot = new Map()
-        this.originals.set(id, snapshot)
-      }
-
       for (const el of set) {
+        let snapshot = this.originals.get(el)
+        if (!snapshot) {
+          snapshot = new Map()
+          this.originals.set(el, snapshot)
+        }
         if (override.transform) {
           if (!snapshot.has('transform')) snapshot.set('transform', el.getAttribute('transform'))
           el.setAttribute('transform', toSvgMatrix(override.transform))

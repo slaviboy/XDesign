@@ -27,7 +27,7 @@ import { isEffectivelyLocked, worldMatrix } from '../document/SceneGraph'
 import { transaction } from '../state/DocumentStore'
 import { editorStore } from '../state/EditorStore'
 import { liveTransform } from '../canvas/LiveTransform'
-import { geomKey } from '../canvas/NodeRenderer'
+import { geomKey } from '../canvas/liveKeys'
 import {
   cornerIndex,
   cornerRadiusOf,

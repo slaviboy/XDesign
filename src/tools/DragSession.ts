@@ -47,7 +47,7 @@ import { transformFromMatrix } from '../document/DocumentModel'
 import { transaction } from '../state/DocumentStore'
 import { editorStore } from '../state/EditorStore'
 import { liveTransform } from '../canvas/LiveTransform'
-import { fxKey, geomKey } from '../canvas/NodeRenderer'
+import { fxKey, geomKey } from '../canvas/liveKeys'
 import { effectMargin, filterRegion } from '../canvas/effects'
 import { hasStyle, isContainer, usesOwnBox } from '../document/types'
 import type { DesignDocument, DesignNode, NodeId, Transform } from '../document/types'
@@ -78,7 +78,7 @@ interface NodeSnapshot {
    *
    * Snapshotted because a resize does not change it — a blur radius is not
    * what a resize edits — but the region built from it has to follow the live
-   * size. See fxKey in NodeRenderer.
+   * size. See fxKey in liveKeys.
    */
   effectMargin: number
 }
@@ -184,7 +184,9 @@ export function beginDrag(
           : undefined,
       sides: node.type === 'polygon' ? node.sides : undefined,
       starRatio: node.type === 'polygon' ? node.starRatio : undefined,
-      cornerRadius: node.type === 'rect' ? node.cornerRadius : undefined,
+      // Images carry corner rounding too, and it shapes the clip they are
+      // drawn through — so a live resize has to rebuild that clip as well.
+      cornerRadius: node.type === 'rect' || node.type === 'image' ? node.cornerRadius : undefined,
       vertexRadius: node.type === 'polygon' ? node.cornerRadius : undefined,
       effectMargin: hasStyle(node) ? effectMargin(node.style) : 0,
     }
@@ -470,8 +472,17 @@ function pushLiveTransform(
   const override: { transform: Mat2D; attrs?: Record<string, string> } = { transform: local }
 
   if (width !== undefined && height !== undefined && usesIntrinsicSize(snap.type)) {
+    const attrs: Record<string, string> = {}
     const d = livePathData(snap, width, height)
-    if (d !== null) liveTransform.set(geomKey(snap.id), { attrs: { d } })
+    if (d !== null) attrs.d = d
+    if (snap.type === 'image') {
+      // An <image> is sized by attributes, not by a path. Without these the
+      // picture keeps its old size inside a clip that has already grown, and
+      // the whole resize appears to do nothing until the mouse comes up.
+      attrs.width = String(Math.max(0, width))
+      attrs.height = String(Math.max(0, height))
+    }
+    if (Object.keys(attrs).length > 0) liveTransform.set(geomKey(snap.id), { attrs })
 
     // The filter region is sized from the box, and this is the one kind of
     // resize that changes the box without changing the matrix — so the region
@@ -517,7 +528,8 @@ export function usesIntrinsicSize(type: DesignNode['type']): boolean {
     type === 'ellipse' ||
     type === 'polygon' ||
     type === 'path' ||
-    type === 'line'
+    type === 'line' ||
+    type === 'image'
   )
 }
 
@@ -542,6 +554,10 @@ function livePathData(snap: NodeSnapshot, width: number, height: number): string
         snap.d,
         scaling(t.width > 0 ? width / t.width : 1, t.height > 0 ? height / t.height : 1),
       )
+    case 'image':
+      // The clip the picture is drawn through, which is what gives it its
+      // corner rounding.
+      return rectPath(width, height, snap.cornerRadius ?? 0)
     case 'line': {
       if (!snap.line) return null
       const kx = t.width > 0 ? width / t.width : 1

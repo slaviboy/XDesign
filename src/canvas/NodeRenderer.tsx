@@ -24,8 +24,10 @@ import {
   rectPath,
 } from '../geometry/ShapeGeometry'
 import { localMatrix } from '../document/SceneGraph'
-import { useDocumentStore, useNode } from '../state/hooks'
+import { useDocumentStore, useLiveTransformTick, useNode } from '../state/hooks'
 import { liveTransform } from './LiveTransform'
+import { clipKey, fxKey, geomKey } from './liveKeys'
+import { getLiveSize } from '../tools/DragSession'
 import {
   ANGULAR_TILE,
   angularWedges,
@@ -62,9 +64,6 @@ import type {
 import { layoutText, lineOffsetX, cssFont } from '../text/TextLayout'
 import { fontStack } from '../text/FontRegistry'
 
-/** LiveTransform key for a node's geometry element (as opposed to its group). */
-export const geomKey = (id: NodeId): string => `${id}::geom`
-
 /**
  * Ref that registers an element under a LiveTransform key.
  *
@@ -95,19 +94,6 @@ function liveRefs(keys: readonly string[], enabled: boolean) {
     }
   }
 }
-/** LiveTransform key for an artboard's clip rect. */
-export const clipKey = (id: NodeId): string => `${id}::clip`
-
-/**
- * LiveTransform key for a node's effect filter.
- *
- * The filter region is in user space and sized from the node's box, so a live
- * resize has to move it too — otherwise the shape is clipped to whatever size
- * it was when React last rendered, which looks like the effect (and half the
- * shape) vanishing until the mouse comes up.
- */
-export const fxKey = (id: NodeId): string => `${id}::fx`
-
 /**
  * What a rendered node IS.
  *
@@ -308,17 +294,23 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
   const stroke = paintToAttrs(node.style.stroke.paint, node.id, 'stroke')
   const hasStroke = node.style.stroke.paint.type !== 'none' && node.style.stroke.width > 0
 
-  const layout = useMemo(
-    () =>
-      layoutText(
-        node.text,
-        node.textStyle,
-        node.textStyle.sizing === 'fixed' ? node.transform.width : undefined,
-      ),
-    [node.text, node.textStyle, node.transform.width],
+  // Text is the one body whose geometry is not an attribute: re-wrapping means
+  // rebuilding the lines, which LiveTransform cannot push. So this component
+  // re-renders itself on each live frame instead, reading the in-flight width.
+  // Only this node re-renders — the document store is still never written
+  // during a gesture, which is the rule that matters.
+  const liveTick = useLiveTransformTick()
+  const width = useMemo(
+    () => getLiveSize(node.id)?.width ?? node.transform.width,
+    [node.id, node.transform.width, liveTick],
   )
 
-  const boxWidth = node.textStyle.sizing === 'fixed' ? node.transform.width : layout.width
+  const layout = useMemo(
+    () => layoutText(node.text, node.textStyle, node.textStyle.sizing === 'fixed' ? width : undefined),
+    [node.text, node.textStyle, width],
+  )
+
+  const boxWidth = node.textStyle.sizing === 'fixed' ? width : layout.width
   const decoration = [
     node.textStyle.underline ? 'underline' : '',
     node.textStyle.strikethrough ? 'line-through' : '',
@@ -394,6 +386,9 @@ function ImageBody({
         </clipPath>
       </defs>
       <image
+        // Registered alongside the clip so the picture is resized by the same
+        // frame that resizes the region it is drawn through.
+        ref={geomRef}
         href={dataUrl}
         width={width}
         height={height}
@@ -719,3 +714,4 @@ export const DocumentLayer = memo(function DocumentLayer(): ReactNode {
 })
 
 export { cssFont }
+export { clipKey, fxKey, geomKey }

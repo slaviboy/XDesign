@@ -468,6 +468,29 @@ and the canvas it had arrived at did not. The clip therefore registers under two
 keys — the node's own, which carries the matrix, and its geometry key, which carries `d` — so a
 move and a resize both reach it in the frame they happen.
 
+### Live resize reaches three kinds of geometry, not one
+
+A drag only moves things, so a matrix covers it. A resize changes what a node *is*, and how it
+is expressed differs by type — which is why "resize does not preview" kept turning up in a new
+guise rather than being one bug.
+
+**Paths** are an attribute: the drag session rebuilds `d` and LiveTransform writes it. That was
+always there.
+
+**Images** are two elements that disagree. The picture is sized by `width`/`height` on an
+`<image>`, while the rounded clip beside it is a `d` on a `<path>`. Only the clip was registered,
+so the region grew live and the picture inside it did not move at all until commit. Both now
+register under the same geometry key and the session writes both sets of attributes. That in turn
+forced LiveTransform to snapshot originals **per element rather than per key**: two elements
+under one key do not agree on which attributes they have, and a shared snapshot restored the
+clip's absent `width` onto the image, so cancelling a resize left the picture with no width at
+all.
+
+**Text** is neither. Re-wrapping rebuilds the lines, and no attribute write can express that. So
+the text body subscribes to the live tick and re-renders itself from the in-flight width — one
+component, not the document, which keeps the rule that matters: a gesture still writes nothing
+to the store.
+
 ### An effect's filter region has to keep up with a live resize
 
 A drag never changes a node's box, so a shadow follows a move for free. A resize is different,

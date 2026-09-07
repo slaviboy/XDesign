@@ -8,8 +8,8 @@
 
 import { test, expect } from '@playwright/test'
 import {
-  CANVAS, captureDownload, drawShape, modifier, nodesOfType, openApp,
-  openExportDialog, readField, selectTool, setField,
+  CANVAS, RED_PNG_BASE64, captureDownload, drawShape, dropFiles, modifier,
+  nodesOfType, openApp, openExportDialog, readField, selectTool, setField,
 } from './helpers'
 
 const radiusField = (page: import('@playwright/test').Page) =>
@@ -252,4 +252,104 @@ test('resizing a group scales its children, live and on commit', async ({ page }
 
   // No snap at pointerup: what was previewed is what was committed.
   expect(await childWidths()).toEqual(during)
+})
+
+// ------------------------------------------------- resizing what is not a path --
+
+/**
+ * Drag the south-east handle of whatever is selected, reporting a reading taken
+ * MID-gesture and again after release.
+ *
+ * The distinction is the whole point: a node whose geometry is only rebuilt on
+ * commit passes any after-the-fact assertion while showing nothing at all while
+ * you drag it.
+ */
+async function resizeSE(
+  page: import('@playwright/test').Page,
+  dx: number,
+  dy: number,
+  read: () => Promise<string>,
+) {
+  const handle = (await page.locator('[data-handle="se"]').boundingBox())!
+  const x = handle.x + handle.width / 2
+  const y = handle.y + handle.height / 2
+  const before = await read()
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + dx, y + dy, { steps: 10 })
+  const during = await read()
+  await page.mouse.up()
+  return { before, during, after: await read() }
+}
+
+test('an image resizes while it is dragged, not on release', async ({ page }) => {
+  await openApp(page)
+  await dropFiles(page, [{ name: 'photo.png', type: 'image/png', base64: RED_PNG_BASE64 }], { x: 350, y: 300 })
+  await selectTool(page, 'select')
+  await page.locator('.layer-row', { hasText: 'photo' }).click()
+  await setField(page, 'W', 200)
+  await setField(page, 'H', 150)
+
+  const picture = page.locator('.document-layer image')
+  const clip = page.locator('.document-layer clipPath path').first()
+  const size = async () =>
+    `${await picture.getAttribute('width')}x${await picture.getAttribute('height')}`
+
+  const r = await resizeSE(page, 140, 100, size)
+  expect(r.before).toBe('200x150')
+  // An <image> is sized by attributes, not by a path: the clip beside it was
+  // already growing live, so the picture used to sit at its old size inside a
+  // region that had moved on.
+  expect(r.during).toBe(r.after)
+  expect(r.during).not.toBe(r.before)
+
+  // The clip followed too, or the corners would round at the wrong radius.
+  const d = (await clip.getAttribute('d'))!
+  expect(d).toContain(String(Math.round(Number((await picture.getAttribute('width'))!))))
+})
+
+test('cancelling an image resize puts the picture back, attribute for attribute', async ({ page }) => {
+  await openApp(page)
+  await dropFiles(page, [{ name: 'photo.png', type: 'image/png', base64: RED_PNG_BASE64 }], { x: 350, y: 300 })
+  await selectTool(page, 'select')
+  await page.locator('.layer-row', { hasText: 'photo' }).click()
+  await setField(page, 'W', 200)
+  await setField(page, 'H', 150)
+
+  const picture = page.locator('.document-layer image')
+  const handle = (await page.locator('[data-handle="se"]').boundingBox())!
+  await page.mouse.move(handle.x + 4, handle.y + 4)
+  await page.mouse.down()
+  await page.mouse.move(handle.x + 160, handle.y + 120, { steps: 8 })
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+
+  // The picture and the clip beside it share one live key but not one set of
+  // attributes: a snapshot taken per key rather than per element would restore
+  // the clip's missing width onto the image and leave it with none.
+  expect(await picture.getAttribute('width')).toBe('200')
+  expect(await picture.getAttribute('height')).toBe('150')
+  expect(await picture.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(0)
+})
+
+test('a fixed-width text box rewraps while it is being resized', async ({ page }) => {
+  await openApp(page)
+  await selectTool(page, 'text')
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  await page.mouse.click(canvas.x + 280, canvas.y + 260)
+  await page.keyboard.type('The quick brown fox jumps over the lazy dog again and again')
+  await page.keyboard.press('Escape')
+  await selectTool(page, 'select')
+  await page.locator('.section', { hasText: 'TEXT' }).locator('select').last()
+    .selectOption({ label: 'Fixed width' })
+  await setField(page, 'W', 260)
+
+  const lines = async () => String(await page.locator('.document-layer text tspan').count())
+  const r = await resizeSE(page, 160, 40, lines)
+
+  // Re-wrapping rebuilds the lines, which no attribute write can express — so
+  // the text body re-renders itself on the live tick instead of waiting for a
+  // store write that only happens on commit.
+  expect(Number(r.before)).toBeGreaterThan(Number(r.after))
+  expect(r.during).toBe(r.after)
 })
