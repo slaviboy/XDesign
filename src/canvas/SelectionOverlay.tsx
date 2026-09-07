@@ -26,8 +26,12 @@ import { angleBetween, rotationCursor } from './cursors'
 import { getDragMode, getLiveMatrix, getLiveRotation, getLiveSize, isDragging } from '../tools/DragSession'
 import { getEditingSubpaths } from '../tools/PathEditing'
 import { getLiveRadius, radiusHandlePosition, type RadiusCorner } from '../tools/RadiusSession'
-import { cornerRadiusOf, supportsCornerRadius } from '../document/types'
-import { worldMatrix as nodeWorldMatrix } from '../document/SceneGraph'
+import { cornerRadiusOf, supportsCornerRadius, type BoxCorner } from '../document/types'
+import {
+  ancestorIds,
+  isEffectivelyLocked,
+  worldMatrix as nodeWorldMatrix,
+} from '../document/SceneGraph'
 import { useDocument, useEditorStore, useLiveTransformTick } from '../state/hooks'
 import { RESIZE_HANDLES, type ResizeHandle } from '../tools/DragSession'
 import type { NodeId } from '../document/types'
@@ -380,21 +384,33 @@ function RadiusHandles({
   const doc = useDocument()
   const node = doc.nodes[nodeId]
   if (!node || !supportsCornerRadius(node)) return null
-  if (node.locked) return null
+  // Honours a locked ANCESTOR, matching every other edit path — a child of a
+  // locked group is still selectable from the Layers panel.
+  if (isEffectivelyLocked(doc, nodeId)) return null
+  // Inside a repeat grid only the first cell registers with LiveTransform, so a
+  // radius drag could preview on one cell while committing to all of them.
+  if (ancestorIds(doc, nodeId).some((a) => doc.nodes[a]?.type === 'repeat-grid')) return null
 
-  const world = nodeWorldMatrix(doc, nodeId)
+  // Live matrix wins during a gesture, exactly as computeFrame does — otherwise
+  // the dots stay pinned at the pre-drag position for the whole of a move or
+  // resize, floating outside the shape while remaining live pointer targets.
+  const live = getLiveMatrix(nodeId)
+  const world = live ?? nodeWorldMatrix(doc, nodeId)
+  const liveSize = getLiveSize(nodeId)
   // Screen pixels per local unit, so the minimum inset is a constant on screen
   // regardless of zoom or how far the node's ancestors have scaled it.
   const pxPerLocal = meanScale(world) * viewport.zoom
   if (pxPerLocal <= 0) return null
 
-  const { width, height } = node.transform
+  const width = liveSize?.width ?? node.transform.width
+  const height = liveSize?.height ?? node.transform.height
   if (width * pxPerLocal < RADIUS_HANDLE_MIN_SHAPE) return null
   if (height * pxPerLocal < RADIUS_HANDLE_MIN_SHAPE) return null
 
-  const live = getLiveRadius(nodeId)
-  const radius = live ?? cornerRadiusOf(node)
   const minInset = RADIUS_HANDLE_MIN_INSET / pxPerLocal
+  const sized = liveSize
+    ? { ...node, transform: { ...node.transform, width, height } }
+    : node
 
   // A box has four independently reachable corners; a polygon's vertices are
   // generated from its sides, so one handle drives the single scalar radius.
@@ -406,7 +422,10 @@ function RadiusHandles({
   return (
     <g className="radius-handles">
       {corners.map((corner) => {
-        const local = radiusHandlePosition(node, corner, radius, minInset)
+        // Per-corner radius, so independent corners each show their own inset.
+        const boxCorner = corner === 'vertex' ? undefined : (corner as BoxCorner)
+        const radius = getLiveRadius(nodeId, boxCorner) ?? cornerRadiusOf(node, boxCorner)
+        const local = radiusHandlePosition(sized, corner, radius, minInset)
         if (!local) return null
         const p = docToScreen(viewport, applyToXY(world, local.x, local.y))
         return (

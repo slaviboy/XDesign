@@ -32,7 +32,9 @@ import { screenDistanceToDoc, screenToDoc, docToScreen } from '../canvas/Viewpor
 import { getDoc } from '../state/DocumentStore'
 import {
   closeDialog, editorStore, openDialog, refreshOverlay, setEditor,
+  setToolDeactivateHandler,
 } from '../state/EditorStore'
+import { getTool } from '../tools/ToolRegistry'
 import { useEditorStore } from '../state/hooks'
 import type { ToolContext } from '../tools/types'
 import type { Vec2 } from '../geometry/Matrix'
@@ -56,6 +58,14 @@ export function App() {
     }),
     [],
   )
+
+  // ---- tool teardown -------------------------------------------------------
+  // Registered here because EditorStore cannot import the tool registry without
+  // a cycle. This is what makes Tool.onDeactivate actually run.
+  useEffect(() => {
+    setToolDeactivateHandler((outgoing) => getTool(outgoing).onDeactivate?.(ctx))
+    return () => setToolDeactivateHandler(null)
+  }, [ctx])
 
   // ---- keyboard ------------------------------------------------------------
   useEffect(

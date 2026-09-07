@@ -35,7 +35,14 @@ const DOM_FENCE = {
 }
 
 export default tseslint.config(
-  { ignores: ['dist', 'dev-dist', 'coverage', 'node_modules', 'playwright-report', 'test-results'] },
+  {
+    // .workflows holds orchestration scripts run by the Workflow tool, which
+    // injects agent()/log()/phase() as globals — they are not app code.
+    ignores: [
+      'dist', 'dev-dist', 'coverage', 'node_modules', 'playwright-report',
+      'test-results', '.workflows',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

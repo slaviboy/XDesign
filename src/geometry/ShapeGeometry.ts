@@ -116,6 +116,11 @@ export function roundedPolygonPath(points: readonly Vec2[], radius: number): str
   if (radius <= 0) return pointsToClosedPath(points)
 
   const parts: string[] = []
+  // Which command opens the subpath is decided by what has actually been
+  // emitted, not by the loop index: a degenerate first vertex is skipped, and
+  // keying off `i === 0` then produced a path starting with `L`, which is not
+  // valid path data and renders as nothing at all.
+  const move = () => (parts.length === 0 ? 'M' : 'L')
 
   for (let i = 0; i < n; i++) {
     const prev = points[(i - 1 + n) % n]!
@@ -135,7 +140,7 @@ export function roundedPolygonPath(points: readonly Vec2[], radius: number): str
     const theta = Math.acos(cosTheta)
     // A straight-through vertex has nothing to round.
     if (theta < 1e-6 || Math.abs(Math.PI - theta) < 1e-6) {
-      parts.push(`${i === 0 ? 'M' : 'L'}${r(cur.x)} ${r(cur.y)}`)
+      parts.push(`${move()}${r(cur.x)} ${r(cur.y)}`)
       continue
     }
 
@@ -151,9 +156,12 @@ export function roundedPolygonPath(points: readonly Vec2[], radius: number): str
     const cross = u1.x * u2.y - u1.y * u2.x
     const sweep = cross < 0 ? 1 : 0
 
-    parts.push(`${i === 0 ? 'M' : 'L'}${r(a.x)} ${r(a.y)}`)
+    parts.push(`${move()}${r(a.x)} ${r(a.y)}`)
     parts.push(`A${r(effective)} ${r(effective)} 0 0 ${sweep} ${r(b.x)} ${r(b.y)}`)
   }
+
+  // Every vertex was degenerate; fall back rather than emit a lone `Z`.
+  if (parts.length === 0) return pointsToClosedPath(points)
 
   parts.push('Z')
   return parts.join(' ')
@@ -176,7 +184,11 @@ export function maxPolygonRadius(points: readonly Vec2[]): number {
     const u1 = { x: (prev.x - cur.x) / (lenPrev || 1), y: (prev.y - cur.y) / (lenPrev || 1) }
     const u2 = { x: (next.x - cur.x) / (lenNext || 1), y: (next.y - cur.y) / (lenNext || 1) }
     const theta = Math.acos(Math.min(1, Math.max(-1, u1.x * u2.x + u1.y * u2.y)))
-    if (theta < 1e-6) continue
+    // Skip both degenerate turns, matching roundedPolygonPath: a doubled-back
+    // vertex (theta ~ 0) and a straight-through one (theta ~ pi). The latter
+    // matters because tan(pi/2) is ~1.6e16, so a single collinear vertex
+    // otherwise reports a "limit" of ~4e17 instead of being ignored.
+    if (theta < 1e-6 || Math.abs(Math.PI - theta) < 1e-6) continue
     limit = Math.min(limit, (Math.min(lenPrev, lenNext) / 2) * Math.tan(theta / 2))
   }
   return Number.isFinite(limit) ? Math.max(0, limit) : 0

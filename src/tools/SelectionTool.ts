@@ -57,6 +57,7 @@ import {
   setSelection,
 } from '../state/EditorStore'
 import { getDoc } from '../state/DocumentStore'
+import { isUniformCornerRadius } from '../document/types'
 import type { Mat2D, Vec2 } from '../geometry/Matrix'
 import type { NodeId } from '../document/types'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
@@ -141,7 +142,18 @@ export const selectionTool: Tool = {
     // it sits inside the shape, where a plain click would otherwise start a move.
     if (e.targetHandle === 'radius') {
       const id = editor.selection[0]
-      if (id && beginRadiusDrag(doc, id, (e.targetCorner ?? 'vertex') as RadiusCorner)) {
+      const node = id ? doc.nodes[id] : undefined
+      // Independent mode is explicit, or inferred when the corners already differ.
+      const independent =
+        editor.cornerRadiusMode === 'independent' ||
+        (editor.cornerRadiusMode === null &&
+          !!node &&
+          (node.type === 'rect' || node.type === 'image') &&
+          !isUniformCornerRadius(node.cornerRadius))
+      if (
+        id &&
+        beginRadiusDrag(doc, id, (e.targetCorner ?? 'vertex') as RadiusCorner, e.doc, independent)
+      ) {
         state.phase = 'radius'
         return
       }
@@ -212,8 +224,14 @@ export const selectionTool: Tool = {
 
   onPointerMove(e: CanvasPointerEvent, ctx: ToolContext): void {
     if (state.phase === 'radius') {
-      const node = ctx.doc().nodes[editorStore.getState().selection[0] ?? '']
-      if (node) updateRadiusDrag(e.doc, node)
+      // Self-healing: a tool switch mid-gesture can deliver pointerup elsewhere,
+      // and a button-less move here would otherwise keep deforming the shape.
+      if (!isRadiusDragging() || e.buttons === 0) {
+        cancelRadiusDrag()
+        reset()
+        return
+      }
+      updateRadiusDrag(e.doc, ctx.doc())
       return
     }
 

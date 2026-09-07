@@ -27,15 +27,18 @@ import {
   trianglePath,
   trianglePoints,
 } from '../geometry/ShapeGeometry'
-import { worldMatrix } from '../document/SceneGraph'
+import { isEffectivelyLocked, worldMatrix } from '../document/SceneGraph'
 import { transaction } from '../state/DocumentStore'
 import { editorStore } from '../state/EditorStore'
 import { liveTransform } from '../canvas/LiveTransform'
 import { geomKey } from '../canvas/NodeRenderer'
 import {
+  cornerIndex,
   cornerRadiusOf,
   hasScalarCornerRadius,
   supportsCornerRadius,
+  type BoxCorner,
+  type CornerRadii,
   type DesignDocument,
   type DesignNode,
   type NodeId,
@@ -47,14 +50,23 @@ interface RadiusState {
   id: NodeId
   corner: RadiusCorner
   world: Mat2D
-  width: number
-  height: number
   startRadius: number
   liveRadius: number
   /** Rebuilds the path for a candidate radius. */
   buildPath: (radius: number) => string
   maxRadius: number
+  /**
+   * Where along the bisector the pointer grabbed, so the radius tracks the
+   * pointer from wherever it was picked up. Without it the radius snaps to the
+   * handle's minimum stand-off distance on the first move, making every small
+   * radius unreachable and letting a stray click commit a change.
+   */
+  grabAlong: number
+  /** Only true once the pointer has moved far enough to be a drag, not a click. */
   changed: boolean
+  /** All four corners at gesture start, for independent-corner editing. */
+  startRadii: CornerRadii
+  independent: boolean
 }
 
 let session: RadiusState | null = null
@@ -63,9 +75,14 @@ export function isRadiusDragging(): boolean {
   return session !== null
 }
 
-/** Live radius while a drag is in flight, for the inspector readout. */
-export function getLiveRadius(id: NodeId): number | null {
-  return session && session.id === id ? session.liveRadius : null
+/**
+ * Live radius while a drag is in flight, for the inspector readout.
+ * @param corner when given, the radius of that specific corner.
+ */
+export function getLiveRadius(id: NodeId, corner?: BoxCorner): number | null {
+  if (!session || session.id !== id || !session.changed) return null
+  if (!corner || !session.independent) return session.liveRadius
+  return session.corner === corner ? session.liveRadius : session.startRadii[cornerIndex(corner)]
 }
 
 /**
@@ -167,17 +184,36 @@ export function beginRadiusDrag(
   doc: DesignDocument,
   id: NodeId,
   corner: RadiusCorner,
+  startDoc: Vec2,
+  independent = false,
 ): boolean {
   const node = doc.nodes[id]
   if (!node || !supportsCornerRadius(node)) return false
+  // Honours a locked ANCESTOR, not just this node's own flag — a child of a
+  // locked group is selectable from the Layers panel and must stay uneditable.
+  if (isEffectivelyLocked(doc, id)) return false
+
   const geo = cornerGeometry(node, corner)
   if (!geo) return false
 
   const { width, height } = node.transform
+  const boxRadii: CornerRadii =
+    node.type === 'rect' || node.type === 'image'
+      ? (node.cornerRadius ?? [0, 0, 0, 0])
+      : [0, 0, 0, 0]
+  const perCorner = independent && corner !== 'vertex'
+  const index = corner === 'vertex' ? 0 : cornerIndex(corner as BoxCorner)
+
   const buildPath = (radius: number): string => {
     switch (node.type) {
-      case 'rect': return rectPath(width, height, [radius, radius, radius, radius])
-      case 'image': return rectPath(width, height, [radius, radius, radius, radius])
+      case 'rect':
+      case 'image': {
+        // Independent mode moves only the grabbed corner; uniform moves all four.
+        const radii: CornerRadii = perCorner
+          ? ([0, 1, 2, 3].map((i) => (i === index ? radius : boxRadii[i]!)) as unknown as CornerRadii)
+          : [radius, radius, radius, radius]
+        return rectPath(width, height, radii)
+      }
       case 'triangle': return trianglePath(width, height, radius)
       case 'polygon': return polygonPath(width, height, node.sides, radius)
       case 'star': return starPath(width, height, node.points, node.innerRatio, radius)
@@ -185,17 +221,25 @@ export function beginRadiusDrag(
     }
   }
 
+  const world = worldMatrix(doc, id)
+  const localStart = applyToPoint(invert(world), startDoc)
+  const grabAlong =
+    (localStart.x - geo.point.x) * geo.inward.x + (localStart.y - geo.point.y) * geo.inward.y
+
+  const startRadius = cornerRadiusOf(node, corner === 'vertex' ? undefined : (corner as BoxCorner))
+
   session = {
     id,
     corner,
-    world: worldMatrix(doc, id),
-    width,
-    height,
-    startRadius: cornerRadiusOf(node),
-    liveRadius: cornerRadiusOf(node),
+    world,
+    startRadius,
+    liveRadius: startRadius,
     buildPath,
     maxRadius: Math.max(0, geo.maxRadius),
+    grabAlong,
     changed: false,
+    startRadii: boxRadii,
+    independent: perCorner,
   }
 
   liveTransform.begin()
@@ -203,24 +247,44 @@ export function beginRadiusDrag(
   return true
 }
 
-/** @returns the live radius, so the caller can drive a readout. */
-export function updateRadiusDrag(currentDoc: Vec2, node: DesignNode): number | null {
+/**
+ * @param doc the live document — the node is resolved from the SESSION's id,
+ *   never from the current selection, which can change mid-drag (Cmd+A while
+ *   the button is held) and would otherwise remap the pointer through a
+ *   different shape's geometry while committing to the original.
+ * @returns the live radius, so the caller can drive a readout.
+ */
+export function updateRadiusDrag(currentDoc: Vec2, doc: DesignDocument): number | null {
   if (!session) return null
+  const node = doc.nodes[session.id]
+  if (!node) return session.liveRadius
   const geo = cornerGeometry(node, session.corner)
-  if (!geo) return null
+  if (!geo) return session.liveRadius
 
   const local = applyToPoint(invert(session.world), currentDoc)
-  // Project the pointer onto the inward bisector: dragging sideways along an
-  // edge should not change the radius, only dragging inward should.
+  // Project onto the inward bisector: sliding along an edge must not change the
+  // radius, only moving inward should.
   const along =
     (local.x - geo.point.x) * geo.inward.x + (local.y - geo.point.y) * geo.inward.y
-  const radius = Math.min(session.maxRadius, Math.max(0, along * geo.sinHalf))
+
+  // Relative to where the handle was grabbed, so the radius does not jump to
+  // the handle's minimum stand-off on the first frame.
+  const delta = (along - session.grabAlong) * geo.sinHalf
+  const radius = Math.min(session.maxRadius, Math.max(0, session.startRadius + delta))
+
+  if (!session.changed && Math.abs(radius - session.startRadius) < RADIUS_DRAG_THRESHOLD) {
+    // Still within click tolerance — do not dirty the document for a stray click.
+    return session.startRadius
+  }
 
   session.liveRadius = radius
   session.changed = true
   liveTransform.set(geomKey(session.id), { attrs: { d: session.buildPath(radius) } })
   return radius
 }
+
+/** Movement below this (in local units) is a click, not a radius drag. */
+const RADIUS_DRAG_THRESHOLD = 0.5
 
 export function commitRadiusDrag(): boolean {
   if (!session) return false
@@ -236,7 +300,11 @@ export function commitRadiusDrag(): boolean {
     const node = draft.nodes[s.id]
     if (!node) return false
     if (node.type === 'rect' || node.type === 'image') {
-      node.cornerRadius = [radius, radius, radius, radius]
+      node.cornerRadius = s.independent
+        ? ([0, 1, 2, 3].map((i) =>
+            i === cornerIndex(s.corner as BoxCorner) ? radius : s.startRadii[i]!,
+          ) as unknown as CornerRadii)
+        : [radius, radius, radius, radius]
       return undefined
     }
     if (hasScalarCornerRadius(node)) {

@@ -50,6 +50,7 @@ import { transaction } from '../state/DocumentStore'
 import { editorStore } from '../state/EditorStore'
 import { liveTransform } from '../canvas/LiveTransform'
 import { geomKey } from '../canvas/NodeRenderer'
+import { isContainer, usesOwnBox } from '../document/types'
 import type { DesignDocument, DesignNode, NodeId, Transform } from '../document/types'
 import type { SnapLine } from '../geometry/Snapping'
 
@@ -85,6 +86,17 @@ export interface DragSessionState {
   nodes: NodeSnapshot[]
   /** True when a single node is being resized along its own rotated axes. */
   singleAxisResize: boolean
+  /**
+   * True when the resize must go into the MATRIX rather than into width/height.
+   *
+   * A group has no size of its own — its box is only a record of where its
+   * children happened to be when it was formed — so writing a new width/height
+   * changes nothing anyone can see. Scaling its matrix is what actually resizes
+   * it, because the children inherit that matrix. Everything else keeps its size
+   * in width/height so strokes, corner radii and text layout do not scale with
+   * the box.
+   */
+  scalesContent: boolean
   /**
    * Intrinsic sizes produced by the in-flight resize. The single-node path keeps
    * size in width/height rather than in the matrix (so strokes and corner radii
@@ -182,6 +194,7 @@ export function beginDrag(
     frame: unionAll(usable.map((id) => geometryBounds(doc, id, cache))),
     nodes,
     singleAxisResize: usable.length === 1,
+    scalesContent: usable.length === 1 && scalesContentOnResize(doc.nodes[usable[0]!]),
     liveSizes: new Map(),
     moved: false,
   }
@@ -313,9 +326,17 @@ function applyResize(
     )
     // Re-anchor: the new local origin sits at (x0,y0) of the OLD local space,
     // and a negative signed extent mirrors the shape rather than inverting it.
-    const reanchor = multiply(translation(box.x0, box.y0), scaling(box.sx, box.sy))
+    // For a group the extent goes into the scale as well, which is the only
+    // thing that moves its children.
+    const kx = s.scalesContent && snap.transform.width > 0 ? box.width / snap.transform.width : 1
+    const ky = s.scalesContent && snap.transform.height > 0 ? box.height / snap.transform.height : 1
+    const reanchor = multiply(translation(box.x0, box.y0), scaling(box.sx * kx, box.sy * ky))
     const world = multiply(snap.world, reanchor)
     out.set(snap.id, world)
+    if (s.scalesContent) {
+      pushLiveTransform(snap, world)
+      return
+    }
     s.liveSizes.set(snap.id, { width: box.width, height: box.height })
     pushLiveTransform(snap, world, box.width, box.height)
     return
@@ -452,8 +473,25 @@ function pushLiveTransform(
   liveTransform.set(snap.id, override)
 }
 
-/** Types whose drawn geometry is derived from transform.width/height. */
-function usesIntrinsicSize(type: DesignNode['type']): boolean {
+/**
+ * Whether resizing this node should scale its contents instead of its box.
+ *
+ * True only for containers with no box of their own. An artboard and a repeat
+ * grid both draw their own transform.width/height, so they resize like a shape.
+ */
+function scalesContentOnResize(node: DesignNode | undefined): boolean {
+  return !!node && isContainer(node) && !usesOwnBox(node)
+}
+
+/**
+ * Types whose drawn geometry is derived from transform.width/height.
+ *
+ * Exported because the inspector needs the same answer: it may only scale its
+ * readout by an in-flight resize for nodes whose geometry actually follows that
+ * resize on screen. A group's children do not, so scaling its readout would
+ * report a size nothing on the canvas has.
+ */
+export function usesIntrinsicSize(type: DesignNode['type']): boolean {
   return (
     type === 'rect' ||
     type === 'ellipse' ||
@@ -533,13 +571,13 @@ export function commitDrag(finalMatrices: Map<NodeId, Mat2D> | null): boolean {
       const parentWorld = node.parentId ? worldMatrix(draft, node.parentId) : ([1, 0, 0, 1, 0, 0] as Mat2D)
       const local = multiply(invert(parentWorld), world)
 
-      if (s.mode === 'resize' && s.singleAxisResize) {
+      const recorded = s.liveSizes.get(snap.id)
+      if (s.mode === 'resize' && s.singleAxisResize && recorded) {
         // `local` already encodes the re-anchor and the mirror sign; the new size
         // lives in width/height, not in the matrix, so it comes from the gesture.
-        const size = s.liveSizes.get(snap.id) ?? {
-          width: snap.transform.width,
-          height: snap.transform.height,
-        }
+        // A group records no size — its scale is in `local` — and falls through
+        // to the branch below, which keeps width/height as they were.
+        const size = recorded
         const kx = snap.transform.width > 0 ? size.width / snap.transform.width : 1
         const ky = snap.transform.height > 0 ? size.height / snap.transform.height : 1
 

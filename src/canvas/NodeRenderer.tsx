@@ -54,6 +54,22 @@ import { fontStack } from '../text/FontRegistry'
 
 /** LiveTransform key for a node's geometry element (as opposed to its group). */
 export const geomKey = (id: NodeId): string => `${id}::geom`
+
+/**
+ * Ref that registers an element under a LiveTransform key.
+ *
+ * Returns a cleanup (React 19 ref-cleanup form) so unmounting ONE element
+ * detaches only that element — a bare `register(key, null)` would drop every
+ * sibling sharing the key, which matters now that a shape's outline can be
+ * drawn by a fill path, a stroke path and a clip or mask at once.
+ */
+function liveRef(key: string, enabled: boolean) {
+  return (el: SVGElement | null) => {
+    if (!enabled || !el) return undefined
+    liveTransform.register(key, el)
+    return () => liveTransform.unregister(key, el)
+  }
+}
 /** LiveTransform key for an artboard's clip rect. */
 export const clipKey = (id: NodeId): string => `${id}::clip`
 
@@ -135,7 +151,7 @@ function PaintedPath({ nodeId, style, d, width, height, geomRef }: PaintedProps)
       <GradientDef paint={style.stroke.paint} id={gradientId(nodeId, 'stroke')} />
       {aligned && style.stroke.align === 'inner' && (
         <clipPath id={clipId}>
-          <path d={d} />
+          <path ref={geomRef} d={d} />
         </clipPath>
       )}
       {aligned && style.stroke.align === 'outer' && (
@@ -147,7 +163,7 @@ function PaintedPath({ nodeId, style, d, width, height, geomRef }: PaintedProps)
             height={height + style.stroke.width * 2}
             fill="white"
           />
-          <path d={d} fill="black" />
+          <path ref={geomRef} d={d} fill="black" />
         </mask>
       )}
     </defs>
@@ -181,6 +197,7 @@ function PaintedPath({ nodeId, style, d, width, height, geomRef }: PaintedProps)
         stroke="none"
       />
       <path
+        ref={geomRef}
         d={d}
         fill="none"
         clipPath={style.stroke.align === 'inner' ? `url(#${clipId})` : undefined}
@@ -263,10 +280,15 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
   )
 }
 
-function ImageBody({ node }: { node: ImageNode }): ReactNode {
+function ImageBody({
+  node,
+  geomRef,
+}: {
+  node: ImageNode
+  geomRef: (el: SVGElement | null) => (() => void) | undefined
+}): ReactNode {
   const dataUrl = useDocumentStore((s) => s.doc.assets[node.assetId]?.dataUrl)
   const { width, height } = node.transform
-  const hasRadius = node.cornerRadius.some((r) => r > 0)
   const clipId = `img-clip-${node.id}`
 
   if (!dataUrl) {
@@ -287,19 +309,19 @@ function ImageBody({ node }: { node: ImageNode }): ReactNode {
 
   return (
     <>
-      {hasRadius && (
-        <defs>
-          <clipPath id={clipId}>
-            <path d={rectPath(width, height, node.cornerRadius)} />
-          </clipPath>
-        </defs>
-      )}
+      {/* Always emitted, even at radius 0: a corner-radius drag overrides this
+          path's `d`, and there would be nothing to override otherwise. */}
+      <defs>
+        <clipPath id={clipId}>
+          <path ref={geomRef} d={rectPath(width, height, node.cornerRadius)} />
+        </clipPath>
+      </defs>
       <image
         href={dataUrl}
         width={width}
         height={height}
         preserveAspectRatio={preserve}
-        clipPath={hasRadius ? `url(#${clipId})` : undefined}
+        clipPath={`url(#${clipId})`}
         style={{ imageRendering: 'auto' }}
       />
     </>
@@ -417,18 +439,8 @@ export const NodeRenderer = memo(function NodeRenderer({
 }): ReactNode {
   const node = useNode(id)
 
-  const groupRef = useCallback(
-    (el: SVGGElement | null) => {
-      if (!repeat) liveTransform.register(id, el)
-    },
-    [id, repeat],
-  )
-  const geomRef = useCallback(
-    (el: SVGElement | null) => {
-      if (!repeat) liveTransform.register(geomKey(id), el)
-    },
-    [id, repeat],
-  )
+  const groupRef = useCallback(liveRef(id, !repeat), [id, repeat])
+  const geomRef = useCallback(liveRef(geomKey(id), !repeat), [id, repeat])
 
   if (!node) return null
   // Hidden nodes are not rendered at all, which also makes them unclickable.
@@ -457,7 +469,7 @@ export const NodeRenderer = memo(function NodeRenderer({
       body = <TextBody node={node} />
       break
     case 'image':
-      body = <ImageBody node={node} />
+      body = <ImageBody node={node} geomRef={geomRef} />
       break
     case 'svg':
       body = <SvgBody node={node} />

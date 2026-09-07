@@ -28,17 +28,37 @@ export interface LiveOverride {
 type Listener = () => void
 
 class LiveTransformChannel {
-  private elements = new Map<NodeId, SVGElement>()
+  private elements = new Map<NodeId, Set<SVGElement>>()
   private pending = new Map<NodeId, LiveOverride>()
   private originals = new Map<NodeId, Map<string, string | null>>()
   private listeners = new Set<Listener>()
   private rafHandle = 0
   private active = false
 
-  /** Called by the renderer for every node element it mounts. */
+  /**
+   * Called by the renderer for every node element it mounts.
+   *
+   * A key may hold SEVERAL elements: a stroke-aligned shape draws its outline
+   * as a fill path plus a stroke path plus a clip or mask in defs, and an image
+   * draws its through a clipPath. Overriding only one of them leaves the rest
+   * showing pre-drag geometry for the whole gesture.
+   */
   register(id: NodeId, el: SVGElement | null): void {
-    if (el) this.elements.set(id, el)
-    else this.elements.delete(id)
+    if (!el) {
+      this.elements.delete(id)
+      return
+    }
+    const set = this.elements.get(id)
+    if (set) set.add(el)
+    else this.elements.set(id, new Set([el]))
+  }
+
+  /** Detach one element without dropping its siblings under the same key. */
+  unregister(id: NodeId, el: SVGElement): void {
+    const set = this.elements.get(id)
+    if (!set) return
+    set.delete(el)
+    if (set.size === 0) this.elements.delete(id)
   }
 
   isActive(): boolean {
@@ -80,11 +100,13 @@ class LiveTransformChannel {
       this.rafHandle = 0
     }
     for (const [id, attrs] of this.originals) {
-      const el = this.elements.get(id)
-      if (!el) continue
-      for (const [name, value] of attrs) {
-        if (value === null) el.removeAttribute(name)
-        else el.setAttribute(name, value)
+      const set = this.elements.get(id)
+      if (!set) continue
+      for (const el of set) {
+        for (const [name, value] of attrs) {
+          if (value === null) el.removeAttribute(name)
+          else el.setAttribute(name, value)
+        }
       }
     }
     this.active = false
@@ -112,8 +134,8 @@ class LiveTransformChannel {
 
   private flush(): void {
     for (const [id, override] of this.pending) {
-      const el = this.elements.get(id)
-      if (!el) continue
+      const set = this.elements.get(id)
+      if (!set) continue
 
       let snapshot = this.originals.get(id)
       if (!snapshot) {
@@ -121,14 +143,16 @@ class LiveTransformChannel {
         this.originals.set(id, snapshot)
       }
 
-      if (override.transform) {
-        if (!snapshot.has('transform')) snapshot.set('transform', el.getAttribute('transform'))
-        el.setAttribute('transform', toSvgMatrix(override.transform))
-      }
-      if (override.attrs) {
-        for (const [name, value] of Object.entries(override.attrs)) {
-          if (!snapshot.has(name)) snapshot.set(name, el.getAttribute(name))
-          el.setAttribute(name, value)
+      for (const el of set) {
+        if (override.transform) {
+          if (!snapshot.has('transform')) snapshot.set('transform', el.getAttribute('transform'))
+          el.setAttribute('transform', toSvgMatrix(override.transform))
+        }
+        if (override.attrs) {
+          for (const [name, value] of Object.entries(override.attrs)) {
+            if (!snapshot.has(name)) snapshot.set(name, el.getAttribute(name))
+            el.setAttribute(name, value)
+          }
         }
       }
     }

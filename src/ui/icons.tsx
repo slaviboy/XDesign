@@ -186,6 +186,21 @@ export const LinkBracket = ({
   </svg>
 )
 
+/** All four corners edited together. */
+export const CornersUniformIcon = (p: IconProps) => (
+  <Icon {...p}><rect x="3" y="3" width="10" height="10" rx="2.6" /></Icon>
+)
+
+/** Each corner edited on its own — four independent brackets. */
+export const CornersIndependentIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 6.4V5.6A2.6 2.6 0 015.6 3h.8" />
+    <path d="M9.6 3h.8A2.6 2.6 0 0113 5.6v.8" />
+    <path d="M13 9.6v.8a2.6 2.6 0 01-2.6 2.6h-.8" />
+    <path d="M6.4 13h-.8A2.6 2.6 0 013 10.4v-.8" />
+  </Icon>
+)
+
 /** Corner radius: a square with one rounded corner and its radius marked. */
 export const RadiusIcon = (p: IconProps) => (
   <Icon {...p}>

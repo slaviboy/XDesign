@@ -19,6 +19,7 @@
  */
 
 import type { CornerRadii } from '../geometry/ShapeGeometry'
+export type { CornerRadii }
 import type { FillRule, LineCap, LineJoin } from '../geometry/PathUtils'
 
 export type NodeId = string
@@ -578,9 +579,32 @@ export function supportsCornerRadius(node: DesignNode | undefined | null): boole
   return !!node && (hasCornerRadius(node) || hasScalarCornerRadius(node))
 }
 
-/** Current radius of any rounding-capable node, as a single number. */
-export function cornerRadiusOf(node: DesignNode): number {
-  if (node.type === 'rect' || node.type === 'image') return node.cornerRadius[0]
-  if (hasScalarCornerRadius(node)) return node.cornerRadius
+/** The four corners of a box, in CornerRadii order. */
+export const CORNER_ORDER = ['nw', 'ne', 'se', 'sw'] as const
+export type BoxCorner = (typeof CORNER_ORDER)[number]
+
+export function cornerIndex(corner: BoxCorner): number {
+  return CORNER_ORDER.indexOf(corner)
+}
+
+/**
+ * Current radius of a rounding-capable node, as a single number.
+ *
+ * `?? 0` is load-bearing: documents saved before triangle/polygon/star gained a
+ * radius have no such field, and without the fallback the inspector renders NaN
+ * into the corner-radius input for every legacy shape.
+ */
+export function cornerRadiusOf(node: DesignNode, corner?: BoxCorner): number {
+  if (node.type === 'rect' || node.type === 'image') {
+    const radii = node.cornerRadius ?? [0, 0, 0, 0]
+    return (corner ? radii[cornerIndex(corner)] : radii[0]) ?? 0
+  }
+  if (hasScalarCornerRadius(node)) return node.cornerRadius ?? 0
   return 0
+}
+
+/** True when all four corners of a box carry the same radius. */
+export function isUniformCornerRadius(radii: CornerRadii | undefined): boolean {
+  if (!radii) return true
+  return radii[0] === radii[1] && radii[1] === radii[2] && radii[2] === radii[3]
 }

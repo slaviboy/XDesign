@@ -56,7 +56,13 @@ import type {
   TextStyle,
   Transform,
 } from '../document/types'
-import { hasScalarCornerRadius, hasStyle, isContainer } from '../document/types'
+import {
+  cornerIndex,
+  hasScalarCornerRadius,
+  hasStyle,
+  isContainer,
+  type BoxCorner,
+} from '../document/types'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -504,6 +510,40 @@ export function setCornerRadius(radius: number, coalesceKey = 'radius'): boolean
           node.cornerRadius = r
           touched = true
         }
+      }
+      return touched ? undefined : false
+    },
+    { coalesceKey },
+  )
+}
+
+/**
+ * Set ONE corner of a box, leaving the other three alone.
+ * Only rect and image have addressable corners; the parametric polygons carry a
+ * single scalar and are unaffected.
+ */
+export function setCornerRadiusAt(
+  corner: BoxCorner,
+  radius: number,
+  coalesceKey?: string,
+): boolean {
+  const ids = editableSelection()
+  if (ids.length === 0) return false
+  const r = Math.max(0, radius)
+  const index = cornerIndex(corner)
+
+  return transaction(
+    'Corner radius',
+    (draft) => {
+      let touched = false
+      for (const id of ids) {
+        const node = draft.nodes[id]
+        if (!node || (node.type !== 'rect' && node.type !== 'image')) continue
+        const current = node.cornerRadius ?? [0, 0, 0, 0]
+        node.cornerRadius = [0, 1, 2, 3].map((i) =>
+          i === index ? r : current[i] ?? 0,
+        ) as unknown as typeof node.cornerRadius
+        touched = true
       }
       return touched ? undefined : false
     },

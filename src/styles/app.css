@@ -931,3 +931,40 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   stroke-width: 1.2;
 }
 .radius-handle-dot { fill: var(--handle-stroke); stroke: none; }
+
+/* --------------------------------------------------- corner radius row -- */
+
+.corner-radius-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.corner-mode-toggle {
+  display: flex;
+  gap: 1px;
+  flex: none;
+}
+.corner-mode-toggle .icon-button {
+  width: 24px;
+  border-color: var(--border);
+}
+/*
+ * A mode toggle reads better as an outlined state than as a filled one: these
+ * sit next to numeric fields, and a solid accent block pulls the eye away from
+ * the values, which are the thing being edited.
+ */
+.corner-mode-toggle .icon-button.active {
+  background: var(--bg-selected);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Four equal columns, so no corner's field is wider than another. */
+.corner-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.corner-radius-row > .tf-corner-all { flex: 1; min-width: 0; }

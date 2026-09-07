@@ -28,29 +28,38 @@ import {
   updateSettings,
   renameDocument,
   matchSize,
+  setCornerRadiusAt,
 } from '../history/Commands'
 import { setRepeatGridParams } from '../history/RepeatGridCommands'
-import { geometryBounds, localGeometryBounds, worldMatrix } from '../document/SceneGraph'
-import { decompose } from '../geometry/Matrix'
-import { transformBounds } from '../geometry/Bounds'
-import { getLiveMatrix, getLiveSize } from '../tools/DragSession'
+import {
+  geometryBounds, localBox, localGeometryBounds, nodeLocalMatrix, worldMatrix,
+} from '../document/SceneGraph'
+import { decompose, invert, multiply, type Mat2D } from '../geometry/Matrix'
+import { transformBounds, unionAll, type Bounds } from '../geometry/Bounds'
+import { getLiveMatrix, getLiveSize, usesIntrinsicSize } from '../tools/DragSession'
 import { getLiveRadius } from '../tools/RadiusSession'
 import { toCss, toHex } from '../document/color'
 import { fontsByCategory, isBundledFont, nearestWeight } from '../text/FontRegistry'
-import { openDialog, setEditor } from '../state/EditorStore'
+import { openDialog, setCornerRadiusMode, setEditor } from '../state/EditorStore'
 import { useDocument, useEditorStore, useLiveTransformTick, useSelectedNodes } from '../state/hooks'
 import { NumberField, Section, Select, TextField, common, IconButton } from './primitives'
 import { PaintPopover } from './ColorPicker'
 import {
   AlignBottomIcon, AlignCenterHIcon, AlignCenterVIcon, AlignLeftIcon, AlignRightIcon,
   AlignTopIcon, DistributeHIcon, DistributeVIcon, FlipHIcon, FlipVIcon,
+  CornersIndependentIcon, CornersUniformIcon,
   LinkBracket, MatchHeightIcon, MatchSizeIcon, MatchWidthIcon, RadiusIcon,
   RotateIcon, TextAlignCenterIcon, TextAlignLeftIcon, TextAlignRightIcon,
 } from './icons'
 import {
+  CORNER_ORDER,
   cornerRadiusOf,
   hasStyle,
+  isContainer,
+  isUniformCornerRadius,
   supportsCornerRadius,
+  usesOwnBox,
+  type DesignDocument,
   type DesignNode,
   type Paint,
   type Style,
@@ -325,48 +334,122 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
 }
 
 /**
+ * geometryBounds with the node's world matrix injected.
+ *
+ * This is a deliberate mirror of SceneGraph.geometryBounds, recursion included,
+ * differing only in where the matrix comes from — which is the whole point: an
+ * in-flight gesture has a world matrix the document does not know about yet.
+ *
+ * The container branch is not an optimization. A group's bounds are its
+ * children's, not its own nominal box, which `groupNodes` writes once and never
+ * refits. Reading that box mid-drag while the committed value came from the
+ * children made X/Y jump the moment a group was touched and jump back on
+ * release. Unioning in world space rather than in the group's own space matters
+ * too, because AABB(M . union) is not union(AABB(M . box)) once anything is
+ * rotated.
+ */
+function boundsWithWorld(doc: DesignDocument, node: DesignNode, world: Mat2D): Bounds {
+  if (isContainer(node) && !usesOwnBox(node)) {
+    const kids: Bounds[] = []
+    for (const id of node.children) {
+      const child = doc.nodes[id]
+      if (!child) continue
+      const b = boundsWithWorld(doc, child, multiply(world, nodeLocalMatrix(child)))
+      if (b.width > 0 || b.height > 0) kids.push(b)
+    }
+    return kids.length ? unionAll(kids) : transformBounds(localBox(node), world)
+  }
+  return transformBounds(localGeometryBounds(node), world)
+}
+
+/**
+ * The node's live matrix re-expressed in its PARENT's space.
+ *
+ * DragSession publishes world matrices, but everything the inspector shows is
+ * local — it is what commitDrag writes back and what the fields edit — so the
+ * ancestor chain has to be divided out. Decomposing the world matrix instead
+ * made W/H jump by the enclosing group's scale the moment a drag began.
+ */
+function liveLocalMatrix(doc: DesignDocument, node: DesignNode): Mat2D | null {
+  const live = getLiveMatrix(node.id)
+  if (!live) return null
+  if (!node.parentId) return live
+  // An ancestor can be in the same gesture (select a group and a node inside
+  // it); its live matrix is then the truthful parent, not the stored one.
+  const parentWorld = getLiveMatrix(node.parentId) ?? worldMatrix(doc, node.parentId)
+  return multiply(invert(parentWorld), live)
+}
+
+/**
+ * How much an in-flight resize has scaled the node's local geometry.
+ *
+ * `null` when nothing is being resized, and also when the node's drawn geometry
+ * does not follow its intrinsic box — a group keeps its children at their own
+ * sizes during a resize, so scaling its readout would report a size that is not
+ * on the canvas.
+ */
+function liveGeometryScale(node: DesignNode): { kx: number; ky: number } | null {
+  const size = getLiveSize(node.id)
+  if (!size || !usesIntrinsicSize(node.type)) return null
+  return {
+    kx: node.transform.width > 0 ? size.width / node.transform.width : 1,
+    ky: node.transform.height > 0 ? size.height / node.transform.height : 1,
+  }
+}
+
+/**
  * Bounds that follow an in-flight drag.
  *
  * Falls back to the document whenever no gesture is running, so this is the
  * single readout path rather than a special case bolted on beside one.
  */
-function liveBounds(doc: ReturnType<typeof useDocument>, node: DesignNode) {
+function liveBounds(doc: DesignDocument, node: DesignNode): Bounds {
   const live = getLiveMatrix(node.id)
   if (!live) return geometryBounds(doc, node.id)
-  const size = getLiveSize(node.id)
-  const local = size
-    ? { x: 0, y: 0, width: size.width, height: size.height }
-    : localGeometryBounds(node)
-  return transformBounds(local, live)
+
+  const k = liveGeometryScale(node)
+  if (!k) return boundsWithWorld(doc, node, live)
+
+  // A resize scales the local geometry about the local ORIGIN, not about the
+  // geometry's own bbox corner — which is exactly what livePathData draws — so
+  // the offset scales with it. Assuming the bbox started at (0,0) put X/Y adrift
+  // for any path whose data had drifted off the origin. Only nodes whose drawn
+  // geometry follows the intrinsic box reach here, so this is never a container.
+  const base = localGeometryBounds(node)
+  return transformBounds(
+    { x: base.x * k.kx, y: base.y * k.ky, width: base.width * k.kx, height: base.height * k.ky },
+    live,
+  )
 }
 
 /**
  * Effective size (intrinsic x |scale|), preferring live values.
  *
- * The three cases differ: a single-node resize writes the new intrinsic size,
- * a multi-node resize instead scales the matrix, and a move or rotate changes
- * neither — so the scale has to come from the live matrix when there is one.
+ * The three cases differ: a single-node resize writes a new INTRINSIC size and
+ * leaves the scale untouched, a multi-node resize instead scales the matrix,
+ * and a move or rotate changes neither — so the scale has to come from the live
+ * matrix when there is one. Returning the intrinsic size raw understated W/H by
+ * the node's own scale for the whole of every single-node resize.
  */
 function liveEffectiveSize(
-  doc: ReturnType<typeof useDocument>,
+  doc: DesignDocument,
   node: DesignNode,
 ): { width: number; height: number } {
-  void doc
-  const size = getLiveSize(node.id)
-  if (size) return size
+  const scaleX = Math.abs(node.transform.scaleX)
+  const scaleY = Math.abs(node.transform.scaleY)
 
-  const live = getLiveMatrix(node.id)
-  if (live) {
-    const d = decompose(live)
+  const size = getLiveSize(node.id)
+  if (size) return { width: size.width * scaleX, height: size.height * scaleY }
+
+  const local = liveLocalMatrix(doc, node)
+  if (local) {
+    const d = decompose(local)
     return {
       width: node.transform.width * Math.abs(d.scaleX),
       height: node.transform.height * Math.abs(d.scaleY),
     }
   }
-  return {
-    width: node.transform.width * Math.abs(node.transform.scaleX),
-    height: node.transform.height * Math.abs(node.transform.scaleY),
-  }
+  return { width: node.transform.width * scaleX, height: node.transform.height * scaleY }
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +624,98 @@ function Swatch({ paint, onClick }: { paint: Paint | null; onClick: (e: React.Mo
 // Shape-specific
 // ---------------------------------------------------------------------------
 
+/**
+ * Corner radius, with the two-mode control from Adobe XD.
+ *
+ * The first button edits all four corners together and shows one field; the
+ * second unlocks them and shows four. The mode is explicit but DEFAULTS to
+ * whatever the data implies — a box whose corners already differ opens in
+ * independent mode rather than silently flattening them on the first edit.
+ *
+ * Only boxes have addressable corners. Triangles, polygons and stars carry a
+ * single scalar, so they never show the toggle.
+ */
+function CornerRadiusRow({ nodes }: { nodes: DesignNode[] }) {
+  const boxes = nodes.filter((n) => n.type === 'rect' || n.type === 'image')
+  const modeOverride = useEditorStore((s) => s.cornerRadiusMode)
+
+  const dataIsUniform = boxes.every(
+    (n) => n.type !== 'rect' && n.type !== 'image' ? true : isUniformCornerRadius(n.cornerRadius),
+  )
+  const canSplit = boxes.length > 0 && boxes.length === nodes.length
+  const independent = canSplit && (modeOverride ?? (dataIsUniform ? 'uniform' : 'independent')) === 'independent'
+
+  const uniformValue = common(nodes, (n) =>
+    round2(getLiveRadius(n.id) ?? cornerRadiusOf(n)),
+  )
+
+  return (
+    <div className="corner-radius-row">
+      {canSplit && (
+        <div className="corner-mode-toggle" role="group" aria-label="Corner radius mode">
+          <button
+            type="button"
+            className={`icon-button${independent ? '' : ' active'}`}
+            aria-label="Edit all corners together"
+            aria-pressed={!independent}
+            data-testid="corners-uniform"
+            title="Edit all corners together"
+            onClick={() => setCornerRadiusMode('uniform')}
+          >
+            <CornersUniformIcon size={14} />
+          </button>
+          <button
+            type="button"
+            className={`icon-button${independent ? ' active' : ''}`}
+            aria-label="Edit corners independently"
+            aria-pressed={independent}
+            data-testid="corners-independent"
+            title="Edit corners independently"
+            onClick={() => setCornerRadiusMode('independent')}
+          >
+            <CornersIndependentIcon size={14} />
+          </button>
+        </div>
+      )}
+
+      {independent ? (
+        <div className="corner-fields">
+          {CORNER_ORDER.map((corner) => (
+            <NumberField
+              key={corner}
+              className={`tf-corner tf-corner-${corner}`}
+              title={CORNER_LABELS[corner]}
+              value={common(boxes, (n) =>
+                round2(getLiveRadius(n.id, corner) ?? cornerRadiusOf(n, corner)),
+              )}
+              min={0}
+              onChange={(v, committing) =>
+                setCornerRadiusAt(corner, v, committing ? undefined : `radius:${corner}`)
+              }
+            />
+          ))}
+        </div>
+      ) : (
+        <NumberField
+          className="tf-corner-all"
+          label={canSplit ? undefined : <RadiusIcon size={13} />}
+          title="Corner radius"
+          value={uniformValue}
+          min={0}
+          onChange={(v, committing) => setCornerRadius(v, committing ? undefined : 'radius')}
+        />
+      )}
+    </div>
+  )
+}
+
+const CORNER_LABELS: Record<(typeof CORNER_ORDER)[number], string> = {
+  nw: 'Top left corner radius',
+  ne: 'Top right corner radius',
+  se: 'Bottom right corner radius',
+  sw: 'Bottom left corner radius',
+}
+
 function RepeatGridSection({ nodes }: { nodes: DesignNode[] }) {
   const grids = nodes.filter((n) => n.type === 'repeat-grid')
   if (grids.length === 0) return null
@@ -608,17 +783,7 @@ function ShapeSection({ nodes }: { nodes: DesignNode[] }) {
 
   return (
     <Section title="Shape">
-      {roundable.length > 0 && (
-        <div className="field-row">
-          <NumberField
-            label={<RadiusIcon size={13} />}
-            title="Corner radius"
-            value={common(roundable, (n) => round2(getLiveRadius(n.id) ?? cornerRadiusOf(n)))}
-            min={0}
-            onChange={(v, committing) => setCornerRadius(v, committing ? undefined : 'radius')}
-          />
-        </div>
-      )}
+      {roundable.length > 0 && <CornerRadiusRow nodes={roundable} />}
       {polygons.length > 0 && (
         <div className="field-row">
           <NumberField

@@ -78,6 +78,34 @@ describe('roundedPolygonPath', () => {
     expect(left).toBeGreaterThan(0)
   })
 
+  it('emits valid path data when a vertex sits on a zero-length edge', () => {
+    // The duplicated first vertex is skipped, so the opening command must still
+    // be M. Keying it off the loop index produced a path starting with L, which
+    // is not valid path data and renders as nothing at all.
+    const dup = [{x:0,y:0},{x:0,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100}]
+    const d = roundedPolygonPath(dup, 15)
+    expect(d.startsWith('M')).toBe(true)
+    const b = pathBounds(d)
+    expect(b.width).toBeCloseTo(100, 3)
+    expect(b.height).toBeCloseTo(100, 3)
+  })
+
+  it('falls back to a sharp outline when every vertex is degenerate', () => {
+    const d = roundedPolygonPath([{x:5,y:5},{x:5,y:5},{x:5,y:5}], 10)
+    expect(d.startsWith('M')).toBe(true)
+    expect(d.trim()).not.toBe('Z')
+  })
+
+  it('ignores a straight-through vertex when reporting the maximum radius', () => {
+    // tan(pi/2) is ~1.6e16, so a single collinear vertex used to report a
+    // "limit" of ~4e17 instead of being skipped the way the path builder skips it.
+    // Splitting the top edge halves the shortest edge at the two upper corners,
+    // so the honest limit is 25 - not the 4e17 the collinear vertex reported.
+    const withCollinear = [{x:0,y:0},{x:50,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100}]
+    expect(maxPolygonRadius(withCollinear)).toBeCloseTo(25, 3)
+    expect(maxPolygonRadius([{x:0,y:0},{x:50,y:0},{x:100,y:0}])).toBe(0)
+  })
+
   it('shape helpers pass the radius through', () => {
     expect(trianglePath(80,60,0)).not.toContain('A')
     expect(trianglePath(80,60,8)).toContain('A')

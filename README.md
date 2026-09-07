@@ -32,7 +32,8 @@ rotation cursor oriented to the corner and the object's own angle.
 width / height / size across a selection. Every readout tracks a drag in real time.
 
 **Corner radius** — draggable handles inside rectangles, triangles, polygons and stars.
-Drag inward to round, outward to sharpen.
+Drag inward to round, outward to sharpen. A rectangle's corners can be edited together
+(one field) or independently (four), and the handle follows whichever mode is selected.
 
 **Repeat Grid** — repeat a selection in a grid. Edit any cell and every cell follows,
 because the grid holds one source rather than N copies. Expand turns it into independent
@@ -82,6 +83,13 @@ Scaling a rotated object in world space composes as `R·S`, and since `R·S ≠ 
 `invert(M₀)`, derives the new box from the fixed opposite corner, and re-anchors. The
 rotation component is never touched. Property tests assert that skew stays at zero across
 random angles and handle drags.
+
+A group is the exception, and it has to be: a group has no size of its own — its box only
+records where its children happened to be when it was formed — so writing a new
+width/height changes nothing anyone can see. Its resize goes into the matrix instead, which
+is what the children inherit. Every other node keeps its size in width/height so strokes,
+corner radii and text layout do not scale with the box; an artboard and a repeat grid draw
+their own box, so they resize like a shape.
 
 ### Three different bounding boxes
 
@@ -194,6 +202,13 @@ Rect and image carry four addressable corners; triangle, polygon and star carry 
 scalar, because their vertices are generated from sides/points and there is nothing stable
 to key per-corner values to.
 
+The two-button toggle above the fields picks between one field for all four corners and
+four separate ones, and the on-canvas handle honours the same choice — dragging any dot in
+uniform mode moves all four. The mode is explicit but *defaults to what the data says*: a
+box whose corners already differ opens in independent mode rather than silently flattening
+them on the first edit. It resets with the selection, so it never leaks from one object to
+the next.
+
 ### Live readouts without breaking the no-store-writes rule
 
 The inspector updates during a drag, which sits awkwardly with the rule that drags never
@@ -209,6 +224,17 @@ Three cases have to be distinguished, and the readout handles each separately: a
 single-node resize writes a new intrinsic size, a multi-node resize instead scales the
 matrix, and a move or rotate changes neither — so the scale has to be decomposed from the
 live matrix when there is one.
+
+Getting that split *nearly* right still shows: every defect here presented the same way, as
+a value that jumped at pointerup. Three were worth naming, because each is a trap the
+obvious implementation falls into. The intrinsic size a resize records is pre-scale, so it
+has to be multiplied by the node's own scale before it can be shown. The live matrices the
+drag session publishes are in WORLD space while every field edits LOCAL values, so the
+ancestor chain has to be divided out first. And a group's bounds are its children's, not
+its own nominal box — that box is written once when the group is formed and never refitted
+— so the live path mirrors `geometryBounds`' recursion with the in-flight matrix injected,
+rather than reading the box. The end-to-end tests assert the invariant directly: what the
+field shows mid-gesture must equal what it shows after release.
 
 ### The theme colours the chrome, never the artwork
 

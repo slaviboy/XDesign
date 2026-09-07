@@ -93,6 +93,15 @@ export interface EditorState {
   snapGuides: SnapGuide[]
   dropIndicator: { x: number; y: number; label: string } | null
 
+  /**
+   * Whether a box's four corners are edited together or individually.
+   *
+   * null means "derive from the data" — a shape whose radii already differ
+   * opens in independent mode. An explicit choice overrides that, so switching
+   * to independent with all corners at 0 stays independent.
+   */
+  cornerRadiusMode: 'uniform' | 'independent' | null
+
   /** Bumped by tools to force an overlay repaint without touching the document. */
   overlayTick: number
 
@@ -129,6 +138,8 @@ export const editorStore = createStore<EditorState>()(
     snapGuides: [],
     dropIndicator: null,
 
+    cornerRadiusMode: null,
+
     overlayTick: 0,
 
     snapEnabled: true,
@@ -140,6 +151,21 @@ export const editorStore = createStore<EditorState>()(
     isDragging: false,
   })),
 )
+
+/**
+ * Invoked with the OUTGOING tool id whenever the tool changes.
+ *
+ * Registered by the app rather than imported here, because EditorStore cannot
+ * reach the tool registry without a cycle. Without this, Tool.onDeactivate was
+ * dead code — nothing called it — so switching tools mid-gesture left the old
+ * tool's session open, its LiveTransform overrides applied, and isDragging
+ * stuck true, with no way back short of a reload.
+ */
+let deactivateHandler: ((outgoing: ToolId) => void) | null = null
+
+export function setToolDeactivateHandler(fn: ((outgoing: ToolId) => void) | null): void {
+  deactivateHandler = fn
+}
 
 export const getEditor = () => editorStore.getState()
 export const setEditor = (partial: Partial<EditorState>) => editorStore.setState(partial)
@@ -156,6 +182,9 @@ export const setEditor = (partial: Partial<EditorState>) => editorStore.setState
 export function setTool(tool: ToolId, keepEditing = false): void {
   const s = editorStore.getState()
   if (s.tool === tool) return
+  // Let the outgoing tool tear down first: it may hold an open gesture whose
+  // pointerup will now be delivered to a different tool entirely.
+  deactivateHandler?.(s.tool)
   editorStore.setState({
     tool,
     toolBeforeTemporary: null,
@@ -166,16 +195,25 @@ export function setTool(tool: ToolId, keepEditing = false): void {
   })
 }
 
-/** Space-to-pan: swap in the hand tool, remembering what to restore. */
+/**
+ * Space-to-pan: swap in the hand tool, remembering what to restore.
+ *
+ * This tears the outgoing tool down exactly as setTool does. Holding space is
+ * the single most likely way to change tools mid-gesture — it is a reflex, not
+ * a decision — so skipping teardown here would leave the very hole setTool
+ * closes.
+ */
 export function pushTemporaryTool(tool: ToolId): void {
   const s = editorStore.getState()
   if (s.toolBeforeTemporary !== null || s.tool === tool) return
+  deactivateHandler?.(s.tool)
   editorStore.setState({ toolBeforeTemporary: s.tool, tool })
 }
 
 export function popTemporaryTool(): void {
   const s = editorStore.getState()
   if (s.toolBeforeTemporary === null) return
+  deactivateHandler?.(s.tool)
   editorStore.setState({ tool: s.toolBeforeTemporary, toolBeforeTemporary: null })
 }
 
@@ -186,7 +224,16 @@ export function popTemporaryTool(): void {
 export function setSelection(ids: readonly NodeId[]): void {
   const current = editorStore.getState().selection
   if (current.length === ids.length && current.every((id, i) => id === ids[i])) return
-  editorStore.setState({ selection: [...ids], selectedPointIndices: [] })
+  // Drop the explicit corner mode: the new selection derives its own from data.
+  editorStore.setState({
+    selection: [...ids],
+    selectedPointIndices: [],
+    cornerRadiusMode: null,
+  })
+}
+
+export function setCornerRadiusMode(mode: 'uniform' | 'independent'): void {
+  editorStore.setState({ cornerRadiusMode: mode })
 }
 
 export function addToSelection(ids: readonly NodeId[]): void {

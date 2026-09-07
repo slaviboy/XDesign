@@ -221,3 +221,38 @@ test('a multi-selection resize updates its readouts live', async ({ page }) => {
   await page.mouse.up()
   expect(midDrag).toBeGreaterThan(w0)
 })
+
+test('resizing a group scales its children, live and on commit', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 280, y: 280 })
+  await drawShape(page, 'rect', { x: 340, y: 200 }, { x: 420, y: 280 })
+  await page.keyboard.press(`${modifier()}+a`)
+  await page.keyboard.press(`${modifier()}+g`)
+
+  // Select via the Layers panel: a pointerdown on a child of a selected group
+  // descends into that child.
+  await page.locator('.layer-row').nth(1).click()
+
+  const childWidths = () =>
+    nodesOfType(page, 'rect').evaluateAll((els) =>
+      els.map((e) => Math.round(e.getBoundingClientRect().width)),
+    )
+  const before = await childWidths()
+  expect(before).toEqual([80, 80])
+
+  const handle = (await page.locator('[data-handle="se"]').boundingBox())!
+  const grab = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 }
+  await page.mouse.move(grab.x, grab.y)
+  await page.mouse.down()
+  await page.mouse.move(grab.x + 220, grab.y + 80, { steps: 12 })
+
+  // A group has no size of its own, so writing a new width/height moves nothing.
+  // Only scaling its matrix resizes it — and the preview has to show that, not
+  // wait for the commit.
+  const during = await childWidths()
+  expect(during[0]).toBeGreaterThan(before[0]!)
+  await page.mouse.up()
+
+  // No snap at pointerup: what was previewed is what was committed.
+  expect(await childWidths()).toEqual(during)
+})
