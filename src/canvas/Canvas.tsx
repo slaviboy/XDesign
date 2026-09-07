@@ -26,7 +26,7 @@ import {
 import { DocumentLayer } from './NodeRenderer'
 import { SelectionOverlay } from './SelectionOverlay'
 import { GridOverlay } from './GridOverlay'
-import { ArtboardGuides, GuideStrips } from './ArtboardGuides'
+import { ArtboardGuides, GuideReadout, GuideStrips } from './ArtboardGuides'
 import { ToolOverlay } from './ToolOverlay'
 import { ArtboardLabels, ArtboardNameEditor } from './ArtboardLabels'
 import { TextEditor } from './TextEditor'
@@ -356,6 +356,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
           {/* Before the labels, so a label's own drag wins where they meet. */}
           <GuideStrips />
           <ArtboardLabels />
+          <GuideReadout />
           <SelectionOverlay />
           <ToolOverlay />
         </g>

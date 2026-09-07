@@ -50,7 +50,9 @@ pointers hand the points back and forth without dropping them.
 window. Every artboard grows a strip along its top and left border that you pull a guide out of,
 and the guide belongs to that artboard. Dragging one snaps to the artboard's edges and centres,
 to every object on it, and to its other guides; hold `⌘`/`Ctrl` to suspend that, `Shift` to move
-in tens. Drag a guide off the artboard to remove it. `⌘;` hides them, `⇧⌘;` locks them, and
+in tens. While you drag, a chip at the cursor gives the guide's own coordinate — `X 138` — and a
+rule along the artboard's edge gives the distance to each side of it, which is usually what you
+are actually placing: a margin, or a column. Drag a guide off the artboard to remove it. `⌘;` hides them, `⇧⌘;` locks them, and
 right-clicking an artboard offers Copy, Paste, Remove All and Lock All Guides — pasting applies
 one set of guides across as many artboards as you have selected.
 
@@ -807,7 +809,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 283 unit tests (Vitest)
-npm run test:e2e   # 199 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 203 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

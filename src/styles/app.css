@@ -171,12 +171,26 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 /* A locked guide is still shown — Adobe's lock stops it moving, not showing —
    but it is dimmed so the reason it will not budge is visible. */
 .artboard-guides .guide.locked { opacity: 0.45; }
+.artboard-guides .guide.active { stroke: var(--guide-active); opacity: 1; }
+
+/* The readout that accompanies a guide being dragged: a rule along the edge
+   with the distance to each side of the guide, and a chip at the cursor. */
+.guide-rule { stroke: var(--snap-guide); stroke-width: 1; }
+.guide-measure {
+  fill: var(--snap-guide);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  dominant-baseline: middle;
+}
+.guide-chip rect { fill: var(--chip-bg); }
+.guide-chip text { fill: #fff; font-size: 13px; font-family: var(--font-ui); }
+.guide-chip .guide-chip-axis { fill: rgba(255, 255, 255, 0.55); }
 
 /* The pull-out areas on an artboard's top and left border. Invisible until
    hovered: they sit in the margin around the artboard, and a permanently
    painted band there would read as part of the artwork. */
 .guide-strip { fill: transparent; }
-.guide-strip:hover { fill: var(--guide); fill-opacity: 0.18; }
+.guide-strip:hover { fill: var(--guide); fill-opacity: 0.1; }
 
 .selection-frame {
   fill: none;

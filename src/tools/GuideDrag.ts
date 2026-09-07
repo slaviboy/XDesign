@@ -55,6 +55,8 @@ interface GuideDragSession {
    * "Add" followed by a run of moves.
    */
   livePosition: number | null
+  /** Canvas-relative pointer position, for the readout that follows the cursor. */
+  pointer: Vec2 | null
 }
 
 let session: GuideDragSession | null = null
@@ -70,18 +72,24 @@ export function isGuideDragging(): boolean {
  * running — including a guide that does not exist yet, which is what a pull out
  * of the edge strip looks like until it is released.
  */
-export function liveGuide(): {
+export interface LiveGuide {
   artboardId: NodeId
   axis: 'x' | 'y'
   guideId: string | null
+  /** In the artboard's local space, as a stored guide would be. */
   position: number
-} | null {
+  /** Canvas-relative, so the readout can sit beside the cursor. */
+  pointer: Vec2 | null
+}
+
+export function liveGuide(): LiveGuide | null {
   if (!session || session.livePosition === null) return null
   return {
     artboardId: session.artboardId,
     axis: session.axis,
     guideId: session.guideId,
     position: session.livePosition,
+    pointer: session.pointer,
   }
 }
 
@@ -119,6 +127,7 @@ export function beginGuideDrag(
     extent: axis === 'x' ? board.transform.width : board.transform.height,
     moved: false,
     livePosition: null,
+    pointer: null,
   }
 
   try {
@@ -192,6 +201,8 @@ function onPointerMove(e: PointerEvent): void {
   }
 
   const viewport = editorStore.getState().viewport
+  const rect = s.container.getBoundingClientRect()
+  s.pointer = { x: e.clientX - rect.left, y: e.clientY - rect.top }
   let position = toLocalPosition(s, e.clientX, e.clientY)
 
   if (e.shiftKey) {

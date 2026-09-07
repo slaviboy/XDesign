@@ -335,3 +335,91 @@ test('guides and a grid survive a save and reopen', async ({ page }) => {
   expect(Number(await guides(page).first().getAttribute('x1'))).toBeCloseTo(250, 0)
   await expect(page.locator('[data-grid="layout"] rect')).toHaveCount(12)
 })
+
+// ---------------------------------------------------------------- readout --
+
+/** Start a guide drag and leave the pointer down, so the readout is on screen. */
+async function holdGuide(page: Page, axis: 'x' | 'y', to: number) {
+  const strip = page.locator(`[data-guide-strip="${axis}"]`).first()
+  const box = (await strip.boundingBox())!
+  const start = axis === 'x'
+    ? { x: box.x + box.width / 2, y: box.y + 200 }
+    : { x: box.x + 300, y: box.y + box.height / 2 }
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  await page.mouse.move(axis === 'x' ? to : start.x, axis === 'x' ? start.y : to, { steps: 10 })
+}
+
+test('a guide being dragged reads out its coordinate at the cursor', async ({ page }) => {
+  await openApp(page)
+  await expect(page.locator('.guide-readout')).toHaveCount(0)
+
+  await holdGuide(page, 'x', await screenOfLocalX(page, 280))
+  // The axis and the value, as Adobe shows them: "X 280".
+  const chip = page.locator('.guide-chip')
+  await expect(chip).toHaveAttribute('data-guide-readout', 'x280')
+  await expect(chip).toContainText('X')
+  await expect(chip).toContainText('280')
+
+  // It follows the cursor rather than sitting at a fixed spot.
+  const before = (await chip.boundingBox())!
+  await page.mouse.move(await screenOfLocalX(page, 400), 400, { steps: 4 })
+  const after = (await chip.boundingBox())!
+  expect(after.x).toBeGreaterThan(before.x)
+
+  await page.mouse.up()
+  // Feedback for a gesture, so it goes when the gesture does.
+  await expect(page.locator('.guide-readout')).toHaveCount(0)
+})
+
+test('the artboard edge shows the distance either side of the guide', async ({ page }) => {
+  await openApp(page)
+  const width = Number(
+    await nodesOfType(page, 'artboard').first().locator('rect').first().getAttribute('width'),
+  )
+
+  await holdGuide(page, 'x', await screenOfLocalX(page, 280))
+  await expect(page.locator('.guide-rule')).toHaveCount(1)
+  // The two segments the guide divides the artboard into, which is what you are
+  // usually after when placing one — a margin, or a column.
+  expect(await page.locator('.guide-measure').allTextContents()).toEqual([
+    '280',
+    String(width - 280),
+  ])
+
+  // Each sits over the middle of the span it measures.
+  const guideX = await screenOfLocalX(page, 280)
+  const boxes = await page.locator('.guide-measure').evaluateAll((els) =>
+    els.map((e) => e.getBoundingClientRect().x + e.getBoundingClientRect().width / 2),
+  )
+  expect(boxes[0]!).toBeLessThan(guideX)
+  expect(boxes[1]!).toBeGreaterThan(guideX)
+  await page.mouse.up()
+})
+
+test('a horizontal guide measures down the left edge instead', async ({ page }) => {
+  await openApp(page)
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  await holdGuide(page, 'y', canvas.y + 300)
+
+  await expect(page.locator('.guide-chip')).toHaveAttribute('data-guide-readout', /^y/)
+  const rule = page.locator('.guide-rule')
+  // A vertical rule this time: it measures the axis the guide divides.
+  expect(await rule.getAttribute('x1')).toBe(await rule.getAttribute('x2'))
+  await expect(page.locator('.guide-measure')).toHaveCount(2)
+  await page.mouse.up()
+})
+
+test('the guide being dragged is distinguishable from the ones already placed', async ({ page }) => {
+  await openApp(page)
+  await pullGuide(page, 'x', await screenOfLocalX(page, 200))
+  await expect(guides(page)).toHaveCount(1)
+  await expect(page.locator('.artboard-guides .guide.active')).toHaveCount(0)
+
+  await holdGuide(page, 'x', await screenOfLocalX(page, 400))
+  // Two guides on screen, and only the live one is marked.
+  await expect(guides(page)).toHaveCount(2)
+  await expect(page.locator('.artboard-guides .guide.active')).toHaveCount(1)
+  await page.mouse.up()
+  await expect(page.locator('.artboard-guides .guide.active')).toHaveCount(0)
+})

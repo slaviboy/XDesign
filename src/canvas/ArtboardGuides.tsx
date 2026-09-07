@@ -20,7 +20,7 @@
 import { memo, useCallback } from 'react'
 import { toSvgMatrix } from '../geometry/Matrix'
 import { artboardIds, geometryBounds, localMatrix } from '../document/SceneGraph'
-import { beginGuideDrag, liveGuide } from '../tools/GuideDrag'
+import { beginGuideDrag, liveGuide, type LiveGuide } from '../tools/GuideDrag'
 import { docToScreen } from './Viewport'
 import { useDocument, useDocumentStore, useEditorStore } from '../state/hooks'
 import type { ArtboardNode, Guide, NodeId } from '../document/types'
@@ -35,7 +35,12 @@ const STRIP_INSIDE = 3
  * A guide being pulled out of the edge is not in the document at all yet, so it
  * is appended; one being moved replaces its own stored position.
  */
-function guidesOf(board: ArtboardNode, live: ReturnType<typeof liveGuide>): Guide[] {
+function isLive(guide: Guide, live: LiveGuide | null): boolean {
+  if (!live) return false
+  return live.guideId ? guide.id === live.guideId : guide.id === 'live'
+}
+
+function guidesOf(board: ArtboardNode, live: LiveGuide | null): Guide[] {
   const stored = board.guides ?? []
   if (!live || live.artboardId !== board.id) return stored
   if (!live.guideId) {
@@ -114,7 +119,10 @@ export const ArtboardGuides = memo(function ArtboardGuides() {
                 )}
                 <line
                   {...from}
-                  className={`guide${board.guidesLocked ? ' locked' : ''}`}
+                  className={
+                    `guide${board.guidesLocked ? ' locked' : ''}` +
+                    (isLive(g, live) ? ' active' : '')
+                  }
                   vectorEffect="non-scaling-stroke"
                   pointerEvents="none"
                 />
@@ -190,3 +198,112 @@ export const GuideStrips = memo(function GuideStrips() {
   )
 })
 
+// ------------------------------------------------------------ the readout --
+
+/**
+ * How far the measurement rule sits outside the artboard edge, in px.
+ *
+ * Clear of the artboard's name label, which sits 7px above the same edge — the
+ * numbers go above the rule, so the name stays legible underneath it.
+ */
+const RULE_OFFSET = 20
+
+/**
+ * What a guide being dragged tells you: where it is, and what it divides.
+ *
+ * Two readings, because they answer different questions. The chip by the
+ * cursor gives the guide's own coordinate — the number you would type into a
+ * field. The pair along the artboard's edge gives the distance to each side of
+ * it, which is what you are usually actually after when placing a guide: a
+ * margin, or a column.
+ *
+ * Screen space, so the type stays legible at any zoom, like the artboard labels.
+ */
+export const GuideReadout = memo(function GuideReadout() {
+  const doc = useDocument()
+  const viewport = useEditorStore((s) => s.viewport)
+  // The drag writes nothing to the document, so this is the only signal.
+  useEditorStore((s) => s.overlayTick)
+  const live = liveGuide()
+  if (!live) return null
+
+  const board = doc.nodes[live.artboardId]
+  if (!board || board.type !== 'artboard') return null
+  const bounds = geometryBounds(doc, live.artboardId)
+  const origin = docToScreen(viewport, { x: bounds.x, y: bounds.y })
+  const vertical = live.axis === 'x'
+  const extent = vertical ? board.transform.width : board.transform.height
+  const span = extent * viewport.zoom
+  const at = (vertical ? origin.x : origin.y) + live.position * viewport.zoom
+
+  // The two distances the guide divides the artboard into.
+  const before = Math.round(live.position)
+  const after = Math.round(extent - live.position)
+  const start = vertical ? origin.x : origin.y
+  const end = start + span
+  const rule = (vertical ? origin.y : origin.x) - RULE_OFFSET
+
+  return (
+    <g className="guide-readout" pointerEvents="none">
+      {vertical ? (
+        <>
+          <line className="guide-rule" x1={start} y1={rule} x2={end} y2={rule} />
+          <text className="guide-measure" x={(start + at) / 2} y={rule - 6} textAnchor="middle">
+            {before}
+          </text>
+          <text className="guide-measure" x={(at + end) / 2} y={rule - 6} textAnchor="middle">
+            {after}
+          </text>
+        </>
+      ) : (
+        <>
+          <line className="guide-rule" x1={rule} y1={start} x2={rule} y2={end} />
+          {/* Upright rather than rotated with the rule: a number read sideways
+              is slower than one read straight, and there is room beside it. */}
+          <text className="guide-measure" x={rule - 6} y={(start + at) / 2} textAnchor="end">
+            {before}
+          </text>
+          <text className="guide-measure" x={rule - 6} y={(at + end) / 2} textAnchor="end">
+            {after}
+          </text>
+        </>
+      )}
+
+      {live.pointer && (
+        <GuideChip
+          x={live.pointer.x + 18}
+          y={live.pointer.y - 14}
+          axis={live.axis}
+          value={Math.round(live.position)}
+        />
+      )}
+    </g>
+  )
+})
+
+/** The coordinate chip that follows the cursor: a dimmed axis, then the value. */
+function GuideChip({
+  x,
+  y,
+  axis,
+  value,
+}: {
+  x: number
+  y: number
+  axis: 'x' | 'y'
+  value: number
+}) {
+  const label = String(value)
+  const width = label.length * 7.6 + 28
+  return (
+    <g className="guide-chip" transform={`translate(${x} ${y})`} data-guide-readout={`${axis}${value}`}>
+      <rect width={width} height={26} rx={4} />
+      <text x={11} y={17} className="guide-chip-axis">
+        {axis.toUpperCase()}
+      </text>
+      <text x={26} y={17}>
+        {label}
+      </text>
+    </g>
+  )
+}
