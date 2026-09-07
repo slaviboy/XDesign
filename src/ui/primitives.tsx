@@ -19,25 +19,75 @@ import {
 
 let tooltipTimer: ReturnType<typeof setTimeout> | null = null
 
+/** Gap between the anchor and the tooltip, and the margin kept from the edges. */
+const TIP_GAP = 8
+const TIP_MARGIN = 6
+/** Rough tooltip size, used to decide which side to open on before it renders. */
+const TIP_ESTIMATE = { width: 150, height: 24 }
+
+type TipPlacement = 'right' | 'left' | 'below'
+
+interface TipPosition {
+  x: number
+  y: number
+  placement: TipPlacement
+}
+
 export function Tooltip({
   label,
   shortcut,
+  side = 'auto',
   children,
 }: {
   label: string
   shortcut?: string
+  /** 'auto' opens to the right, flipping left or below when there is no room. */
+  side?: 'auto' | 'right' | 'below'
   children: ReactNode
 }) {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const [pos, setPos] = useState<TipPosition | null>(null)
   const ref = useRef<HTMLSpanElement>(null)
 
   const show = useCallback(() => {
     if (tooltipTimer) clearTimeout(tooltipTimer)
     tooltipTimer = setTimeout(() => {
-      const rect = ref.current?.getBoundingClientRect()
-      if (rect) setPos({ x: rect.right + 8, y: rect.top + rect.height / 2 })
+      // The wrapper is `display: contents`, which generates NO layout box — its
+      // getBoundingClientRect() is all zeros, which would park every tooltip in
+      // the top-left corner of the window. Measure the real child instead.
+      const anchor = ref.current?.firstElementChild ?? ref.current
+      const rect = anchor?.getBoundingClientRect()
+      if (!rect || (rect.width === 0 && rect.height === 0)) return
+
+      const width = Math.max(TIP_ESTIMATE.width, label.length * 6.5 + (shortcut ? 28 : 0))
+      const fitsRight = rect.right + TIP_GAP + width < window.innerWidth - TIP_MARGIN
+      const fitsLeft = rect.left - TIP_GAP - width > TIP_MARGIN
+
+      let placement: TipPlacement
+      if (side === 'below') placement = 'below'
+      else if (fitsRight) placement = 'right'
+      else if (fitsLeft) placement = 'left'
+      else placement = 'below'
+
+      if (placement === 'below') {
+        setPos({
+          x: clamp(rect.left + rect.width / 2, TIP_MARGIN + width / 2, window.innerWidth - TIP_MARGIN - width / 2),
+          y: Math.min(rect.bottom + TIP_GAP, window.innerHeight - TIP_MARGIN - TIP_ESTIMATE.height),
+          placement,
+        })
+        return
+      }
+
+      setPos({
+        x: placement === 'right' ? rect.right + TIP_GAP : rect.left - TIP_GAP,
+        y: clamp(
+          rect.top + rect.height / 2,
+          TIP_MARGIN + TIP_ESTIMATE.height / 2,
+          window.innerHeight - TIP_MARGIN - TIP_ESTIMATE.height / 2,
+        ),
+        placement,
+      })
     }, 450)
-  }, [])
+  }, [label, shortcut, side])
 
   const hide = useCallback(() => {
     if (tooltipTimer) clearTimeout(tooltipTimer)
@@ -45,6 +95,13 @@ export function Tooltip({
   }, [])
 
   useEffect(() => () => { if (tooltipTimer) clearTimeout(tooltipTimer) }, [])
+
+  const transform =
+    pos?.placement === 'right'
+      ? 'translateY(-50%)'
+      : pos?.placement === 'left'
+        ? 'translate(-100%, -50%)'
+        : 'translateX(-50%)'
 
   return (
     <span
@@ -56,13 +113,21 @@ export function Tooltip({
     >
       {children}
       {pos && (
-        <span className="tooltip" style={{ left: pos.x, top: pos.y, transform: 'translateY(-50%)' }}>
+        <span
+          className="tooltip"
+          role="tooltip"
+          style={{ left: pos.x, top: pos.y, transform }}
+        >
           {label}
           {shortcut && <span className="tooltip-shortcut">{shortcut}</span>}
         </span>
       )}
     </span>
   )
+}
+
+function clamp(value: number, lo: number, hi: number): number {
+  return value < lo ? lo : value > hi ? hi : value
 }
 
 // ------------------------------------------------------------- number field

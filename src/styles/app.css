@@ -119,15 +119,15 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 6px 0;
+  gap: 3px;
+  padding: 8px 0;
   background: var(--bg-toolbar);
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
 
 .tool-button {
-  width: 32px; height: 32px;
+  width: 38px; height: 38px;
   display: grid; place-items: center;
   border: 1px solid transparent;
   border-radius: var(--radius);
@@ -142,10 +142,10 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .tool-button svg { display: block; pointer-events: none; }
 
 .tool-separator {
-  width: 22px;
+  width: 24px;
   height: 1px;
   background: var(--border);
-  margin: 4px 0;
+  margin: 5px 0;
   flex: none;
 }
 

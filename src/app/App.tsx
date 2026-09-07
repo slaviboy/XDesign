@@ -103,7 +103,20 @@ export function App() {
 
   // ---- stop the browser navigating away on a stray file drop ---------------
   useEffect(() => {
+    // Dropping a file on a page normally makes the browser navigate to it,
+    // which would throw away the document. This guard blocks that everywhere
+    // EXCEPT over the canvas.
+    //
+    // The exception is essential: these listeners are on window, so they run
+    // after the canvas's own handler in the bubble phase. Unconditionally
+    // setting dropEffect = 'none' here overrode the canvas's 'copy', the
+    // browser concluded the drop was not allowed, and the drop event never
+    // fired — which is why dragging an image from the desktop did nothing.
+    const overCanvas = (e: DragEvent): boolean =>
+      !!(e.target as Element | null)?.closest?.('[data-testid="canvas-root"]')
+
     const prevent = (e: DragEvent) => {
+      if (overCanvas(e)) return
       e.preventDefault()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
     }

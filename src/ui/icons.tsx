@@ -28,46 +28,93 @@ function Icon({ size = 16, children, ...rest }: IconProps) {
   )
 }
 
+/**
+ * Tool-rail icons.
+ *
+ * Drawn on a 24px grid rather than the 16px one the panel icons use: the rail
+ * renders them at 20px, and the finer grid is what lets the strokes stay thin
+ * and the geometry stay true at that size — matching the reference, where the
+ * tool glyphs are noticeably larger and lighter than the dense inspector icons.
+ */
+function ToolIcon({ size = 20, children, ...rest }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...rest}
+    >
+      {children}
+    </svg>
+  )
+}
+
 /* ------------------------------------------------------------------ tools */
 
+/** Classic pointer: filled, with the notched tail that reads as a cursor. */
 export const CursorIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M3.5 2.2l8.4 5.3-3.7.7-1.9 3.6z" fill="currentColor" strokeWidth={1} /></Icon>
+  <ToolIcon {...p}>
+    <path
+      d="M5.5 2.4v16.9l4.3-4.2 2.7 6.2 2.6-1.1-2.7-6.1h6.1z"
+      fill="currentColor"
+      strokeWidth={1.1}
+      strokeLinejoin="round"
+    />
+  </ToolIcon>
 )
 export const RectIcon = (p: IconProps) => (
-  <Icon {...p}><rect x="2.5" y="3.5" width="11" height="9" rx="1" /></Icon>
+  <ToolIcon {...p}><rect x="3.6" y="5.1" width="16.8" height="13.8" /></ToolIcon>
 )
 export const EllipseIcon = (p: IconProps) => (
-  <Icon {...p}><ellipse cx="8" cy="8" rx="5.5" ry="4.5" /></Icon>
+  <ToolIcon {...p}><circle cx="12" cy="12" r="8.4" /></ToolIcon>
 )
 export const TriangleIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M8 3l5 9.5H3z" /></Icon>
+  <ToolIcon {...p}><path d="M12 4.1l8.3 15.8H3.7z" /></ToolIcon>
 )
 export const PolygonIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M8 2.5l4.8 3.5-1.8 5.6H5L3.2 6z" /></Icon>
+  <ToolIcon {...p}><path d="M12 3.4l7.4 4.3v8.6L12 20.6l-7.4-4.3V7.7z" /></ToolIcon>
 )
 export const StarIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M8 2.2l1.8 3.7 4.1.6-3 2.9.7 4.1L8 11.6l-3.6 1.9.7-4.1-3-2.9 4.1-.6z" /></Icon>
+  <ToolIcon {...p}>
+    <path d="M12 3.2l2.72 5.51 6.08.89-4.4 4.29 1.04 6.05L12 17.08l-5.44 2.86 1.04-6.05-4.4-4.29 6.08-.89z" />
+  </ToolIcon>
 )
 export const LineIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M3 13L13 3" /></Icon>
+  <ToolIcon {...p}><path d="M4.4 19.6L19.6 4.4" /></ToolIcon>
 )
+/** Fountain-pen nib — the universal mark for a Bézier pen. */
 export const PenIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M3 13l1-3.2 6.2-6.2a1.4 1.4 0 012 2L6 11.8z" /><path d="M9.2 4.6l2.2 2.2" /></Icon>
+  <ToolIcon {...p}>
+    <path d="M12 2.6l7 11.1-7 7.7-7-7.7z" />
+    <path d="M12 2.6v11.1" />
+    <circle cx="12" cy="16.1" r="1.35" />
+  </ToolIcon>
 )
 export const PencilIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M2.6 13.4c2-.4 2.4-2.6 3.6-4.6C7.6 6.5 9.6 3 11.6 3s1.4 2.6-.4 4.6c-1.6 1.8-3.4 2-3.4.6 0-1.6 2.6-2 4.6-1" /></Icon>
+  <ToolIcon {...p}>
+    <path d="M4 20l.6-4.3L15.9 4.4a2 2 0 012.9 0l.8.8a2 2 0 010 2.9L8.3 19.4z" />
+    <path d="M14.6 5.7l3.7 3.7" />
+  </ToolIcon>
 )
 export const TextIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M3.5 4V3h9v1M8 3v10M5.8 13h4.4" /></Icon>
+  <ToolIcon {...p}><path d="M5.4 6.6V4.2h13.2v2.4M12 4.2v15.6M8.9 19.8h6.2" /></ToolIcon>
 )
+/** Artboard frame: the four rules that read as a canvas boundary. */
 export const ArtboardIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M4.5 2v12M11.5 2v12M2 4.5h12M2 11.5h12" /></Icon>
+  <ToolIcon {...p}><path d="M7.6 3v18M16.4 3v18M3 7.6h18M3 16.4h18" /></ToolIcon>
 )
 export const ZoomIcon = (p: IconProps) => (
-  <Icon {...p}><circle cx="7" cy="7" r="4.2" /><path d="M10.2 10.2L13.5 13.5" /></Icon>
+  <ToolIcon {...p}><circle cx="10.6" cy="10.6" r="6.6" /><path d="M15.4 15.4l5.1 5.1" /></ToolIcon>
 )
 export const HandIcon = (p: IconProps) => (
-  <Icon {...p}><path d="M5.5 8V4.2a1 1 0 012 0V8m0-1.2a1 1 0 012 0V8m0-.8a1 1 0 012 0v3.4a3.4 3.4 0 01-3.4 3.4H8.2A4.7 4.7 0 013.5 9.3V7.8a1 1 0 012 0" /></Icon>
+  <ToolIcon {...p}>
+    <path d="M8.3 12V5.9a1.55 1.55 0 013.1 0V11m0-1.5a1.55 1.55 0 013.1 0V12m0-1.1a1.55 1.55 0 013.1 0v5a5.2 5.2 0 01-5.2 5.2h-1A5.9 5.9 0 015.2 14.6v-2a1.55 1.55 0 013.1 0" />
+  </ToolIcon>
 )
 
 /* -------------------------------------------------------------- transform */

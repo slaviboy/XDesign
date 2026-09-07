@@ -6,8 +6,9 @@
 
 import { test, expect } from '@playwright/test'
 import {
-  CANVAS, captureDownload, clickCanvas, dragOnCanvas, drawShape, modifier,
-  nodesOfType, openApp, openExportDialog, press, readField, selectTool, setField,
+  CANVAS, RED_PNG_BASE64, captureDownload, clickCanvas, dragOnCanvas, drawShape,
+  dropFiles, modifier, nodesOfType, openApp, openExportDialog, press, readField,
+  selectTool, setField,
 } from './helpers'
 
 /** Draw a shallow arc freehand, so the simplifier has real curvature to keep. */
@@ -521,4 +522,99 @@ test('every tool keyboard shortcut selects its tool', async ({ page }) => {
     await page.keyboard.press(key)
     await expect(page.locator(`[data-tool="${tool}"]`)).toHaveAttribute('aria-pressed', 'true')
   }
+})
+
+test('tooltips appear next to the control they describe', async ({ page }) => {
+  await openApp(page)
+
+  const button = page.locator('[data-tool="ellipse"]')
+  const buttonBox = (await button.boundingBox())!
+  await button.hover()
+
+  const tip = page.locator('.tooltip')
+  await expect(tip).toBeVisible({ timeout: 3000 })
+  await expect(tip).toContainText('Ellipse')
+
+  const tipBox = (await tip.boundingBox())!
+  // The wrapper is display:contents, which has no layout box — measuring it
+  // instead of the child parked every tooltip at the window's top-left corner.
+  expect(tipBox.x).toBeGreaterThan(buttonBox.x)
+  expect(tipBox.x).toBeLessThan(buttonBox.x + buttonBox.width + 40)
+  // Vertically centred on the button.
+  const tipMid = tipBox.y + tipBox.height / 2
+  const buttonMid = buttonBox.y + buttonBox.height / 2
+  expect(Math.abs(tipMid - buttonMid)).toBeLessThan(14)
+})
+
+test('tooltips near the right edge flip inside the window', async ({ page }) => {
+  await openApp(page)
+
+  // The top-bar menu sits hard against the right edge.
+  const button = page.locator('[data-testid="app-menu"]')
+  await button.hover()
+
+  const tip = page.locator('.tooltip')
+  await expect(tip).toBeVisible({ timeout: 3000 })
+  const tipBox = (await tip.boundingBox())!
+  const viewport = page.viewportSize()!
+  expect(tipBox.x).toBeGreaterThanOrEqual(0)
+  expect(tipBox.x + tipBox.width).toBeLessThanOrEqual(viewport.width)
+  expect(tipBox.y).toBeGreaterThanOrEqual(0)
+})
+
+/**
+ * Dragging a file over a target.
+ *
+ * NOTE on what can and cannot be asserted here: `dropEffect` is ignored on a
+ * synthetic DataTransfer — assigning it outside a real OS drag is a documented
+ * no-op, verified directly (it reads back as 'none' however it is set). So the
+ * regression is covered through the behaviour a user actually sees: the canvas
+ * shows drop feedback and accepts the file, while the surrounding chrome does
+ * neither.
+ */
+async function dragFileOver(page: import('@playwright/test').Page, selector: string) {
+  return page.evaluate((sel) => {
+    const dt = new DataTransfer()
+    dt.items.add(new File([new Blob(['x'])], 'photo.png', { type: 'image/png' }))
+    const target = document.querySelector(sel)!
+    const rect = target.getBoundingClientRect()
+    const event = new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: dt,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    })
+    target.dispatchEvent(event)
+    return { accepted: event.defaultPrevented }
+  }, selector)
+}
+
+test('the canvas accepts a dragged file and shows drop feedback', async ({ page }) => {
+  await openApp(page)
+
+  // The window-level guard that stops the browser navigating to a dropped file
+  // must not veto the canvas. When it did, the browser cancelled the drag and
+  // `drop` never fired — which is why dragging an image in did nothing at all.
+  const result = await dragFileOver(page, '[data-testid="canvas-root"]')
+  expect(result.accepted).toBe(true)
+  await expect(page.locator('.drop-indicator')).toBeVisible()
+  await expect(page.locator('.drop-indicator')).toContainText('Import')
+})
+
+test('a file dragged over the chrome shows no drop target', async ({ page }) => {
+  await openApp(page)
+  await dragFileOver(page, '.inspector')
+  // No feedback outside the canvas, and the guard still blocks navigation.
+  await expect(page.locator('.drop-indicator')).toHaveCount(0)
+})
+
+test('dropping an image onto the canvas imports it', async ({ page }) => {
+  await openApp(page)
+  await dropFiles(page, [{ name: 'photo.png', type: 'image/png', base64: RED_PNG_BASE64 }], { x: 420, y: 320 })
+
+  await expect(nodesOfType(page, 'image')).toHaveCount(1)
+  await expect(page.locator('.layer-row', { hasText: 'photo' })).toHaveCount(1)
+  // Placed where it was dropped, not at the origin.
+  expect(await readField(page, 'X')).toBeGreaterThan(0)
 })

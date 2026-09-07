@@ -27,20 +27,23 @@ import {
   ZoomIcon,
 } from './icons'
 
+/** Rail glyph size. Larger than the 16px inspector icons, matching the reference. */
+const TOOL_ICON_SIZE = 20
+
 const TOOL_ICONS: Record<ToolId, ReactNode> = {
-  select: <CursorIcon />,
-  rect: <RectIcon />,
-  ellipse: <EllipseIcon />,
-  triangle: <TriangleIcon />,
-  polygon: <PolygonIcon />,
-  star: <StarIcon />,
-  line: <LineIcon />,
-  pen: <PenIcon />,
-  pencil: <PencilIcon />,
-  text: <TextIcon />,
-  artboard: <ArtboardIcon />,
-  zoom: <ZoomIcon />,
-  hand: <HandIcon />,
+  select: <CursorIcon size={TOOL_ICON_SIZE} />,
+  rect: <RectIcon size={TOOL_ICON_SIZE} />,
+  ellipse: <EllipseIcon size={TOOL_ICON_SIZE} />,
+  triangle: <TriangleIcon size={TOOL_ICON_SIZE} />,
+  polygon: <PolygonIcon size={TOOL_ICON_SIZE} />,
+  star: <StarIcon size={TOOL_ICON_SIZE} />,
+  line: <LineIcon size={TOOL_ICON_SIZE} />,
+  pen: <PenIcon size={TOOL_ICON_SIZE} />,
+  pencil: <PencilIcon size={TOOL_ICON_SIZE} />,
+  text: <TextIcon size={TOOL_ICON_SIZE} />,
+  artboard: <ArtboardIcon size={TOOL_ICON_SIZE} />,
+  zoom: <ZoomIcon size={TOOL_ICON_SIZE} />,
+  hand: <HandIcon size={TOOL_ICON_SIZE} />,
 }
 
 export const Toolbar = memo(function Toolbar() {
