@@ -1,0 +1,563 @@
+/**
+ * Move / resize / rotate gestures.
+ *
+ * The three-phase contract that keeps drags at 60fps:
+ *
+ *   pointerdown — snapshot every affected node's world matrix and geometry into
+ *                 a plain object. Exactly one store write (interaction mode).
+ *   pointermove — compute new matrices in pure TS and push them straight to the
+ *                 mounted SVG elements via LiveTransform. ZERO store writes, so
+ *                 zero React renders, regardless of document size.
+ *   pointerup   — one transaction, one undo entry.
+ *
+ * RESIZE-WITH-ROTATION, the subtle part. Scaling a rotated object in world space
+ * composes as R·S, and since R·S != S·R the shape *shears* — a bug that looks
+ * like the object melting as you drag. The fix is to do the entire resize in the
+ * node's own unrotated local space: transform the pointer by invert(M0), derive
+ * the new local box from the fixed opposite corner, and re-anchor. The rotation
+ * component is never touched, so it cannot leak into the scale.
+ */
+
+import {
+  applyToPoint,
+  invert,
+  multiply,
+  rotationAbout,
+  scaling,
+  translation,
+  type Mat2D,
+  type Vec2,
+} from '../geometry/Matrix'
+import { transformBounds, unionAll, type Bounds } from '../geometry/Bounds'
+import {
+  ellipsePath,
+  linePath,
+  polygonPath,
+  rectPath,
+  starPath,
+  trianglePath,
+} from '../geometry/ShapeGeometry'
+import { transformPath } from '../geometry/PathUtils'
+import {
+  geometryBounds,
+  localMatrix,
+  worldMatrix,
+  createMatrixCache,
+  isEffectivelyLocked,
+} from '../document/SceneGraph'
+import { transformFromMatrix } from '../document/DocumentModel'
+import { transaction } from '../state/DocumentStore'
+import { editorStore } from '../state/EditorStore'
+import { liveTransform } from '../canvas/LiveTransform'
+import { geomKey } from '../canvas/NodeRenderer'
+import type { DesignDocument, DesignNode, NodeId, Transform } from '../document/types'
+import type { SnapLine } from '../geometry/Snapping'
+
+export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+export type DragMode = 'move' | 'resize' | 'rotate'
+
+export const RESIZE_HANDLES: ResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
+
+interface NodeSnapshot {
+  id: NodeId
+  world: Mat2D
+  parentWorld: Mat2D
+  transform: Transform
+  type: DesignNode['type']
+  /** Original path data, for path nodes whose geometry is baked on resize. */
+  d?: string
+  line?: { x1: number; y1: number; x2: number; y2: number }
+  /** Shape parameters, so the live preview redraws the real shape, not a default. */
+  sides?: number
+  points?: number
+  innerRatio?: number
+  cornerRadius?: readonly [number, number, number, number]
+}
+
+export interface DragSessionState {
+  mode: DragMode
+  handle: ResizeHandle | null
+  startDoc: Vec2
+  /** Selection bounds in world space at gesture start. */
+  frame: Bounds
+  nodes: NodeSnapshot[]
+  /** True when a single node is being resized along its own rotated axes. */
+  singleAxisResize: boolean
+  /**
+   * Intrinsic sizes produced by the in-flight resize. The single-node path keeps
+   * size in width/height rather than in the matrix (so strokes and corner radii
+   * do not scale), which means the matrix alone cannot tell commit what the new
+   * size is — this carries it across.
+   */
+  liveSizes: Map<NodeId, { width: number; height: number }>
+  moved: boolean
+}
+
+let session: DragSessionState | null = null
+
+/**
+ * Latest world matrices from the in-flight gesture.
+ *
+ * The selection overlay reads these so its frame and handles track the shapes
+ * during a drag. It cannot read the document, because a drag deliberately makes
+ * zero store writes until commit.
+ */
+let liveMatrices = new Map<NodeId, Mat2D>()
+
+export function getLiveMatrix(id: NodeId): Mat2D | undefined {
+  return liveMatrices.get(id)
+}
+
+export function getLiveSize(id: NodeId): { width: number; height: number } | undefined {
+  return session?.liveSizes.get(id)
+}
+
+export function isDragging(): boolean {
+  return session !== null
+}
+
+export function getDragMode(): DragMode | null {
+  return session?.mode ?? null
+}
+
+// ---------------------------------------------------------------------------
+// Begin
+// ---------------------------------------------------------------------------
+
+export function beginDrag(
+  doc: DesignDocument,
+  ids: readonly NodeId[],
+  mode: DragMode,
+  startDoc: Vec2,
+  handle: ResizeHandle | null = null,
+): boolean {
+  const usable = ids.filter((id) => doc.nodes[id] && !isEffectivelyLocked(doc, id))
+  if (usable.length === 0) return false
+
+  const cache = createMatrixCache()
+  const nodes: NodeSnapshot[] = usable.map((id) => {
+    const node = doc.nodes[id]!
+    return {
+      id,
+      world: cache.world(doc, id),
+      parentWorld: node.parentId ? cache.world(doc, node.parentId) : ([1, 0, 0, 1, 0, 0] as Mat2D),
+      transform: { ...node.transform },
+      type: node.type,
+      d: node.type === 'path' ? node.d : undefined,
+      line:
+        node.type === 'line'
+          ? { x1: node.x1, y1: node.y1, x2: node.x2, y2: node.y2 }
+          : undefined,
+      sides: node.type === 'polygon' ? node.sides : undefined,
+      points: node.type === 'star' ? node.points : undefined,
+      innerRatio: node.type === 'star' ? node.innerRatio : undefined,
+      cornerRadius: node.type === 'rect' ? node.cornerRadius : undefined,
+    }
+  })
+
+  session = {
+    mode,
+    handle,
+    startDoc,
+    frame: unionAll(usable.map((id) => geometryBounds(doc, id, cache))),
+    nodes,
+    singleAxisResize: usable.length === 1,
+    liveSizes: new Map(),
+    moved: false,
+  }
+
+  liveMatrices = new Map()
+  liveTransform.begin()
+  editorStore.setState({ isDragging: true })
+  return true
+}
+
+export function getDragFrame(): Bounds | null {
+  return session?.frame ?? null
+}
+
+// ---------------------------------------------------------------------------
+// Update
+// ---------------------------------------------------------------------------
+
+export interface DragUpdateOptions {
+  /** Constrain: proportional resize, axis-locked move, angle-snapped rotate. */
+  constrain: boolean
+  /** Resize/scale about the center instead of the opposite corner. */
+  fromCenter: boolean
+  /** Applied to the raw pointer delta before anything else. */
+  snapDelta?: Vec2
+  snapLines?: SnapLine[]
+}
+
+/** Returns the live world matrices so the caller can drive snapping and readouts. */
+export function updateDrag(
+  currentDoc: Vec2,
+  options: DragUpdateOptions,
+): Map<NodeId, Mat2D> | null {
+  if (!session) return null
+  const result = new Map<NodeId, Mat2D>()
+
+  const dx = currentDoc.x - session.startDoc.x + (options.snapDelta?.x ?? 0)
+  const dy = currentDoc.y - session.startDoc.y + (options.snapDelta?.y ?? 0)
+  if (dx !== 0 || dy !== 0) session.moved = true
+
+  switch (session.mode) {
+    case 'move':
+      applyMove(dx, dy, options, result)
+      break
+    case 'rotate':
+      applyRotate(currentDoc, options, result)
+      break
+    case 'resize':
+      applyResize(currentDoc, options, result)
+      break
+  }
+
+  liveMatrices = result
+  editorStore.setState({ snapGuides: options.snapLines ?? [] })
+  return result
+}
+
+function applyMove(
+  dx: number,
+  dy: number,
+  options: DragUpdateOptions,
+  out: Map<NodeId, Mat2D>,
+): void {
+  let mx = dx
+  let my = dy
+  // Shift locks to the dominant axis.
+  if (options.constrain) {
+    if (Math.abs(dx) > Math.abs(dy)) my = 0
+    else mx = 0
+  }
+  const m: Mat2D = [1, 0, 0, 1, mx, my]
+  for (const snap of session!.nodes) {
+    const world = multiply(m, snap.world)
+    out.set(snap.id, world)
+    pushLiveTransform(snap, world)
+  }
+}
+
+function applyRotate(
+  currentDoc: Vec2,
+  options: DragUpdateOptions,
+  out: Map<NodeId, Mat2D>,
+): void {
+  const s = session!
+  const cx = s.frame.x + s.frame.width / 2
+  const cy = s.frame.y + s.frame.height / 2
+
+  const a0 = Math.atan2(s.startDoc.y - cy, s.startDoc.x - cx)
+  const a1 = Math.atan2(currentDoc.y - cy, currentDoc.x - cx)
+  let deg = ((a1 - a0) * 180) / Math.PI
+  if (options.constrain) deg = Math.round(deg / 15) * 15
+
+  const m = rotationAbout(deg, cx, cy)
+  for (const snap of s.nodes) {
+    const world = multiply(m, snap.world)
+    out.set(snap.id, world)
+    pushLiveTransform(snap, world)
+  }
+}
+
+/**
+ * The resize path.
+ *
+ * Single selection: work in the node's own local space so the result has zero
+ * shear regardless of rotation.
+ * Multi selection: build one axis-aligned frame and apply the same world-space
+ * scale to every member about the shared anchor.
+ */
+function applyResize(
+  currentDoc: Vec2,
+  options: DragUpdateOptions,
+  out: Map<NodeId, Mat2D>,
+): void {
+  const s = session!
+  const handle = s.handle
+  if (!handle) return
+
+  if (s.singleAxisResize) {
+    const snap = s.nodes[0]!
+    const local = applyToPoint(invert(snap.world), currentDoc)
+    const box = resizeLocalBox(
+      snap.transform.width,
+      snap.transform.height,
+      handle,
+      local,
+      options,
+    )
+    // Re-anchor: the new local origin sits at (x0,y0) of the OLD local space,
+    // and a negative signed extent mirrors the shape rather than inverting it.
+    const reanchor = multiply(translation(box.x0, box.y0), scaling(box.sx, box.sy))
+    const world = multiply(snap.world, reanchor)
+    out.set(snap.id, world)
+    s.liveSizes.set(snap.id, { width: box.width, height: box.height })
+    pushLiveTransform(snap, world, box.width, box.height)
+    return
+  }
+
+  // Multi-selection: scale the whole frame.
+  const frame = s.frame
+  const anchor = frameAnchor(frame, handle, options.fromCenter)
+  let sx = 1
+  let sy = 1
+  if (handle.includes('e')) sx = (currentDoc.x - anchor.x) / Math.max(1e-6, frame.x + frame.width - anchor.x)
+  if (handle.includes('w')) sx = (currentDoc.x - anchor.x) / Math.min(-1e-6, frame.x - anchor.x)
+  if (handle.includes('s')) sy = (currentDoc.y - anchor.y) / Math.max(1e-6, frame.y + frame.height - anchor.y)
+  if (handle.includes('n')) sy = (currentDoc.y - anchor.y) / Math.min(-1e-6, frame.y - anchor.y)
+  if (!handle.includes('e') && !handle.includes('w')) sx = 1
+  if (!handle.includes('n') && !handle.includes('s')) sy = 1
+
+  if (options.constrain) {
+    const k = Math.max(Math.abs(sx), Math.abs(sy))
+    sx = sx === 1 ? 1 : Math.sign(sx) * k
+    sy = sy === 1 ? 1 : Math.sign(sy) * k
+  }
+
+  const m = multiply(
+    multiply(translation(anchor.x, anchor.y), scaling(sx, sy)),
+    translation(-anchor.x, -anchor.y),
+  )
+  for (const snap of s.nodes) {
+    const world = multiply(m, snap.world)
+    out.set(snap.id, world)
+    pushLiveTransform(snap, world)
+  }
+}
+
+interface LocalResizeBox {
+  x0: number
+  y0: number
+  width: number
+  height: number
+  sx: number
+  sy: number
+}
+
+/**
+ * New local box from a handle drag, in the node's own unrotated space.
+ * `sx`/`sy` carry the mirror sign so dragging a handle past the opposite edge
+ * flips the shape instead of collapsing it.
+ */
+function resizeLocalBox(
+  w0: number,
+  h0: number,
+  handle: ResizeHandle,
+  local: Vec2,
+  options: DragUpdateOptions,
+): LocalResizeBox {
+  let x0 = 0
+  let y0 = 0
+  let x1 = w0
+  let y1 = h0
+
+  if (handle.includes('w')) x0 = local.x
+  if (handle.includes('e')) x1 = local.x
+  if (handle.includes('n')) y0 = local.y
+  if (handle.includes('s')) y1 = local.y
+
+  if (options.fromCenter) {
+    // Grow symmetrically about the center: mirror whichever edge moved.
+    const cx = w0 / 2
+    const cy = h0 / 2
+    if (handle.includes('w')) x1 = 2 * cx - x0
+    if (handle.includes('e')) x0 = 2 * cx - x1
+    if (handle.includes('n')) y1 = 2 * cy - y0
+    if (handle.includes('s')) y0 = 2 * cy - y1
+  }
+
+  let sw = x1 - x0
+  let sh = y1 - y0
+
+  if (options.constrain && w0 > 0 && h0 > 0) {
+    const aspect = w0 / h0
+    // Corner handles preserve aspect; edge handles derive the other dimension.
+    if (handle.length === 2) {
+      const byWidth = Math.abs(sw) / w0 >= Math.abs(sh) / h0
+      if (byWidth) sh = Math.sign(sh || 1) * (Math.abs(sw) / aspect)
+      else sw = Math.sign(sw || 1) * (Math.abs(sh) * aspect)
+      // Only the origin corner feeds the result, so the opposite edge needs no
+      // update — it is already where the fixed anchor put it.
+      if (handle.includes('n')) y0 = y1 - sh
+      if (handle.includes('w')) x0 = x1 - sw
+    }
+  }
+
+  const sx = sw < 0 ? -1 : 1
+  const sy = sh < 0 ? -1 : 1
+  return {
+    x0,
+    y0,
+    width: Math.max(0.5, Math.abs(sw)),
+    height: Math.max(0.5, Math.abs(sh)),
+    sx,
+    sy,
+  }
+}
+
+function frameAnchor(frame: Bounds, handle: ResizeHandle, fromCenter: boolean): Vec2 {
+  if (fromCenter) return { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 }
+  return {
+    x: handle.includes('w') ? frame.x + frame.width : handle.includes('e') ? frame.x : frame.x + frame.width / 2,
+    y: handle.includes('n') ? frame.y + frame.height : handle.includes('s') ? frame.y : frame.y + frame.height / 2,
+  }
+}
+
+/**
+ * Push one node's live state to the DOM.
+ *
+ * Writes the local matrix (world re-expressed in the parent's space) onto the
+ * node's <g>, and regenerates the geometry element's `d` when the resize changed
+ * the node's own width/height — otherwise a resized rect would visibly scale its
+ * stroke and corner radii, then snap on commit.
+ */
+function pushLiveTransform(
+  snap: NodeSnapshot,
+  world: Mat2D,
+  width?: number,
+  height?: number,
+): void {
+  const local = multiply(invert(snap.parentWorld), world)
+  const override: { transform: Mat2D; attrs?: Record<string, string> } = { transform: local }
+
+  if (width !== undefined && height !== undefined && usesIntrinsicSize(snap.type)) {
+    const d = livePathData(snap, width, height)
+    if (d !== null) liveTransform.set(geomKey(snap.id), { attrs: { d } })
+  }
+  liveTransform.set(snap.id, override)
+}
+
+/** Types whose drawn geometry is derived from transform.width/height. */
+function usesIntrinsicSize(type: DesignNode['type']): boolean {
+  return (
+    type === 'rect' ||
+    type === 'ellipse' ||
+    type === 'triangle' ||
+    type === 'polygon' ||
+    type === 'star' ||
+    type === 'path' ||
+    type === 'line'
+  )
+}
+
+function livePathData(snap: NodeSnapshot, width: number, height: number): string | null {
+  const t = snap.transform
+  switch (snap.type) {
+    case 'rect':
+      return rectPath(width, height, snap.cornerRadius ?? 0)
+    case 'ellipse':
+      return ellipsePath(width, height)
+    case 'triangle':
+      return trianglePath(width, height)
+    case 'polygon':
+      return polygonPath(width, height, snap.sides ?? 6)
+    case 'star':
+      return starPath(width, height, snap.points ?? 5, snap.innerRatio ?? 0.5)
+    case 'path':
+      if (!snap.d) return null
+      return transformPath(
+        snap.d,
+        scaling(t.width > 0 ? width / t.width : 1, t.height > 0 ? height / t.height : 1),
+      )
+    case 'line': {
+      if (!snap.line) return null
+      const kx = t.width > 0 ? width / t.width : 1
+      const ky = t.height > 0 ? height / t.height : 1
+      return linePath(snap.line.x1 * kx, snap.line.y1 * ky, snap.line.x2 * kx, snap.line.y2 * ky)
+    }
+    default:
+      return null
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Commit / cancel
+// ---------------------------------------------------------------------------
+
+/**
+ * Close the gesture with a single transaction.
+ *
+ * Resize writes width/height for nodes with intrinsic geometry (so strokes and
+ * corner radii stay the size the user set) and bakes the scale into path data
+ * for path/line nodes, which have no parametric size to preserve.
+ */
+export function commitDrag(finalMatrices: Map<NodeId, Mat2D> | null): boolean {
+  if (!session) return false
+  const s = session
+  session = null
+  liveMatrices = new Map()
+  liveTransform.end()
+  editorStore.setState({ isDragging: false, snapGuides: [] })
+
+  if (!s.moved || !finalMatrices || finalMatrices.size === 0) return false
+
+  const label = s.mode === 'move' ? 'Move' : s.mode === 'rotate' ? 'Rotate' : 'Resize'
+
+  return transaction(label, (draft) => {
+    for (const snap of s.nodes) {
+      const node = draft.nodes[snap.id]
+      const world = finalMatrices.get(snap.id)
+      if (!node || !world) continue
+
+      const parentWorld = node.parentId ? worldMatrix(draft, node.parentId) : ([1, 0, 0, 1, 0, 0] as Mat2D)
+      const local = multiply(invert(parentWorld), world)
+
+      if (s.mode === 'resize' && s.singleAxisResize) {
+        // `local` already encodes the re-anchor and the mirror sign; the new size
+        // lives in width/height, not in the matrix, so it comes from the gesture.
+        const size = s.liveSizes.get(snap.id) ?? {
+          width: snap.transform.width,
+          height: snap.transform.height,
+        }
+        const kx = snap.transform.width > 0 ? size.width / snap.transform.width : 1
+        const ky = snap.transform.height > 0 ? size.height / snap.transform.height : 1
+
+        // Paths and lines have no parametric size to preserve, so the scale is
+        // baked into their geometry (losslessly — svgpath keeps arcs as arcs).
+        if (node.type === 'path' && snap.d) {
+          node.d = transformPath(snap.d, scaling(kx, ky))
+        }
+        if (node.type === 'line' && snap.line) {
+          node.x1 = snap.line.x1 * kx
+          node.y1 = snap.line.y1 * ky
+          node.x2 = snap.line.x2 * kx
+          node.y2 = snap.line.y2 * ky
+        }
+        node.transform = transformFromMatrix(
+          local,
+          size.width,
+          size.height,
+          snap.transform.originX,
+          snap.transform.originY,
+        )
+      } else {
+        node.transform = transformFromMatrix(
+          local,
+          snap.transform.width,
+          snap.transform.height,
+          snap.transform.originX,
+          snap.transform.originY,
+        )
+      }
+    }
+  })
+}
+
+export function cancelDrag(): void {
+  if (!session) return
+  session = null
+  liveMatrices = new Map()
+  liveTransform.cancel()
+  editorStore.setState({ isDragging: false, snapGuides: [] })
+}
+
+/** Selection bounds in world space, honoring an in-flight gesture. */
+export function selectionBounds(doc: DesignDocument, ids: readonly NodeId[]): Bounds {
+  const cache = createMatrixCache()
+  return unionAll(ids.map((id) => geometryBounds(doc, id, cache)))
+}
+
+export { transformBounds, localMatrix }

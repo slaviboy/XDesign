@@ -1,0 +1,267 @@
+# XDesign
+
+An offline-first vector design editor, in the shape of Adobe XD's Design workspace.
+
+No account. No login. No server. No database. No telemetry. Once the app has loaded,
+it needs no network connection at all, and every document lives on your own machine.
+
+```bash
+npm install
+npm run dev      # http://localhost:5173
+```
+
+```bash
+npm run build    # production build in dist/
+npm run preview  # serve the production build
+```
+
+---
+
+## What it does
+
+**Drawing** — rectangle, ellipse, triangle, polygon, star, line, pen (real cubic Béziers),
+pencil (smoothed freehand), text, artboard. Every tool in the rail is implemented; none of
+them are decorative.
+
+**Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
+snapping and smart guides, per-point Bézier editing, boolean operations, alignment and
+distribution, z-ordering, grouping, locking, hiding, guides and a grid.
+
+**Import** — SVG and raster images (PNG, JPEG, GIF, WebP, BMP, AVIF) by drag-and-drop,
+paste, or File ▸ Import. Imported SVG becomes real editable nodes: shapes stay shapes,
+gradients stay gradients, groups stay groups. Nothing is ever rasterized on import.
+
+**Export** — SVG, PNG and JPEG, of a selection, an artboard, the whole document, or every
+layer marked for export, at 0.1×–10× scale.
+
+**Files** — a self-contained `.xdesign` document you can copy to another machine and open
+with every vector and every pixel intact. Plus autosave and crash recovery.
+
+---
+
+## Design decisions worth knowing about
+
+### The document is a scene graph, not a canvas
+
+The document is a normalized, DOM-free tree of typed nodes. SVG renders it; Canvas is used
+only as a rasterization target when exporting PNG or JPEG. Nothing about the document
+depends on the DOM, which is why the geometry engine is directly testable in Node.
+
+Geometry is authored in **local space** — every shape spans `(0,0)…(width,height)` and a
+transform maps it into its parent. Rotating a star never rewrites the star: its `points`
+and `innerRatio` stay editable forever. That is what makes *group → rotate → ungroup*
+round-trip exactly.
+
+### Dragging never writes to the store
+
+A store write runs every subscribed component's selector, which is O(nodes) per frame. So a
+drag does not write to the store at all: matrices are computed in pure TypeScript and
+pushed straight onto the mounted SVG elements, coalesced into one `requestAnimationFrame`
+flush. One transaction is committed on pointer-up, which is also why a 200-event drag is a
+single undo step.
+
+### Resize happens in the object's own unrotated space
+
+Scaling a rotated object in world space composes as `R·S`, and since `R·S ≠ S·R` the shape
+*shears* — it visibly melts as you drag. Resize therefore transforms the pointer by
+`invert(M₀)`, derives the new box from the fixed opposite corner, and re-anchors. The
+rotation component is never touched. Property tests assert that skew stays at zero across
+random angles and handle drags.
+
+### Three different bounding boxes
+
+Conflating these produces a whole family of "the export is clipped" bugs:
+
+| Box | What it is | Used for |
+| --- | --- | --- |
+| `geometryBounds` | exact fill outline | align, distribute, selection frame |
+| `renderBounds` | ⊕ stroke, incl. miter extension | export cropping |
+| `localGeometryBounds` | the same, in local space | hit testing |
+
+A miter join on a sharp corner reaches `miterlimit × width / 2`, not `width / 2`. Bounds are
+inflated in local space and *then* transformed, because `AABB(M·box) ≠ M·AABB(box)`.
+
+### The geometry layer is fenced off from the DOM
+
+`src/geometry/` and `src/document/` may not touch `document`, `window`, `DOMMatrix`,
+`getBBox`, or `getScreenCTM` — enforced by ESLint, not convention.
+
+This is not stylistic. jsdom has no `DOMMatrix` and no `getBBox` at all, and happy-dom
+implements `getBBox()` as `return new DOMRect()` — always `0,0,0,0` — and `getCTM()` as a
+fresh identity matrix. Geometry built on those would be "verified" against fabricated
+values. Solving path bounds analytically instead is both more accurate than the browser's
+own answer and actually testable.
+
+### Imported SVG that cannot be modelled is preserved, not discarded
+
+`<use>`, `<symbol>`, `<pattern>`, `<mask>`, `<filter>` and `<marker>` have no first-class
+editor UI. Rather than dropping them or flattening them to a bitmap, their sanitized markup
+is kept verbatim in an `svg` node along with the `<defs>` it needs. It still renders, still
+scales and rotates as vector, and still exports as vector — fidelity is preserved even
+where editability cannot be.
+
+### SVG sanitization: two stages, and three corrected defaults
+
+Imported SVG is untrusted input. DOMPurify does the XSS work — a hand-rolled allowlist would
+not reproduce a decade of mXSS and namespace-confusion hardening — and then the importer
+walks the sanitized DOM with a **fail-closed** mapper, because DOMPurify is not a semantic
+validator: it happily keeps `url(#missing)` and nonsense attribute values.
+
+Three of its defaults are wrong for a vector editor, and each would fail silently:
+
+1. **`<use>` is stripped by default.** It is on DOMPurify's `svgDisallowed` list, so every
+   `<symbol>`-based file would arrive gutted. Added back explicitly. `<foreignObject>`
+   stays stripped on purpose — it is the top SVG→PNG rasterization failure mode.
+
+2. **`ALLOWED_URI_REGEXP` must not be tightened.** DOMPurify uses it as a general
+   attribute-value gate, not just for `href`/`src`; its default pattern ends in a catch-all
+   branch that lets ordinary values through. Replacing it with a strict URL pattern strips
+   `d`, `width`, `height`, `viewBox` and `fill` from *every element* — destroying the
+   artwork while appearing to work. The offline-only policy is enforced in a hook instead,
+   which also closes a real hole: `url(http://…)` matches DOMPurify's own URI check via its
+   bare-word branch, so `fill`/`filter`/`mask` can otherwise smuggle a remote reference
+   straight past it.
+
+3. **IDs are namespaced *before* sanitizing.** `SANITIZE_DOM` deletes any `id` whose value
+   is also a property on `document` — `title`, `body`, `location` — orphaning every
+   `url(#…)` gradient, clip and mask that referenced it. Renaming first sidesteps the whole
+   class of problem, and stops two imported files colliding.
+
+Because remote references are structurally impossible to import, canvas tainting on raster
+export is impossible rather than merely unlikely.
+
+### Fonts are bundled, and export says what will happen
+
+Google's open-source fonts ship with the app (self-hosted via `@fontsource`, latin subset,
+~20 KB per face). Nothing is fetched from a font CDN, ever. The `@font-face` rules are
+declarations only, so a face is downloaded when something actually uses it; the service
+worker precaches them so every family stays available offline.
+
+An SVG loaded through `<img>` for rasterization runs in **secure static mode**: it cannot
+fetch anything, and it does not inherit the page's `document.fonts`. So a PNG export of
+styled text would silently render in a substitute face.
+
+A base64 `data:` URL is not a fetch, though — so an `@font-face` embedded directly in the
+exported SVG *does* resolve inside that sandbox. This was verified empirically in real
+Chromium before committing to it: the same string rendered through `<img>` produces
+markedly more glyph coverage with the embedded face than with the fallback.
+
+So export **embeds the font** by default, and raster export always does. Text stays real
+`<text>` — selectable, searchable, still editable — and renders identically anywhere. The
+dialog also offers **reference by name** for the smallest possible file.
+
+This replaced an earlier plan to convert text to outlines with `opentype.js` + `wawoff2`.
+Embedding turned out to be strictly better, and `wawoff2` cannot run in a browser at all —
+it is CommonJS and throws `exports is not defined` the moment it is imported. Dropping both
+libraries removed ~1.4 MB from the build.
+
+System fonts can be used, but their bytes are not readable by the page, so they can only be
+referenced by name. The dialog says so when a system font is in the export.
+
+### `.xdesign` is a zip
+
+A ZIP holding `document.json` plus the raw bytes of every image under `assets/`. Base64
+inside JSON inflates binary by 33% and then compresses badly. The reader sniffs the magic
+bytes — `PK` means unzip, anything else is parsed as flat JSON — so hand-written documents
+still open. Loading is defensive: a dangling parent or a broken reference is repaired rather
+than failing the whole open.
+
+### Autosave uses `pagehide`, not `beforeunload`
+
+`beforeunload` is unreliable on mobile Safari and simply does not fire when a tab is
+discarded — which is precisely the case recovery exists for. The clean-shutdown flag is set
+on `pagehide` and `visibilitychange:hidden`; if it is missing at next launch, the app offers
+to restore the autosaved document.
+
+---
+
+## Architecture
+
+```
+Document Model (pure TS, zero DOM)
+      ↓
+Document Store (normalized, zustand + immer patches)
+      ↓ ↑
+History (transactions → inverse patches)
+      ↓
+SVG Renderer (React, memoized per node)  ←  Interaction Engine (tools, pointer capture)
+      ↓                                            ↑
+   SVG DOM                                Selection · Snapping · Hit-testing
+```
+
+```
+src/
+  document/    typed scene graph, transforms, colour — DOM-free
+  geometry/    matrices, bounds, path math, boolean ops, snapping — DOM-free
+  state/       normalized stores, clipboard, React bindings
+  history/     patch-based undo, commands
+  canvas/      SVG renderer, overlays, viewport, live-transform fast path
+  tools/       13 tools + drag session + point editing
+  svg/         sanitizer, ID namespacer, importer, exporter
+  text/        font registry, layout, font embedding
+  images/      file import
+  export/      export pipeline, rasterizer
+  persistence/ .xdesign format, IndexedDB, file system, autosave
+  ui/          top bar, toolbar, inspector, layers, dialogs
+  shortcuts/   keyboard map
+```
+
+Selection handles live **outside** the viewport transform and outside the document group, so
+they stay a constant size at any zoom and can never end up in an export.
+
+---
+
+## Testing
+
+```bash
+npm test           # 103 unit tests (Vitest)
+npm run test:e2e   # 52 end-to-end tests (Playwright, real Chromium)
+npm run lint
+npm run typecheck
+```
+
+Unit tests run in **plain Node** because the geometry is DOM-free by design.
+
+The end-to-end suite drives the real UI — toolbar clicks, canvas drags, inspector fields —
+and asserts against the rendered SVG or the bytes of an actual export. There is no
+test-only backdoor in the application code.
+
+`tests/e2e/acceptance.spec.ts` covers the ten acceptance scenarios plus a run with the
+network blocked, and `tests/e2e/offline.spec.ts` goes further: it installs the service
+worker, cuts the network at the browser level, hard-reloads, and then draws, edits and
+types in the recovered app. `tests/e2e/sanitizer.spec.ts` holds the SVG security assertions, and they
+live there rather than in the unit suite for a specific reason: **DOMPurify reports
+`isSupported === false` under happy-dom and returns its input unmodified**, so a "the script
+was stripped" assertion would pass without any sanitization having happened. Testing a
+security boundary against a fake DOM proves nothing.
+
+---
+
+## Browser support
+
+Chromium, Firefox and Safari all run the editor. One difference is worth stating plainly:
+
+**Save** uses the File System Access API where it exists (Chromium), which overwrites the
+same file on disk and remembers it across sessions. Firefox and Safari have both declined
+those pickers, so there Save downloads a copy and Open uses a file input. Autosave to
+IndexedDB runs in parallel either way, so a document is never lost.
+
+---
+
+## Deploying
+
+The build is fully static and uses relative paths, so it works from any static host,
+including a GitHub Pages project subpath, with no configuration.
+
+```bash
+npm run build      # → dist/
+```
+
+`.github/workflows/deploy.yml` publishes `dist/` to GitHub Pages on push to `main`. Enable
+Pages for the repository with **Source: GitHub Actions**.
+
+Initial load is ~520 KB; paper.js is a lazy chunk fetched only when a boolean operation
+actually runs. The service worker precaches the rest in the background.
+
+Opening `dist/index.html` directly with `file://` will not work — browsers block ES modules
+on that scheme. Use `npm run preview` or any static host.

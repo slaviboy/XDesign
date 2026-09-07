@@ -1,0 +1,69 @@
+/**
+ * Design tokens.
+ *
+ * Tuned to read as a desktop creative application rather than a web dashboard:
+ * hairline borders instead of shadows, 11-12px type, 22-26px control heights,
+ * and a narrow neutral palette so the artwork on the canvas is the only
+ * saturated thing on screen.
+ */
+
+:root {
+  /* Neutrals — the app chrome */
+  --bg-app: #f0f0f0;
+  --bg-panel: #ffffff;
+  --bg-panel-alt: #fafafa;
+  --bg-workspace: #e4e4e4;
+  --bg-input: #ffffff;
+  --bg-input-hover: #f5f5f5;
+  --bg-hover: #f0f0f0;
+  --bg-active: #e8e8e8;
+  --bg-selected: #e5f0fd;
+  --bg-toolbar: #fbfbfb;
+
+  --border: #d6d6d6;
+  --border-strong: #bfbfbf;
+  --border-subtle: #e8e8e8;
+
+  --text: #2c2c2c;
+  --text-muted: #757575;
+  --text-faint: #9a9a9a;
+  --text-inverse: #ffffff;
+
+  /* Selection / interaction — a single blue, used sparingly */
+  --accent: #1473e6;
+  --accent-hover: #0d66d0;
+  --accent-soft: #e5f0fd;
+  --accent-contrast: #ffffff;
+
+  --magenta: #d83790;
+  --warn: #d97706;
+  --error: #d7373f;
+  --success: #268e6c;
+
+  /* Canvas chrome */
+  --handle-fill: #ffffff;
+  --handle-stroke: #1473e6;
+  --guide: #d83790;
+  --snap-guide: #ff3b8d;
+  --grid-line: rgba(0, 0, 0, 0.07);
+  --artboard-label: #6e6e6e;
+
+  /* Metrics */
+  --topbar-height: 44px;
+  --toolbar-width: 48px;
+  --inspector-width: 260px;
+  --row-height: 24px;
+  --control-height: 24px;
+  --radius: 3px;
+  --radius-lg: 4px;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --fs-xs: 10px;
+  --fs-sm: 11px;
+  --fs-md: 12px;
+  --fs-lg: 13px;
+
+  --shadow-panel: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.16);
+}

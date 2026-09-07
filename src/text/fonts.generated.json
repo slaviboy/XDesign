@@ -1,0 +1,328 @@
+[
+  {
+    "pkg": "inter",
+    "family": "Inter",
+    "category": "sans",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "roboto",
+    "family": "Roboto",
+    "category": "sans",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "open-sans",
+    "family": "Open Sans",
+    "category": "sans",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "lato",
+    "family": "Lato",
+    "category": "sans",
+    "weights": [
+      300,
+      400,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      700
+    ]
+  },
+  {
+    "pkg": "montserrat",
+    "family": "Montserrat",
+    "category": "sans",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "poppins",
+    "family": "Poppins",
+    "category": "sans",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "raleway",
+    "family": "Raleway",
+    "category": "sans",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "nunito",
+    "family": "Nunito",
+    "category": "sans",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "work-sans",
+    "family": "Work Sans",
+    "category": "sans",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "dm-sans",
+    "family": "DM Sans",
+    "category": "sans",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "oswald",
+    "family": "Oswald",
+    "category": "display",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": []
+  },
+  {
+    "pkg": "playfair-display",
+    "family": "Playfair Display",
+    "category": "serif",
+    "weights": [
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "merriweather",
+    "family": "Merriweather",
+    "category": "serif",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "lora",
+    "family": "Lora",
+    "category": "serif",
+    "weights": [
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "libre-baskerville",
+    "family": "Libre Baskerville",
+    "category": "serif",
+    "weights": [
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "roboto-mono",
+    "family": "Roboto Mono",
+    "category": "mono",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "jetbrains-mono",
+    "family": "JetBrains Mono",
+    "category": "mono",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  },
+  {
+    "pkg": "source-code-pro",
+    "family": "Source Code Pro",
+    "category": "mono",
+    "weights": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ],
+    "italics": [
+      300,
+      400,
+      500,
+      600,
+      700
+    ]
+  }
+]

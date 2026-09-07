@@ -1,0 +1,498 @@
+/**
+ * SVG export.
+ *
+ * Serialized from the DOCUMENT MODEL, not by scraping the live SVG DOM. That
+ * matters for three reasons: the output contains only defs that are actually
+ * referenced, none of the editor's overlay chrome can leak in, and export works
+ * identically whether or not the node is currently on screen.
+ *
+ * Vector stays vector. Shapes are emitted as real <rect>/<ellipse>/<path>,
+ * gradients as real gradient elements, groups as real groups. Nothing is
+ * rasterized — the only bitmaps in the output are the ones that were bitmaps to
+ * begin with.
+ */
+
+import { toSvgMatrix, multiply, type Mat2D } from '../geometry/Matrix'
+import type { Bounds } from '../geometry/Bounds'
+import { polygonPath, rectPath, starPath, trianglePath } from '../geometry/ShapeGeometry'
+import { localMatrix, worldMatrix } from '../document/SceneGraph'
+import { toHex } from '../document/color'
+import { gradientId, isGradient, sortedStops } from '../canvas/paint'
+import { layoutText, lineOffsetX } from '../text/TextLayout'
+import { fontStack } from '../text/FontRegistry'
+import { canEmbed, embedFontCss } from '../text/FontEmbedder'
+import { hasStyle } from '../document/types'
+import type {
+  DesignDocument,
+  DesignNode,
+  NodeId,
+  Paint,
+  RGBA,
+  Style,
+} from '../document/types'
+
+export type ImageHandling = 'embed' | 'link'
+export type TextHandling = 'embed-font' | 'reference'
+
+export interface SvgExportOptions {
+  /** World-space crop rectangle. Output is translated so this becomes (0,0). */
+  bounds: Bounds
+  imageHandling?: ImageHandling
+  /**
+   * How text is written out.
+   * 'embed-font' — real <text> plus a base64 @font-face. Renders identically
+   *                anywhere, including inside the <img> sandbox used for raster
+   *                export, and stays selectable. Default.
+   * 'reference'  — real <text> naming the family. Smallest file; substitutes on
+   *                a machine without the font.
+   */
+  textHandling?: TextHandling
+  background?: RGBA | null
+  precision?: number
+  /** Multiplies the emitted width/height; the viewBox stays in document units. */
+  scale?: number
+  padding?: number
+}
+
+export interface SvgExportResult {
+  svg: string
+  /** Assets referenced rather than embedded, when imageHandling is 'link'. */
+  linkedAssets: Array<{ fileName: string; dataUrl: string }>
+  warnings: string[]
+}
+
+interface EmitContext {
+  doc: DesignDocument
+  options: Required<Omit<SvgExportOptions, 'background'>> & { background: RGBA | null }
+  defs: string[]
+  fontCss: string[]
+  linkedAssets: Array<{ fileName: string; dataUrl: string }>
+  warnings: Set<string>
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+export async function exportNodesToSvg(
+  doc: DesignDocument,
+  nodeIds: readonly NodeId[],
+  options: SvgExportOptions,
+): Promise<SvgExportResult> {
+  const opts = {
+    bounds: options.bounds,
+    imageHandling: options.imageHandling ?? 'embed',
+    textHandling: options.textHandling ?? 'embed-font',
+    precision: options.precision ?? 3,
+    scale: options.scale ?? 1,
+    padding: options.padding ?? 0,
+    background: options.background ?? null,
+  }
+
+  const ctx: EmitContext = {
+    doc,
+    options: opts,
+    defs: [],
+    fontCss: [],
+    linkedAssets: [],
+    warnings: new Set(),
+  }
+
+  // Font embedding is async (the bytes must be fetched and base64-encoded), so
+  // it is resolved up front and the synchronous emit pass just reads the result.
+  await prepareText(ctx, nodeIds)
+
+  const body = nodeIds
+    .map((id) => emitNode(ctx, id, true))
+    .filter(Boolean)
+    .join('\n')
+
+  const b = opts.bounds
+  const pad = opts.padding
+  const width = Math.max(1, b.width + pad * 2)
+  const height = Math.max(1, b.height + pad * 2)
+  const outW = Math.max(1, Math.round(width * opts.scale))
+  const outH = Math.max(1, Math.round(height * opts.scale))
+
+  const defsBlock =
+    ctx.defs.length || ctx.fontCss.length
+      ? `<defs>${ctx.fontCss.length ? `<style>${ctx.fontCss.join('')}</style>` : ''}${ctx.defs.join('')}</defs>`
+      : ''
+
+  const bg =
+    opts.background && opts.background.a > 0
+      ? `<rect width="${width}" height="${height}" fill="${toHex(opts.background)}"${
+          opts.background.a < 1 ? ` fill-opacity="${round(opts.background.a, 3)}"` : ''
+        }/>`
+      : ''
+
+  // Explicit width/height are required: Firefox renders a viewBox-only SVG as
+  // 0x0 when it is loaded through an <img>, which is exactly what the raster
+  // exporter does.
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" ` +
+    `width="${outW}" height="${outH}" viewBox="0 0 ${round(width, 3)} ${round(height, 3)}">` +
+    defsBlock +
+    bg +
+    `<g transform="translate(${round(pad - b.x, 3)} ${round(pad - b.y, 3)})">${body}</g>` +
+    `</svg>`
+
+  return { svg, linkedAssets: ctx.linkedAssets, warnings: [...ctx.warnings] }
+}
+
+// ---------------------------------------------------------------------------
+// Text preparation
+// ---------------------------------------------------------------------------
+
+async function prepareText(ctx: EmitContext, roots: readonly NodeId[]): Promise<void> {
+  const textNodes: DesignNode[] = []
+  const visit = (id: NodeId) => {
+    const node = ctx.doc.nodes[id]
+    if (!node || !node.visible) return
+    if (node.type === 'text') textNodes.push(node)
+    if ('children' in node) for (const c of node.children) visit(c)
+  }
+  for (const id of roots) visit(id)
+  if (textNodes.length === 0) return
+
+  if (ctx.options.textHandling === 'embed-font') {
+    const seen = new Set<string>()
+    for (const node of textNodes) {
+      if (node.type !== 'text') continue
+      const ts = node.textStyle
+      const key = `${ts.fontFamily}|${ts.fontWeight}|${ts.fontStyle}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const css = await embedFontCss(ts.fontFamily, ts.fontWeight, ts.fontStyle === 'italic')
+      if (css) ctx.fontCss.push(css)
+      else if (!canEmbed(ts.fontFamily)) {
+        // A system font's bytes are not readable by the page, so it can only be
+        // named. Say so rather than letting it substitute silently.
+        ctx.warnings.add(
+          `"${ts.fontFamily}" is a system font, so it is referenced by name and ` +
+            `may substitute on a machine without it.`,
+        )
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Node emission
+// ---------------------------------------------------------------------------
+
+function emitNode(ctx: EmitContext, id: NodeId, isRoot: boolean): string {
+  const node = ctx.doc.nodes[id]
+  if (!node || !node.visible) return ''
+
+  // Roots carry their full world matrix; descendants carry only their local one,
+  // since their ancestors' groups are emitted around them.
+  const matrix: Mat2D = isRoot ? worldMatrix(ctx.doc, id) : localMatrix(node.transform)
+  const transform = ` transform="${toSvgMatrix(matrix)}"`
+  const styled = hasStyle(node) ? node.style : null
+  const opacity = styled && styled.opacity < 1 ? ` opacity="${round(styled.opacity, 3)}"` : ''
+  const blend =
+    styled && styled.blendMode !== 'normal' ? ` style="mix-blend-mode:${styled.blendMode}"` : ''
+  const name = ` id="${escapeAttr(safeId(node.id))}" data-name="${escapeAttr(node.name)}"`
+
+  const body = emitBody(ctx, node)
+  if (!body) return ''
+  return `<g${name}${transform}${opacity}${blend}>${body}</g>`
+}
+
+function emitBody(ctx: EmitContext, node: DesignNode): string {
+  switch (node.type) {
+    case 'document':
+      return node.children.map((c) => emitNode(ctx, c, false)).join('')
+
+    case 'artboard': {
+      const { width, height } = node.transform
+      const clipId = `clip-${safeId(node.id)}`
+      const bg = emitArtboardBackground(ctx, node.background, node.id, width, height)
+      const kids = node.children.map((c) => emitNode(ctx, c, false)).join('')
+      if (node.clipContent) {
+        ctx.defs.push(
+          `<clipPath id="${clipId}"><rect width="${round(width, 3)}" height="${round(height, 3)}"/></clipPath>`,
+        )
+        return `${bg}<g clip-path="url(#${clipId})">${kids}</g>`
+      }
+      return bg + kids
+    }
+
+    case 'group':
+      return node.children.map((c) => emitNode(ctx, c, false)).join('')
+
+    case 'image':
+      return emitImage(ctx, node)
+
+    case 'text':
+      return emitText(ctx, node)
+
+    case 'svg':
+      // A preserved subtree is written back exactly as it came in, still vector.
+      return emitPreservedSvg(ctx, node)
+
+    default:
+      return emitShape(ctx, node)
+  }
+}
+
+function emitArtboardBackground(
+  ctx: EmitContext,
+  paint: Paint,
+  nodeId: NodeId,
+  width: number,
+  height: number,
+): string {
+  if (paint.type === 'none') return ''
+  const attrs = paintAttrs(ctx, paint, nodeId, 'fill')
+  return `<rect width="${round(width, 3)}" height="${round(height, 3)}" fill="${attrs.value}"${
+    attrs.opacity < 1 ? ` fill-opacity="${round(attrs.opacity, 3)}"` : ''
+  }/>`
+}
+
+/**
+ * Shapes are emitted as semantic elements where one fits exactly, and as <path>
+ * otherwise. That keeps the output readable and small — a rounded rect stays a
+ * <rect rx>, not a twelve-command path.
+ */
+function emitShape(ctx: EmitContext, node: DesignNode): string {
+  if (!hasStyle(node)) return ''
+  const style = node.style
+  const { width, height } = node.transform
+  const p = ctx.options.precision
+
+  let element: string
+  switch (node.type) {
+    case 'rect': {
+      const [tl, tr, br, bl] = node.cornerRadius
+      const uniform = tl === tr && tr === br && br === bl
+      element = uniform
+        ? `<rect width="${round(width, p)}" height="${round(height, p)}"${tl > 0 ? ` rx="${round(tl, p)}"` : ''}`
+        : `<path d="${rectPath(width, height, node.cornerRadius)}"`
+      break
+    }
+    case 'ellipse':
+      element = `<ellipse cx="${round(width / 2, p)}" cy="${round(height / 2, p)}" rx="${round(width / 2, p)}" ry="${round(height / 2, p)}"`
+      break
+    case 'line':
+      element = `<line x1="${round(node.x1, p)}" y1="${round(node.y1, p)}" x2="${round(node.x2, p)}" y2="${round(node.y2, p)}"`
+      break
+    case 'triangle':
+      element = `<path d="${trianglePath(width, height)}"`
+      break
+    case 'polygon':
+      element = `<path d="${polygonPath(width, height, node.sides)}"`
+      break
+    case 'star':
+      element = `<path d="${starPath(width, height, node.points, node.innerRatio)}"`
+      break
+    case 'path':
+      element = `<path d="${node.d}"`
+      break
+    default:
+      element = `<path d="${rectPath(width, height, 0)}"`
+  }
+
+  return `${element}${styleAttrs(ctx, style, node.id)}/>`
+}
+
+function emitImage(ctx: EmitContext, node: Extract<DesignNode, { type: 'image' }>): string {
+  const asset = ctx.doc.assets[node.assetId]
+  if (!asset) {
+    ctx.warnings.add(`An image was skipped because its data is missing.`)
+    return ''
+  }
+  const { width, height } = node.transform
+  const p = ctx.options.precision
+
+  let href = asset.dataUrl
+  if (ctx.options.imageHandling === 'link') {
+    const ext = mimeToExtension(asset.mimeType)
+    const fileName = `${sanitizeFileName(asset.name || 'image')}-${asset.id}.${ext}`
+    ctx.linkedAssets.push({ fileName, dataUrl: asset.dataUrl })
+    href = `./${fileName}`
+  }
+
+  const preserve =
+    node.fit === 'fill' ? 'none' : node.fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet'
+  const hasRadius = node.cornerRadius.some((r) => r > 0)
+  const clipId = `imgclip-${safeId(node.id)}`
+  if (hasRadius) {
+    ctx.defs.push(
+      `<clipPath id="${clipId}"><path d="${rectPath(width, height, node.cornerRadius)}"/></clipPath>`,
+    )
+  }
+
+  return (
+    `<image href="${escapeAttr(href)}" xlink:href="${escapeAttr(href)}" ` +
+    `width="${round(width, p)}" height="${round(height, p)}" ` +
+    `preserveAspectRatio="${preserve}"` +
+    (hasRadius ? ` clip-path="url(#${clipId})"` : '') +
+    `/>`
+  )
+}
+
+function emitText(ctx: EmitContext, node: Extract<DesignNode, { type: 'text' }>): string {
+  const ts = node.textStyle
+  const p = ctx.options.precision
+  const boxWidth = ts.sizing === 'fixed' ? node.transform.width : undefined
+  const layout = layoutText(node.text, ts, boxWidth)
+  const width = boxWidth ?? layout.width
+
+  const tspans = layout.lines
+    .map(
+      (line) =>
+        `<tspan x="${round(lineOffsetX(line.width, width, ts.align), p)}" y="${round(line.baseline, p)}">` +
+        `${escapeText(line.text)}</tspan>`,
+    )
+    .join('')
+
+  const decoration = [ts.underline ? 'underline' : '', ts.strikethrough ? 'line-through' : '']
+    .filter(Boolean)
+    .join(' ')
+
+  return (
+    `<text font-family="${escapeAttr(fontStack(ts.fontFamily))}" font-size="${round(ts.fontSize, p)}" ` +
+    `font-weight="${ts.fontWeight}"` +
+    (ts.fontStyle === 'italic' ? ` font-style="italic"` : '') +
+    (ts.letterSpacing ? ` letter-spacing="${round(ts.letterSpacing * ts.fontSize, p)}"` : '') +
+    (decoration ? ` text-decoration="${decoration}"` : '') +
+    ` xml:space="preserve"${styleAttrs(ctx, node.style, node.id, true)}>${tspans}</text>`
+  )
+}
+
+function emitPreservedSvg(ctx: EmitContext, node: Extract<DesignNode, { type: 'svg' }>): string {
+  const { width, height } = node.transform
+  const vb = node.viewBox
+  const sx = vb.width > 0 ? width / vb.width : 1
+  const sy = vb.height > 0 ? height / vb.height : 1
+  // The defs this subtree needs travel with it, so it renders standalone.
+  if (node.defs) ctx.defs.push(node.defs)
+  return `<g transform="scale(${round(sx, 4)} ${round(sy, 4)}) translate(${round(-vb.x, 3)} ${round(-vb.y, 3)})">${node.markup}</g>`
+}
+
+// ---------------------------------------------------------------------------
+// Style serialization
+// ---------------------------------------------------------------------------
+
+function styleAttrs(
+  ctx: EmitContext,
+  style: Style,
+  nodeId: NodeId,
+  isText = false,
+): string {
+  const parts: string[] = []
+  const p = ctx.options.precision
+
+  const fill = paintAttrs(ctx, style.fill, nodeId, 'fill')
+  parts.push(` fill="${fill.value}"`)
+  const fo = fill.opacity * style.fillOpacity
+  if (fo < 1) parts.push(` fill-opacity="${round(fo, 3)}"`)
+  if (style.fillRule !== 'nonzero' && !isText) parts.push(` fill-rule="${style.fillRule}"`)
+
+  const stroke = style.stroke
+  if (stroke.paint.type !== 'none' && stroke.width > 0) {
+    const sp = paintAttrs(ctx, stroke.paint, nodeId, 'stroke')
+    parts.push(` stroke="${sp.value}"`)
+    const so = sp.opacity * style.strokeOpacity
+    if (so < 1) parts.push(` stroke-opacity="${round(so, 3)}"`)
+    parts.push(` stroke-width="${round(stroke.width, p)}"`)
+    if (stroke.cap !== 'butt') parts.push(` stroke-linecap="${stroke.cap}"`)
+    if (stroke.join !== 'miter') parts.push(` stroke-linejoin="${stroke.join}"`)
+    if (stroke.join === 'miter' && stroke.miterLimit !== 4) {
+      parts.push(` stroke-miterlimit="${round(stroke.miterLimit, p)}"`)
+    }
+    if (stroke.dashArray.length) parts.push(` stroke-dasharray="${stroke.dashArray.join(' ')}"`)
+    if (stroke.dashOffset) parts.push(` stroke-dashoffset="${round(stroke.dashOffset, p)}"`)
+  }
+  return parts.join('')
+}
+
+function paintAttrs(
+  ctx: EmitContext,
+  paint: Paint,
+  nodeId: NodeId,
+  target: 'fill' | 'stroke',
+): { value: string; opacity: number } {
+  switch (paint.type) {
+    case 'none':
+      return { value: 'none', opacity: 1 }
+    case 'solid':
+      return { value: toHex(paint.color), opacity: paint.color.a }
+    case 'ref':
+      return { value: paint.ref, opacity: 1 }
+    case 'linear':
+    case 'radial': {
+      const id = gradientId(safeId(nodeId), target)
+      ctx.defs.push(emitGradient(paint, id))
+      return { value: `url(#${id})`, opacity: 1 }
+    }
+    default:
+      return { value: 'none', opacity: 1 }
+  }
+}
+
+function emitGradient(paint: Paint, id: string): string {
+  if (!isGradient(paint)) return ''
+  const stops = sortedStops(paint.stops)
+    .map(
+      (s) =>
+        `<stop offset="${round(s.offset, 4)}" stop-color="${toHex(s.color)}"` +
+        (s.color.a < 1 ? ` stop-opacity="${round(s.color.a, 3)}"` : '') +
+        `/>`,
+    )
+    .join('')
+
+  // objectBoundingBox is SVG's default unit, and is what the model stores — so
+  // the gradient rescales with the shape in any renderer that opens the file.
+  if (paint.type === 'linear') {
+    return (
+      `<linearGradient id="${id}" x1="${round(paint.x1, 4)}" y1="${round(paint.y1, 4)}" ` +
+      `x2="${round(paint.x2, 4)}" y2="${round(paint.y2, 4)}">${stops}</linearGradient>`
+    )
+  }
+  return (
+    `<radialGradient id="${id}" cx="${round(paint.cx, 4)}" cy="${round(paint.cy, 4)}" r="${round(paint.r, 4)}"` +
+    (paint.fx !== undefined ? ` fx="${round(paint.fx, 4)}"` : '') +
+    (paint.fy !== undefined ? ` fy="${round(paint.fy, 4)}"` : '') +
+    `>${stops}</radialGradient>`
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function round(n: number, digits = 3): number {
+  if (!Number.isFinite(n)) return 0
+  const f = 10 ** digits
+  const r = Math.round(n * f) / f
+  return Object.is(r, -0) ? 0 : r
+}
+
+function escapeAttr(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function escapeText(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function safeId(id: string): string {
+  return id.replace(/[^A-Za-z0-9_-]/g, '_')
+}
+
+function sanitizeFileName(name: string): string {
+  return name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'asset'
+}
+
+function mimeToExtension(mime: string): string {
+  const map: Record<string, string> = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif',
+    'image/webp': 'webp', 'image/bmp': 'bmp', 'image/svg+xml': 'svg', 'image/tiff': 'tiff',
+  }
+  return map[mime.toLowerCase()] ?? 'png'
+}
+
+export { multiply }
