@@ -449,6 +449,45 @@ real background blur, and PNG and JPEG do too, since both rasterise the exported
 The cost is honest and bounded: the backdrop is rendered twice per blurred shape. Object blur
 has none of this, being a plain `feGaussianBlur` on the shape itself.
 
+The copies are **mirrors, not repeats**, and the distinction is the whole reason `NodeRenderer`
+has a three-valued `CopyMode` rather than a `repeat` boolean. A repeat-grid cell must not
+register with LiveTransform — it is the same node drawn at a different offset, and only one copy
+may own the live element. A backdrop copy sits exactly where the original does, so it must
+register: LiveTransform writes to every element under a key, and a copy that does not follow the
+gesture leaves a blurred ghost of the artwork at the position it started from. Neither kind
+carries `data-node-id`, so no duplicate is hit-testable or countable, and the mode propagates
+down a subtree because a copy of a group is a copy of everything in it.
+
+### A background blur's clip is drawn in the parent's space, and has to be moved itself
+
+The blurred copy of the backdrop is clipped to the shape's outline, and that clip cannot live
+inside the shape's own group — it has to be a sibling, because the thing it clips is the
+artwork *behind* the shape. So it does not ride along when the shape's group is transformed,
+and moving the panel left its blur region behind: the canvas the panel had left stayed blurred,
+and the canvas it had arrived at did not. The clip therefore registers under two LiveTransform
+keys — the node's own, which carries the matrix, and its geometry key, which carries `d` — so a
+move and a resize both reach it in the frame they happen.
+
+### An effect's filter region has to keep up with a live resize
+
+A drag never changes a node's box, so a shadow follows a move for free. A resize is different,
+and it broke in a way that looked nothing like a shadow bug: **the shape itself was clipped.**
+
+The filter region is in user space, sized from the node's box — `userSpaceOnUse` rather than
+percentages of the bounding box, because a percentage region collapses to nothing on a
+horizontal line, whose box has no height. But the box is read when React renders, and a resize
+of a rect or an ellipse deliberately does not re-render: it writes a new `d` straight to the
+DOM and leaves the matrix alone. The region therefore stayed at the pre-drag size, and
+everything outside it — the shadow *and* the growing half of the shape — was clipped away until
+the mouse came up.
+
+A group resize does not have the problem, because it scales through the matrix and the region,
+being in local space, scales with it. So the fix goes exactly where the mismatch is: the drag
+session snapshots how far a node's effects paint outside its box (a blur radius is not
+something a resize edits, so it is constant for the gesture) and rewrites the region from the
+live size in the same place it rewrites `d`. The filter element registers under its own
+LiveTransform key for that, the way geometry elements register under `geomKey`.
+
 ### A mask group is a group with a flag, not a node type of its own
 
 Adobe's model is a `MaskGroup` whose topmost child is the mask. That could have been a new node

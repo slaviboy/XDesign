@@ -49,11 +49,45 @@ export interface EffectFilter {
 }
 
 /**
+ * How far a node's own effects paint outside its box, in local units.
+ *
+ * Separate from the filter itself because a live resize has to keep the filter
+ * region in step with the geometry: the region is the only thing standing
+ * between the shape and being clipped to whatever size it was when React last
+ * rendered it. The margin does not change during a gesture — a blur radius and
+ * an offset are not what a resize edits — so it is snapshotted once and the
+ * region recomputed from the live size.
+ */
+export function effectMargin(style: Style): number {
+  const shadow = activeShadow(style)
+  const blur = activeBlur(style, 'object')
+  if (!shadow && !blur) return 0
+  return (
+    (blur ? blur.amount : 0) +
+    (shadow ? shadow.blur + Math.abs(shadow.x) + Math.abs(shadow.y) : 0) +
+    style.stroke.width +
+    8
+  )
+}
+
+/** The filter region for a box, given the margin its effects need around it. */
+export function filterRegion(
+  margin: number,
+  box: { width: number; height: number },
+): { x: number; y: number; width: number; height: number } {
+  return {
+    x: -margin,
+    y: -margin,
+    width: Math.max(0, box.width) + margin * 2,
+    height: Math.max(0, box.height) + margin * 2,
+  }
+}
+
+/**
  * The filter for a node's shadow and object blur, or null if it has neither.
  *
  * Background blur is NOT here: no SVG filter primitive can read what is behind
- * an element, so it is done with CSS on canvas and by re-drawing the backdrop
- * on export. See the callers.
+ * an element, so it is done by re-drawing the backdrop. See the callers.
  */
 export function effectFilter(
   nodeId: string,
@@ -106,18 +140,9 @@ export function effectFilter(
   // A region in user space rather than the default -10%..120% of the bounding
   // box: percentages collapse to nothing on a horizontal line, whose box has no
   // height, and clip a large offset on a small shape.
-  const margin =
-    (blur ? blur.amount : 0) +
-    (shadow ? shadow.blur + Math.abs(shadow.x) + Math.abs(shadow.y) : 0) +
-    style.stroke.width +
-    8
-
   return {
     id: effectFilterId(nodeId),
-    x: -margin,
-    y: -margin,
-    width: Math.max(0, box.width) + margin * 2,
-    height: Math.max(0, box.height) + margin * 2,
+    ...filterRegion(effectMargin(style), box),
     primitives: parts.join(''),
   }
 }

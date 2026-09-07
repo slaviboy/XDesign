@@ -8,6 +8,7 @@
  */
 
 import { test, expect, type Page } from '@playwright/test'
+import { createHash } from 'node:crypto'
 import {
   CANVAS, captureDownload, drawShape, nodesOfType, openApp, openExportDialog,
   press, selectTool,
@@ -306,4 +307,173 @@ test('every effect survives SVG export', async ({ page }) => {
   // the canvas makes, so the file matches the screen.
   expect(svg).toMatch(/<use href="#bd-/)
   expect(svg).toContain('bdblur-')
+})
+
+// ------------------------------------------------------- live during a drag --
+
+/**
+ * The requirement these three share: what you see mid-gesture is what you get
+ * on release. Each captures the same patch of canvas with the mouse still down
+ * and again after it comes up, and demands the bytes match — a picture that
+ * only settles on pointerup fails, and so does one that settles to something
+ * different from what it showed.
+ *
+ * The patches deliberately avoid the selection frame and the size badge, which
+ * are drawn only while a gesture is running and would differ in every
+ * comparison. Snapping is turned off for the same reason: a smart guide is a
+ * magenta line drawn across the canvas mid-drag and gone after it, which says
+ * nothing about whether the effect kept up.
+ */
+
+const digest = (b: Buffer) => createHash('sha1').update(b).digest('hex').slice(0, 12)
+
+/** Smart guides paint over the canvas mid-drag; they are not what is measured. */
+async function withoutSnapping(page: Page) {
+  await page.locator('button[aria-label="Snapping"]').click()
+}
+
+async function shadowSection(page: Page, y: string, blur: string) {
+  const shadow = section(page, 'SHADOW')
+  await shadow.locator('.paint-toggle').check()
+  for (const [label, value] of [['Y', y], ['B', blur]] as const) {
+    const field = shadow
+      .locator('.field', { has: page.locator(`.field-label:text-is("${label}")`) })
+      .locator('input')
+    await field.fill(value)
+    await field.press('Enter')
+  }
+}
+
+test('a shadow follows the shape through a move, not on release', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 420, y: 320 })
+  await shadowSection(page, '30', '30')
+  await selectTool(page, 'select')
+  await withoutSnapping(page)
+
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  // Below and left of the moved shape: where the shadow spills, and where
+  // neither the frame nor the size badge reaches.
+  const patch = { x: canvas.x + 330, y: canvas.y + 330, width: 26, height: 26 }
+
+  await page.mouse.move(canvas.x + 340, canvas.y + 260)
+  await page.mouse.down()
+  await page.mouse.move(canvas.x + 440, canvas.y + 260, { steps: 8 })
+  const during = await page.screenshot({ clip: patch })
+  await page.mouse.up()
+  const after = await page.screenshot({ clip: patch })
+
+  expect(digest(during)).toBe(digest(after))
+  // And it is a shadow, not two identically empty patches.
+  await section(page, 'SHADOW').locator('.paint-toggle').uncheck()
+  expect(digest(await page.screenshot({ clip: patch }))).not.toBe(digest(after))
+})
+
+test('resizing a shape with a shadow does not clip it to its old size', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 400, y: 300 })
+  await shadowSection(page, '30', '30')
+  await selectTool(page, 'select')
+  await withoutSnapping(page)
+
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  // Well outside the shape's ORIGINAL box: the region the stale filter used to
+  // clip away, taking the shape with it.
+  const patch = { x: canvas.x + 470, y: canvas.y + 360, width: 40, height: 40 }
+
+  await page.mouse.move(canvas.x + 400, canvas.y + 300)
+  await page.mouse.down()
+  await page.mouse.move(canvas.x + 600, canvas.y + 440, { steps: 10 })
+  const during = await page.screenshot({ clip: patch })
+  await page.mouse.up()
+  const after = await page.screenshot({ clip: patch })
+
+  expect(digest(during)).toBe(digest(after))
+  // The filter region grew with the shape rather than staying where it was.
+  const region = await page.locator('.document-layer filter').first().evaluate((f) => ({
+    width: Number(f.getAttribute('width')),
+    height: Number(f.getAttribute('height')),
+  }))
+  expect(region.width).toBeGreaterThan(600)
+})
+
+test('a background blur re-blurs while the artwork beneath it moves', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 240, y: 200 }, { x: 320, y: 420 })
+  await drawShape(page, 'rect', { x: 260, y: 260 }, { x: 620, y: 360 })
+  const blur = section(page, 'BLUR')
+  await blur.locator('.paint-toggle').check()
+  const amount = blur.locator('.slider-row', { hasText: 'Amount' }).locator('input[type="text"]')
+  await amount.fill('30')
+  await amount.press('Enter')
+  await selectTool(page, 'select')
+  await withoutSnapping(page)
+
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  // Inside the panel, where the stripe used to be blurred and no longer is.
+  const patch = { x: canvas.x + 270, y: canvas.y + 300, width: 30, height: 30 }
+
+  await page.locator('.layer-row').last().click()
+  await page.mouse.move(canvas.x + 280, canvas.y + 230)
+  await page.mouse.down()
+  await page.mouse.move(canvas.x + 480, canvas.y + 230, { steps: 10 })
+  const during = await page.screenshot({ clip: patch })
+  await page.mouse.up()
+  const after = await page.screenshot({ clip: patch })
+
+  // The copy of the backdrop is a real mirror of the artwork, not a snapshot of
+  // where it used to be.
+  expect(digest(during)).toBe(digest(after))
+})
+
+test('a mirrored backdrop copy is invisible to everything but the eye', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 240, y: 200 }, { x: 320, y: 420 })
+  await drawShape(page, 'rect', { x: 260, y: 260 }, { x: 620, y: 360 })
+  await section(page, 'BLUR').locator('.paint-toggle').check()
+
+  // Two rectangles in the document, and two in the DOM — the mirror carries no
+  // identity, so it cannot be hit-tested, counted or selected.
+  await expect(nodesOfType(page, 'rect')).toHaveCount(2)
+  await expect(page.locator('.layer-row')).toHaveCount(3)
+  await expect(page.locator('.document-layer g[clip-path^="url(#bdclip"]')).toHaveAttribute(
+    'pointer-events',
+    'none',
+  )
+})
+
+test('a background blur takes its region with it when the panel moves', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 240, y: 180 }, { x: 330, y: 440 })
+  await drawShape(page, 'rect', { x: 380, y: 180 }, { x: 470, y: 440 })
+  await drawShape(page, 'rect', { x: 250, y: 250 }, { x: 620, y: 340 })
+  const blur = section(page, 'BLUR')
+  await blur.locator('.paint-toggle').check()
+  const amount = blur.locator('.slider-row', { hasText: 'Amount' }).locator('input[type="text"]')
+  await amount.fill('30')
+  await amount.press('Enter')
+  await selectTool(page, 'select')
+  await withoutSnapping(page)
+
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  // On the left stripe, at the height the panel is being moved TO — so it is
+  // outside the region the blur started in and inside the one it ends in.
+  const patch = { x: canvas.x + 255, y: canvas.y + 370, width: 30, height: 30 }
+
+  await page.mouse.move(canvas.x + 550, canvas.y + 295)
+  await page.mouse.down()
+  await page.mouse.move(canvas.x + 550, canvas.y + 400, { steps: 10 })
+  const during = await page.screenshot({ clip: patch })
+  await page.mouse.up()
+  const after = await page.screenshot({ clip: patch })
+
+  // The clip is drawn in the parent's space, so it does not ride along inside
+  // the panel's group: it used to sit where the panel started, which blurred
+  // the canvas the panel had left and not the canvas it had reached.
+  expect(digest(during)).toBe(digest(after))
+
+  // And the region really did move, rather than both being unblurred.
+  const clip = await page.locator('.document-layer clipPath[id^="bdclip-"] path').getAttribute('transform')
+  const panel = await page.locator('.document-layer [data-node-type="rect"]').last().getAttribute('transform')
+  expect(clip).toBe(panel)
 })

@@ -47,8 +47,9 @@ import { transformFromMatrix } from '../document/DocumentModel'
 import { transaction } from '../state/DocumentStore'
 import { editorStore } from '../state/EditorStore'
 import { liveTransform } from '../canvas/LiveTransform'
-import { geomKey } from '../canvas/NodeRenderer'
-import { isContainer, usesOwnBox } from '../document/types'
+import { fxKey, geomKey } from '../canvas/NodeRenderer'
+import { effectMargin, filterRegion } from '../canvas/effects'
+import { hasStyle, isContainer, usesOwnBox } from '../document/types'
 import type { DesignDocument, DesignNode, NodeId, Transform } from '../document/types'
 import type { SnapLine } from '../geometry/Snapping'
 
@@ -72,6 +73,14 @@ interface NodeSnapshot {
   cornerRadius?: readonly [number, number, number, number]
   /** Scalar vertex rounding for the parametric polygon. */
   vertexRadius?: number
+  /**
+   * How far this node's shadow and blur paint outside its box.
+   *
+   * Snapshotted because a resize does not change it — a blur radius is not
+   * what a resize edits — but the region built from it has to follow the live
+   * size. See fxKey in NodeRenderer.
+   */
+  effectMargin: number
 }
 
 export interface DragSessionState {
@@ -177,6 +186,7 @@ export function beginDrag(
       starRatio: node.type === 'polygon' ? node.starRatio : undefined,
       cornerRadius: node.type === 'rect' ? node.cornerRadius : undefined,
       vertexRadius: node.type === 'polygon' ? node.cornerRadius : undefined,
+      effectMargin: hasStyle(node) ? effectMargin(node.style) : 0,
     }
   })
 
@@ -462,6 +472,23 @@ function pushLiveTransform(
   if (width !== undefined && height !== undefined && usesIntrinsicSize(snap.type)) {
     const d = livePathData(snap, width, height)
     if (d !== null) liveTransform.set(geomKey(snap.id), { attrs: { d } })
+
+    // The filter region is sized from the box, and this is the one kind of
+    // resize that changes the box without changing the matrix — so the region
+    // does not scale with it and has to be rewritten. Leaving it stale clips
+    // the SHAPE, not just its shadow, to whatever size it was when React last
+    // rendered: the artefact reads as the effect switching off mid-gesture.
+    if (snap.effectMargin > 0) {
+      const region = filterRegion(snap.effectMargin, { width, height })
+      liveTransform.set(fxKey(snap.id), {
+        attrs: {
+          x: String(region.x),
+          y: String(region.y),
+          width: String(region.width),
+          height: String(region.height),
+        },
+      })
+    }
   }
   liveTransform.set(snap.id, override)
 }

@@ -74,14 +74,58 @@ export const geomKey = (id: NodeId): string => `${id}::geom`
  * drawn by a fill path, a stroke path and a clip or mask at once.
  */
 function liveRef(key: string, enabled: boolean) {
+  return liveRefs([key], enabled)
+}
+
+/**
+ * The same, for an element that has to answer to SEVERAL keys.
+ *
+ * A background blur's clip is drawn in the PARENT's space, so it does not move
+ * inside the shape's own group and needs both keys: the node's own, which
+ * carries the matrix, and its geometry key, which carries `d`. Without the
+ * first the region stays where the shape started and the blur looks nailed to
+ * the canvas; without the second it keeps the shape's old size through a resize.
+ */
+function liveRefs(keys: readonly string[], enabled: boolean) {
   return (el: SVGElement | null) => {
     if (!enabled || !el) return undefined
-    liveTransform.register(key, el)
-    return () => liveTransform.unregister(key, el)
+    for (const key of keys) liveTransform.register(key, el)
+    return () => {
+      for (const key of keys) liveTransform.unregister(key, el)
+    }
   }
 }
 /** LiveTransform key for an artboard's clip rect. */
 export const clipKey = (id: NodeId): string => `${id}::clip`
+
+/**
+ * LiveTransform key for a node's effect filter.
+ *
+ * The filter region is in user space and sized from the node's box, so a live
+ * resize has to move it too — otherwise the shape is clipped to whatever size
+ * it was when React last rendered, which looks like the effect (and half the
+ * shape) vanishing until the mouse comes up.
+ */
+export const fxKey = (id: NodeId): string => `${id}::fx`
+
+/**
+ * What a rendered node IS.
+ *
+ * 'primary'  the node itself: carries its identity attributes, and owns its
+ *            LiveTransform registration.
+ * 'mirror'   a duplicate that must still follow a live gesture — the blurred
+ *            copy of a backdrop. It registers (LiveTransform writes to every
+ *            element under a key, and a mirror sits exactly where the original
+ *            does) but carries no identity, so it is invisible to hit testing
+ *            and to anything counting nodes in the DOM.
+ * 'repeat'   a duplicate that must NOT register: a repeat grid's 2nd..Nth cell
+ *            is the same node drawn at a different offset, and only one copy
+ *            may own the live element.
+ *
+ * It propagates down a subtree, because a copy of a group is a copy of
+ * everything in it.
+ */
+export type CopyMode = 'primary' | 'mirror' | 'repeat'
 
 // ---------------------------------------------------------------------------
 // Shared pieces
@@ -393,7 +437,7 @@ function SvgBody({ node }: { node: SvgNode }): ReactNode {
  * alternative — materialising N copies — would need change-propagation logic
  * and would bloat the file by the repeat count.
  */
-function RepeatGridBody({ node }: { node: RepeatGridNode }): ReactNode {
+function RepeatGridBody({ node, copy }: { node: RepeatGridNode; copy: CopyMode }): ReactNode {
   const offsets = repeatGridOffsets(node)
   const size = repeatGridSize(node)
   const clipId = `rg-clip-${node.id}`
@@ -412,7 +456,7 @@ function RepeatGridBody({ node }: { node: RepeatGridNode }): ReactNode {
               // Cell 0 owns the live element refs; later cells are pure
               // repeats, so they must not re-register the same node id with
               // LiveTransform or a drag would write to whichever mounted last.
-              <NodeRenderer key={childId} id={childId} repeat={i > 0} />
+              <NodeRenderer key={childId} id={childId} copy={i > 0 ? 'repeat' : copy} />
             ))}
           </g>
         ))}
@@ -435,18 +479,19 @@ function RepeatGridBody({ node }: { node: RepeatGridNode }): ReactNode {
  * keep duplicate artwork from registering itself with LiveTransform — only the
  * real child may own a node's live element.
  */
-function Children({ ids }: { ids: readonly NodeId[] }): ReactNode {
+function Children({ ids, copy = 'primary' }: { ids: readonly NodeId[]; copy?: CopyMode }): ReactNode {
   const doc = useDocumentStore((s) => s.doc)
   const out: ReactNode[] = []
 
   ids.forEach((id, i) => {
     const node = doc.nodes[id]
     const blur = node && node.visible && hasStyle(node) ? activeBlur(node.style, 'background') : null
-    // Nothing painted yet is nothing to blur.
-    if (blur && node && i > 0) {
+    // Nothing painted yet is nothing to blur. And a backdrop inside a backdrop
+    // is not drawn at all: one blurred panel does not blur through another.
+    if (blur && node && i > 0 && copy === 'primary') {
       out.push(<Backdrop key={`bd-${id}`} node={node} before={ids.slice(0, i)} blur={blur} />)
     }
-    out.push(<NodeRenderer key={id} id={id} />)
+    out.push(<NodeRenderer key={id} id={id} copy={copy} />)
   })
 
   return <>{out}</>
@@ -463,12 +508,16 @@ function Backdrop({
 }): ReactNode {
   const clipId = backdropClipId(node.id)
   const filterId = backdropFilterId(node.id)
+  // The clip is drawn in the PARENT's space, so it does not travel inside the
+  // panel's group and has to be moved and resized itself. Both keys: the
+  // node's own carries the matrix, its geometry key carries `d`.
+  const clipRef = useCallback(liveRefs([node.id, geomKey(node.id)], true), [node.id])
 
   return (
     <>
       <defs>
         <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
-          <path d={shapePathData(node)} transform={toSvgMatrix(localMatrix(node.transform))} />
+          <path ref={clipRef} d={shapePathData(node)} transform={toSvgMatrix(localMatrix(node.transform))} />
         </clipPath>
         <filter
           id={filterId}
@@ -480,8 +529,11 @@ function Backdrop({
         />
       </defs>
       <g clipPath={`url(#${clipId})`} filter={`url(#${filterId})`} pointerEvents="none">
+        {/* Mirrors, not repeats: the copy sits exactly where the original does,
+            so it must follow a drag or a resize frame by frame — a frozen one
+            leaves a blurred ghost of the artwork at its old position. */}
         {before.map((id) => (
-          <NodeRenderer key={id} id={id} repeat />
+          <NodeRenderer key={id} id={id} copy="mirror" />
         ))}
       </g>
     </>
@@ -500,13 +552,16 @@ function Backdrop({
  * luminance mask would make a shape's own fill and opacity leak into the
  * result, so a mask filled with 50% grey would half-hide what it masks.
  */
-function GroupBody({ node }: { node: GroupNode }): ReactNode {
+function GroupBody({ node, copy }: { node: GroupNode; copy: CopyMode }): ReactNode {
   const mask = useNode(node.maskId ?? '')
   const clipId = `mask-clip-${node.id}`
   const masked = isMaskGroup(node) && !!mask
 
   const content = (
-    <Children ids={node.children.filter((childId) => !masked || childId !== node.maskId)} />
+    <Children
+      copy={copy}
+      ids={node.children.filter((childId) => !masked || childId !== node.maskId)}
+    />
   )
 
   if (!masked) return content
@@ -525,7 +580,7 @@ function GroupBody({ node }: { node: GroupNode }): ReactNode {
   )
 }
 
-function ArtboardBody({ node }: { node: ArtboardNode }): ReactNode {
+function ArtboardBody({ node, copy }: { node: ArtboardNode; copy: CopyMode }): ReactNode {
   const { width, height } = node.transform
   const bg = paintToAttrs(node.background, node.id, 'fill')
   const clipId = `ab-clip-${node.id}`
@@ -544,7 +599,7 @@ function ArtboardBody({ node }: { node: ArtboardNode }): ReactNode {
         <rect width={width} height={height} fill={bg.value} fillOpacity={bg.opacity} />
       )}
       <g clipPath={node.clipContent ? `url(#${clipId})` : undefined}>
-        <Children ids={node.children} />
+        <Children ids={node.children} copy={copy} />
       </g>
     </>
   )
@@ -556,16 +611,18 @@ function ArtboardBody({ node }: { node: ArtboardNode }): ReactNode {
 
 export const NodeRenderer = memo(function NodeRenderer({
   id,
-  repeat = false,
+  copy = 'primary',
 }: {
   id: NodeId
-  /** True for the 2nd..Nth copy inside a repeat grid — see RepeatGridBody. */
-  repeat?: boolean
+  /** What this rendering is — see CopyMode. */
+  copy?: CopyMode
 }): ReactNode {
   const node = useNode(id)
 
-  const groupRef = useCallback(liveRef(id, !repeat), [id, repeat])
-  const geomRef = useCallback(liveRef(geomKey(id), !repeat), [id, repeat])
+  const live = copy !== 'repeat'
+  const groupRef = useCallback(liveRef(id, live), [id, live])
+  const geomRef = useCallback(liveRef(geomKey(id), live), [id, live])
+  const filterRef = useCallback(liveRef(fxKey(id), live), [id, live])
 
   if (!node) return null
   // Hidden nodes are not rendered at all, which also makes them unclickable.
@@ -583,13 +640,13 @@ export const NodeRenderer = memo(function NodeRenderer({
   let body: ReactNode
   switch (node.type) {
     case 'artboard':
-      body = <ArtboardBody node={node} />
+      body = <ArtboardBody node={node} copy={copy} />
       break
     case 'group':
-      body = <GroupBody node={node} />
+      body = <GroupBody node={node} copy={copy} />
       break
     case 'repeat-grid':
-      body = <RepeatGridBody node={node} />
+      body = <RepeatGridBody node={node} copy={copy} />
       break
     case 'text':
       body = <TextBody node={node} />
@@ -601,7 +658,7 @@ export const NodeRenderer = memo(function NodeRenderer({
       body = <SvgBody node={node} />
       break
     case 'document':
-      body = <Children ids={node.children} />
+      body = <Children ids={node.children} copy={copy} />
       break
     default:
       body = (
@@ -623,14 +680,15 @@ export const NodeRenderer = memo(function NodeRenderer({
       opacity={opacity === 1 ? undefined : opacity}
       style={groupStyle}
       filter={filter ? `url(#${effectFilterId(id)})` : undefined}
-      data-node-id={repeat ? undefined : id}
-      data-node-type={repeat ? undefined : node.type}
+      data-node-id={copy === 'primary' ? id : undefined}
+      data-node-type={copy === 'primary' ? node.type : undefined}
       // Locked nodes stay visible but must not swallow pointer events on canvas.
       pointerEvents={node.locked ? 'none' : undefined}
     >
       {filter && (
         <defs>
           <filter
+            ref={filterRef}
             id={filter.id}
             filterUnits="userSpaceOnUse"
             x={filter.x}
