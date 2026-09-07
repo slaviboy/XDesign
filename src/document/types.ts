@@ -324,13 +324,22 @@ export interface EllipseNode extends StyledNode {
   type: 'ellipse'
 }
 
+/**
+ * Vertex rounding for the parametric polygons.
+ *
+ * A single scalar, unlike a rect's four-corner CornerRadii: a polygon's corners
+ * are generated from its sides/points rather than being individually
+ * addressable, so per-corner values would have nothing stable to attach to.
+ */
 export interface TriangleNode extends StyledNode {
   type: 'triangle'
+  cornerRadius: number
 }
 
 export interface PolygonNode extends StyledNode {
   type: 'polygon'
   sides: number
+  cornerRadius: number
 }
 
 export interface StarNode extends StyledNode {
@@ -338,6 +347,7 @@ export interface StarNode extends StyledNode {
   points: number
   /** Inner radius as a fraction of outer, 0..1. */
   innerRatio: number
+  cornerRadius: number
 }
 
 /** Endpoints are in local space so the transform can still rotate/scale the line. */
@@ -554,4 +564,23 @@ export function isBooleanCapable(node: DesignNode | undefined | null): boolean {
 
 export function hasCornerRadius(node: DesignNode): node is RectNode | ImageNode {
   return node.type === 'rect' || node.type === 'image'
+}
+
+/** Types whose vertices round by a single scalar radius. */
+export function hasScalarCornerRadius(
+  node: DesignNode | undefined | null,
+): node is TriangleNode | PolygonNode | StarNode {
+  return !!node && (node.type === 'triangle' || node.type === 'polygon' || node.type === 'star')
+}
+
+/** Any node that supports corner rounding at all. */
+export function supportsCornerRadius(node: DesignNode | undefined | null): boolean {
+  return !!node && (hasCornerRadius(node) || hasScalarCornerRadius(node))
+}
+
+/** Current radius of any rounding-capable node, as a single number. */
+export function cornerRadiusOf(node: DesignNode): number {
+  if (node.type === 'rect' || node.type === 'image') return node.cornerRadius[0]
+  if (hasScalarCornerRadius(node)) return node.cornerRadius
+  return 0
 }

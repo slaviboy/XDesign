@@ -31,6 +31,8 @@ export interface CanvasPointerEvent {
   targetNodeId: NodeId | null
   /** Selection handle under the pointer, read from the overlay's data attributes. */
   targetHandle: string | null
+  /** Which corner that handle belongs to, for rotation and radius handles. */
+  targetCorner: string | null
   native: PointerEvent
 }
 

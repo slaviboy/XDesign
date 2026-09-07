@@ -299,13 +299,13 @@ function emitShape(ctx: EmitContext, node: DesignNode): string {
       element = `<line x1="${round(node.x1, p)}" y1="${round(node.y1, p)}" x2="${round(node.x2, p)}" y2="${round(node.y2, p)}"`
       break
     case 'triangle':
-      element = `<path d="${trianglePath(width, height)}"`
+      element = `<path d="${trianglePath(width, height, node.cornerRadius)}"`
       break
     case 'polygon':
-      element = `<path d="${polygonPath(width, height, node.sides)}"`
+      element = `<path d="${polygonPath(width, height, node.sides, node.cornerRadius)}"`
       break
     case 'star':
-      element = `<path d="${starPath(width, height, node.points, node.innerRatio)}"`
+      element = `<path d="${starPath(width, height, node.points, node.innerRatio, node.cornerRadius)}"`
       break
     case 'path':
       element = `<path d="${node.d}"`

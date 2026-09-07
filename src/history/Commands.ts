@@ -56,7 +56,7 @@ import type {
   TextStyle,
   Transform,
 } from '../document/types'
-import { hasStyle, isContainer } from '../document/types'
+import { hasScalarCornerRadius, hasStyle, isContainer } from '../document/types'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -494,8 +494,14 @@ export function setCornerRadius(radius: number, coalesceKey = 'radius'): boolean
       let touched = false
       for (const id of ids) {
         const node = draft.nodes[id]
-        if (node && (node.type === 'rect' || node.type === 'image')) {
+        if (!node) continue
+        // Boxes carry four corners; the parametric polygons carry one scalar,
+        // because their vertices are generated rather than addressable.
+        if (node.type === 'rect' || node.type === 'image') {
           node.cornerRadius = [r, r, r, r]
+          touched = true
+        } else if (hasScalarCornerRadius(node)) {
+          node.cornerRadius = r
           touched = true
         }
       }

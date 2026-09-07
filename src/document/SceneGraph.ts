@@ -150,11 +150,11 @@ export function nodePathData(node: DesignNode): string | null {
     case 'ellipse':
       return ellipsePath(width, height)
     case 'triangle':
-      return trianglePath(width, height)
+      return trianglePath(width, height, node.cornerRadius)
     case 'polygon':
-      return polygonPath(width, height, node.sides)
+      return polygonPath(width, height, node.sides, node.cornerRadius)
     case 'star':
-      return starPath(width, height, node.points, node.innerRatio)
+      return starPath(width, height, node.points, node.innerRatio, node.cornerRadius)
     case 'line':
       return linePath(node.x1, node.y1, node.x2, node.y2)
     case 'path':

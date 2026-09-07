@@ -923,3 +923,11 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .repeat-grid-button:hover:not(:disabled) { background: var(--bg-hover); }
 .repeat-grid-button:disabled { opacity: 0.4; cursor: default; }
 .repeat-grid-button svg { flex: none; }
+
+/* Corner-radius handles: a ring with a centre dot, sitting inside the shape. */
+.radius-handle-ring {
+  fill: var(--handle-fill);
+  stroke: var(--handle-stroke);
+  stroke-width: 1.2;
+}
+.radius-handle-dot { fill: var(--handle-stroke); stroke: none; }

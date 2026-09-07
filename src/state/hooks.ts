@@ -7,8 +7,9 @@
  * re-renders one element rather than the whole canvas.
  */
 
-import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react'
 import { useStore } from 'zustand'
+import { liveTransform } from '../canvas/LiveTransform'
 import { documentStore, type DocumentState } from './DocumentStore'
 import { editorStore, type EditorState } from './EditorStore'
 import type { DesignNode, NodeId } from '../document/types'
@@ -71,6 +72,24 @@ export function useViewport() {
 
 export function useTool() {
   return useStore(editorStore, (s) => s.tool)
+}
+
+/**
+ * Re-render on every LiveTransform flush.
+ *
+ * Drags deliberately make no store writes, so anything that must track a
+ * gesture live — the selection frame, the inspector readouts — subscribes here
+ * instead and reads the in-flight values from the session modules.
+ *
+ * This does mean the subscriber re-renders each animation frame while a drag is
+ * running. That is a deliberate, bounded exception: the overlay and the
+ * inspector are a few dozen elements each, whereas writing to the store would
+ * re-run every node's selector, which is O(document).
+ */
+export function useLiveTransformTick(): number {
+  const [tick, bump] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => liveTransform.subscribe(bump), [])
+  return tick
 }
 
 export function useHistoryState() {

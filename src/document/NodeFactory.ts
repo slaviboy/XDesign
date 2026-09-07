@@ -105,7 +105,12 @@ export function createTriangle(
   transform: Partial<Transform> = {},
   style: Partial<Style> = {},
 ): TriangleNode {
-  return { ...base('triangle', 'Triangle', transform), type: 'triangle', style: cloneStyle(style) }
+  return {
+    ...base('triangle', 'Triangle', transform),
+    type: 'triangle',
+    style: cloneStyle(style),
+    cornerRadius: 0,
+  }
 }
 
 export function createPolygon(
@@ -113,7 +118,13 @@ export function createPolygon(
   style: Partial<Style> = {},
   sides = 6,
 ): PolygonNode {
-  return { ...base('polygon', 'Polygon', transform), type: 'polygon', style: cloneStyle(style), sides }
+  return {
+    ...base('polygon', 'Polygon', transform),
+    type: 'polygon',
+    style: cloneStyle(style),
+    sides,
+    cornerRadius: 0,
+  }
 }
 
 export function createStar(
@@ -128,6 +139,7 @@ export function createStar(
     style: cloneStyle(style),
     points,
     innerRatio,
+    cornerRadius: 0,
   }
 }
 

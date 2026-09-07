@@ -186,6 +186,14 @@ export const LinkBracket = ({
   </svg>
 )
 
+/** Corner radius: a square with one rounded corner and its radius marked. */
+export const RadiusIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M13.5 3.2v-.4H6.4A3.6 3.6 0 002.8 6.4v7.1" />
+    <circle cx="6.6" cy="6.6" r="1.1" fill="currentColor" stroke="none" />
+  </Icon>
+)
+
 /** Make every selected object as wide as the widest. */
 export const MatchWidthIcon = (p: IconProps) => (
   <Icon {...p}>

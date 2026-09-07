@@ -80,11 +80,106 @@ export function ellipsePath(width: number, height: number): string {
   return `M0 ${r(cy)} A${r(rx)} ${r(ry)} 0 1 0 ${r(width)} ${r(cy)} A${r(rx)} ${r(ry)} 0 1 0 0 ${r(cy)} Z`
 }
 
-/** Isosceles triangle: apex centered on the top edge, base along the bottom. */
-export function trianglePath(width: number, height: number): string {
+/** Vertices of an isosceles triangle: apex centered on top, base along the bottom. */
+export function trianglePoints(width: number, height: number): Vec2[] {
   const w = Math.max(0, width)
   const h = Math.max(0, height)
-  return `M${r(w / 2)} 0 L${r(w)} ${r(h)} L0 ${r(h)} Z`
+  return [
+    { x: w / 2, y: 0 },
+    { x: w, y: h },
+    { x: 0, y: h },
+  ]
+}
+
+/** Isosceles triangle: apex centered on the top edge, base along the bottom. */
+export function trianglePath(width: number, height: number, radius = 0): string {
+  const points = trianglePoints(width, height)
+  return radius > 0 ? roundedPolygonPath(points, radius) : pointsToClosedPath(points)
+}
+
+/**
+ * Round every vertex of a closed polygon by `radius`.
+ *
+ * At each vertex the two edge directions are walked back by the tangent length
+ * `r / tan(theta/2)`, and an arc joins the two resulting points. The tangent
+ * length is clamped to half of the shorter adjacent edge, and the radius is then
+ * recomputed from the clamped tangent — without that, a radius larger than an
+ * edge can carry produces overlapping arcs and a self-intersecting outline.
+ *
+ * Reflex vertices need no special case: the sweep flag follows the sign of the
+ * cross product, so a star's inner points round inward exactly as its outer
+ * points round outward.
+ */
+export function roundedPolygonPath(points: readonly Vec2[], radius: number): string {
+  const n = points.length
+  if (n < 3) return pointsToClosedPath(points)
+  if (radius <= 0) return pointsToClosedPath(points)
+
+  const parts: string[] = []
+
+  for (let i = 0; i < n; i++) {
+    const prev = points[(i - 1 + n) % n]!
+    const cur = points[i]!
+    const next = points[(i + 1) % n]!
+
+    const toPrev = { x: prev.x - cur.x, y: prev.y - cur.y }
+    const toNext = { x: next.x - cur.x, y: next.y - cur.y }
+    const lenPrev = Math.hypot(toPrev.x, toPrev.y)
+    const lenNext = Math.hypot(toNext.x, toNext.y)
+    if (lenPrev < 1e-9 || lenNext < 1e-9) continue
+
+    const u1 = { x: toPrev.x / lenPrev, y: toPrev.y / lenPrev }
+    const u2 = { x: toNext.x / lenNext, y: toNext.y / lenNext }
+
+    const cosTheta = Math.min(1, Math.max(-1, u1.x * u2.x + u1.y * u2.y))
+    const theta = Math.acos(cosTheta)
+    // A straight-through vertex has nothing to round.
+    if (theta < 1e-6 || Math.abs(Math.PI - theta) < 1e-6) {
+      parts.push(`${i === 0 ? 'M' : 'L'}${r(cur.x)} ${r(cur.y)}`)
+      continue
+    }
+
+    const halfTan = Math.tan(theta / 2)
+    let tangent = radius / halfTan
+    tangent = Math.min(tangent, lenPrev / 2, lenNext / 2)
+    const effective = tangent * halfTan
+
+    const a = { x: cur.x + u1.x * tangent, y: cur.y + u1.y * tangent }
+    const b = { x: cur.x + u2.x * tangent, y: cur.y + u2.y * tangent }
+
+    // Cross product sign gives the turn direction, which is the arc's sweep.
+    const cross = u1.x * u2.y - u1.y * u2.x
+    const sweep = cross < 0 ? 1 : 0
+
+    parts.push(`${i === 0 ? 'M' : 'L'}${r(a.x)} ${r(a.y)}`)
+    parts.push(`A${r(effective)} ${r(effective)} 0 0 ${sweep} ${r(b.x)} ${r(b.y)}`)
+  }
+
+  parts.push('Z')
+  return parts.join(' ')
+}
+
+/**
+ * Largest radius a polygon can take before its arcs start overlapping.
+ * Used to clamp the corner-radius handle and the inspector field.
+ */
+export function maxPolygonRadius(points: readonly Vec2[]): number {
+  const n = points.length
+  if (n < 3) return 0
+  let limit = Infinity
+  for (let i = 0; i < n; i++) {
+    const prev = points[(i - 1 + n) % n]!
+    const cur = points[i]!
+    const next = points[(i + 1) % n]!
+    const lenPrev = Math.hypot(prev.x - cur.x, prev.y - cur.y)
+    const lenNext = Math.hypot(next.x - cur.x, next.y - cur.y)
+    const u1 = { x: (prev.x - cur.x) / (lenPrev || 1), y: (prev.y - cur.y) / (lenPrev || 1) }
+    const u2 = { x: (next.x - cur.x) / (lenNext || 1), y: (next.y - cur.y) / (lenNext || 1) }
+    const theta = Math.acos(Math.min(1, Math.max(-1, u1.x * u2.x + u1.y * u2.y)))
+    if (theta < 1e-6) continue
+    limit = Math.min(limit, (Math.min(lenPrev, lenNext) / 2) * Math.tan(theta / 2))
+  }
+  return Number.isFinite(limit) ? Math.max(0, limit) : 0
 }
 
 /** Vertices of a regular n-gon inscribed in the local box, first point at top. */
@@ -100,8 +195,14 @@ export function polygonPoints(width: number, height: number, sides: number): Vec
   return pts
 }
 
-export function polygonPath(width: number, height: number, sides: number): string {
-  return pointsToClosedPath(polygonPoints(width, height, sides))
+export function polygonPath(
+  width: number,
+  height: number,
+  sides: number,
+  radius = 0,
+): string {
+  const points = polygonPoints(width, height, sides)
+  return radius > 0 ? roundedPolygonPath(points, radius) : pointsToClosedPath(points)
 }
 
 /**
@@ -132,8 +233,10 @@ export function starPath(
   height: number,
   points: number,
   innerRatio: number,
+  radius = 0,
 ): string {
-  return pointsToClosedPath(starPoints(width, height, points, innerRatio))
+  const verts = starPoints(width, height, points, innerRatio)
+  return radius > 0 ? roundedPolygonPath(verts, radius) : pointsToClosedPath(verts)
 }
 
 /** Line from one local corner to the other; the transform orients it. */

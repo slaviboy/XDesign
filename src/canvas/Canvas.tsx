@@ -112,6 +112,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
         pointerId: e.pointerId,
         targetNodeId: nodeEl?.dataset.nodeId ?? null,
         targetHandle: handleEl?.dataset.handle ?? null,
+        targetCorner: handleEl?.dataset.corner ?? null,
         native: e as PointerEvent,
       }
     },

@@ -30,21 +30,31 @@ import {
   matchSize,
 } from '../history/Commands'
 import { setRepeatGridParams } from '../history/RepeatGridCommands'
-import { geometryBounds, worldMatrix } from '../document/SceneGraph'
+import { geometryBounds, localGeometryBounds, worldMatrix } from '../document/SceneGraph'
 import { decompose } from '../geometry/Matrix'
+import { transformBounds } from '../geometry/Bounds'
+import { getLiveMatrix, getLiveSize } from '../tools/DragSession'
+import { getLiveRadius } from '../tools/RadiusSession'
 import { toCss, toHex } from '../document/color'
 import { fontsByCategory, isBundledFont, nearestWeight } from '../text/FontRegistry'
 import { openDialog, setEditor } from '../state/EditorStore'
-import { useDocument, useEditorStore, useSelectedNodes } from '../state/hooks'
+import { useDocument, useEditorStore, useLiveTransformTick, useSelectedNodes } from '../state/hooks'
 import { NumberField, Section, Select, TextField, common, IconButton } from './primitives'
 import { PaintPopover } from './ColorPicker'
 import {
   AlignBottomIcon, AlignCenterHIcon, AlignCenterVIcon, AlignLeftIcon, AlignRightIcon,
   AlignTopIcon, DistributeHIcon, DistributeVIcon, FlipHIcon, FlipVIcon,
-  LinkBracket, MatchHeightIcon, MatchSizeIcon, MatchWidthIcon,
+  LinkBracket, MatchHeightIcon, MatchSizeIcon, MatchWidthIcon, RadiusIcon,
   RotateIcon, TextAlignCenterIcon, TextAlignLeftIcon, TextAlignRightIcon,
 } from './icons'
-import { hasStyle, type DesignNode, type Paint, type Style } from '../document/types'
+import {
+  cornerRadiusOf,
+  hasStyle,
+  supportsCornerRadius,
+  type DesignNode,
+  type Paint,
+  type Style,
+} from '../document/types'
 
 export function PropertyInspector() {
   const selected = useSelectedNodes()
@@ -145,24 +155,34 @@ function DocumentSection() {
 function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
   const doc = useDocument()
   const multiple = nodes.length > 1
+  // Drags never write to the store, so the readouts would sit frozen at the
+  // pre-drag values without this: it re-renders on each LiveTransform flush and
+  // the helpers below prefer the in-flight matrices when a gesture is running.
+  const liveTick = useLiveTransformTick()
   const [aspectLocked, setAspectLocked] = useState(false)
   const aspectRatioRef = useRef<number | null>(null)
   const styled = nodes.filter(hasStyle)
 
   // World-space geometry, so the readout matches what is on screen even for a
-  // node nested inside a transformed group.
+  // node nested inside a transformed group. During a gesture the live matrix
+  // wins, which is what makes the fields track a drag in real time.
   const bounds = useMemo(
-    () => (nodes.length ? geometryBounds(doc, nodes[0]!.id) : null),
-    [doc, nodes],
+    () => (nodes.length ? liveBounds(doc, nodes[0]!) : null),
+    // liveTick participates: mid-drag the document has not changed, and the
+    // tick is the only signal that the live values moved.
+    [doc, nodes, liveTick],
   )
 
   const rotation = useMemo(
-    () => common(nodes, (n) => Math.round(decompose(worldMatrix(doc, n.id)).rotation * 100) / 100),
-    [doc, nodes],
+    () =>
+      common(nodes, (n) =>
+        round2(decompose(getLiveMatrix(n.id) ?? worldMatrix(doc, n.id)).rotation),
+      ),
+    [doc, nodes, liveTick],
   )
 
-  const effectiveW = common(nodes, (n) => round2(n.transform.width * Math.abs(n.transform.scaleX)))
-  const effectiveH = common(nodes, (n) => round2(n.transform.height * Math.abs(n.transform.scaleY)))
+  const effectiveW = common(nodes, (n) => round2(liveEffectiveSize(doc, n).width))
+  const effectiveH = common(nodes, (n) => round2(liveEffectiveSize(doc, n).height))
   const x = multiple ? null : round2(bounds?.x ?? 0)
   const y = multiple ? null : round2(bounds?.y ?? 0)
 
@@ -302,6 +322,51 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
       <ExportSection nodes={nodes} />
     </>
   )
+}
+
+/**
+ * Bounds that follow an in-flight drag.
+ *
+ * Falls back to the document whenever no gesture is running, so this is the
+ * single readout path rather than a special case bolted on beside one.
+ */
+function liveBounds(doc: ReturnType<typeof useDocument>, node: DesignNode) {
+  const live = getLiveMatrix(node.id)
+  if (!live) return geometryBounds(doc, node.id)
+  const size = getLiveSize(node.id)
+  const local = size
+    ? { x: 0, y: 0, width: size.width, height: size.height }
+    : localGeometryBounds(node)
+  return transformBounds(local, live)
+}
+
+/**
+ * Effective size (intrinsic x |scale|), preferring live values.
+ *
+ * The three cases differ: a single-node resize writes the new intrinsic size,
+ * a multi-node resize instead scales the matrix, and a move or rotate changes
+ * neither — so the scale has to come from the live matrix when there is one.
+ */
+function liveEffectiveSize(
+  doc: ReturnType<typeof useDocument>,
+  node: DesignNode,
+): { width: number; height: number } {
+  void doc
+  const size = getLiveSize(node.id)
+  if (size) return size
+
+  const live = getLiveMatrix(node.id)
+  if (live) {
+    const d = decompose(live)
+    return {
+      width: node.transform.width * Math.abs(d.scaleX),
+      height: node.transform.height * Math.abs(d.scaleY),
+    }
+  }
+  return {
+    width: node.transform.width * Math.abs(node.transform.scaleX),
+    height: node.transform.height * Math.abs(node.transform.scaleY),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -534,19 +599,21 @@ function RepeatGridSection({ nodes }: { nodes: DesignNode[] }) {
 }
 
 function ShapeSection({ nodes }: { nodes: DesignNode[] }) {
-  const rects = nodes.filter((n) => n.type === 'rect' || n.type === 'image')
+  const liveTick = useLiveTransformTick()
+  void liveTick
+  const roundable = nodes.filter(supportsCornerRadius)
   const polygons = nodes.filter((n) => n.type === 'polygon')
   const stars = nodes.filter((n) => n.type === 'star')
-  if (rects.length === 0 && polygons.length === 0 && stars.length === 0) return null
+  if (roundable.length === 0 && polygons.length === 0 && stars.length === 0) return null
 
   return (
     <Section title="Shape">
-      {rects.length > 0 && (
+      {roundable.length > 0 && (
         <div className="field-row">
           <NumberField
-            label="⌜"
+            label={<RadiusIcon size={13} />}
             title="Corner radius"
-            value={common(rects, (n) => ('cornerRadius' in n ? n.cornerRadius[0] : 0))}
+            value={common(roundable, (n) => round2(getLiveRadius(n.id) ?? cornerRadiusOf(n)))}
             min={0}
             onChange={(v, committing) => setCornerRadius(v, committing ? undefined : 'radius')}
           />

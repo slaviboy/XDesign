@@ -120,7 +120,15 @@ export function inspectorField(page: Page, label: string): Locator {
   if (label === '∠' || label.toLowerCase() === 'rotation') {
     return page.locator('.tf-rot input')
   }
-  return page.locator('.field', { has: page.locator(`.field-label:text-is("${label}")`) }).locator('input').first()
+  // Most fields carry a visible text label; icon-labelled ones (corner radius)
+  // carry their name in `title` instead. Try both rather than guessing from the
+  // shape of the string — "Gap X" has a text label, "Corner radius" does not.
+  const byText = page
+    .locator('.field', { has: page.locator(`.field-label:text-is("${label}")`) })
+    .locator('input')
+    .first()
+  const byTitle = page.locator(`.field[title="${label}"] input`).first()
+  return byText.or(byTitle).first()
 }
 
 export async function readField(page: Page, label: string): Promise<number> {

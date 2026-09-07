@@ -72,6 +72,8 @@ interface NodeSnapshot {
   points?: number
   innerRatio?: number
   cornerRadius?: readonly [number, number, number, number]
+  /** Scalar vertex rounding for triangle / polygon / star. */
+  vertexRadius?: number
 }
 
 export interface DragSessionState {
@@ -166,6 +168,10 @@ export function beginDrag(
       points: node.type === 'star' ? node.points : undefined,
       innerRatio: node.type === 'star' ? node.innerRatio : undefined,
       cornerRadius: node.type === 'rect' ? node.cornerRadius : undefined,
+      vertexRadius:
+        node.type === 'triangle' || node.type === 'polygon' || node.type === 'star'
+          ? node.cornerRadius
+          : undefined,
     }
   })
 
@@ -467,11 +473,17 @@ function livePathData(snap: NodeSnapshot, width: number, height: number): string
     case 'ellipse':
       return ellipsePath(width, height)
     case 'triangle':
-      return trianglePath(width, height)
+      return trianglePath(width, height, snap.vertexRadius ?? 0)
     case 'polygon':
-      return polygonPath(width, height, snap.sides ?? 6)
+      return polygonPath(width, height, snap.sides ?? 6, snap.vertexRadius ?? 0)
     case 'star':
-      return starPath(width, height, snap.points ?? 5, snap.innerRatio ?? 0.5)
+      return starPath(
+        width,
+        height,
+        snap.points ?? 5,
+        snap.innerRatio ?? 0.5,
+        snap.vertexRadius ?? 0,
+      )
     case 'path':
       if (!snap.d) return null
       return transformPath(

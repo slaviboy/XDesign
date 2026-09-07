@@ -31,6 +31,14 @@ import {
 } from './DragSession'
 import { buildSnapContext, resolveSnap, type SnapContext } from './snapHelpers'
 import {
+  beginRadiusDrag,
+  cancelRadiusDrag,
+  commitRadiusDrag,
+  isRadiusDragging,
+  updateRadiusDrag,
+  type RadiusCorner,
+} from './RadiusSession'
+import {
   beginPathEditing,
   endPathEditing,
   pathEditKeyDown,
@@ -53,7 +61,7 @@ import type { Mat2D, Vec2 } from '../geometry/Matrix'
 import type { NodeId } from '../document/types'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
 
-type Phase = 'idle' | 'pending' | 'marquee' | 'transform'
+type Phase = 'idle' | 'pending' | 'marquee' | 'transform' | 'radius'
 
 interface State {
   phase: Phase
@@ -129,7 +137,18 @@ export const selectionTool: Tool = {
     // While a path's points are shown, they own the pointer.
     if (editor.nodeEditingId && pathEditPointerDown(e, ctx)) return
 
-    // 1. A selection handle takes priority over anything underneath it.
+    // 1a. A corner-radius handle. Checked before the transform handles because
+    // it sits inside the shape, where a plain click would otherwise start a move.
+    if (e.targetHandle === 'radius') {
+      const id = editor.selection[0]
+      if (id && beginRadiusDrag(doc, id, (e.targetCorner ?? 'vertex') as RadiusCorner)) {
+        state.phase = 'radius'
+        return
+      }
+      return
+    }
+
+    // 1b. A selection handle takes priority over anything underneath it.
     if (e.targetHandle) {
       const ids = editor.selection.filter((id) => !isEffectivelyLocked(doc, id))
       if (ids.length === 0) return
@@ -192,6 +211,12 @@ export const selectionTool: Tool = {
   },
 
   onPointerMove(e: CanvasPointerEvent, ctx: ToolContext): void {
+    if (state.phase === 'radius') {
+      const node = ctx.doc().nodes[editorStore.getState().selection[0] ?? '']
+      if (node) updateRadiusDrag(e.doc, node)
+      return
+    }
+
     if (editorStore.getState().nodeEditingId && pathEditPointerMove(e, ctx)) return
 
     if (state.phase === 'idle') {
@@ -240,6 +265,13 @@ export const selectionTool: Tool = {
 
   onPointerUp(e: CanvasPointerEvent, ctx: ToolContext): void {
     const editor = editorStore.getState()
+
+    if (state.phase === 'radius') {
+      commitRadiusDrag()
+      reset()
+      return
+    }
+
     if (editor.nodeEditingId && pathEditPointerUp()) return
 
     if (state.phase === 'marquee') {
@@ -306,6 +338,11 @@ export const selectionTool: Tool = {
     if (editorStore.getState().nodeEditingId && pathEditKeyDown(e)) return true
 
     if (e.key === 'Escape') {
+      if (isRadiusDragging()) {
+        cancelRadiusDrag()
+        reset()
+        return true
+      }
       if (isDragging()) {
         cancelDrag()
         reset()
@@ -325,6 +362,7 @@ export const selectionTool: Tool = {
   },
 
   onDeactivate(): void {
+    if (isRadiusDragging()) cancelRadiusDrag()
     if (isDragging()) cancelDrag()
     endPathEditing()
     setEditor({ marquee: null, hoverId: null })

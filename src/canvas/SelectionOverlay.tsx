@@ -12,8 +12,8 @@
  * the document stays untouched until commit.
  */
 
-import { memo, useEffect, useMemo, useReducer } from 'react'
-import { applyToXY, type Mat2D, type Vec2 } from '../geometry/Matrix'
+import { memo, useMemo } from 'react'
+import { applyToXY, meanScale, type Mat2D, type Vec2 } from '../geometry/Matrix'
 import { boundsFromPoints, type Bounds } from '../geometry/Bounds'
 import {
   createMatrixCache,
@@ -23,10 +23,12 @@ import {
 } from '../document/SceneGraph'
 import { docToScreen } from './Viewport'
 import { angleBetween, rotationCursor } from './cursors'
-import { liveTransform } from './LiveTransform'
 import { getDragMode, getLiveMatrix, getLiveRotation, getLiveSize, isDragging } from '../tools/DragSession'
 import { getEditingSubpaths } from '../tools/PathEditing'
-import { useDocument, useEditorStore } from '../state/hooks'
+import { getLiveRadius, radiusHandlePosition, type RadiusCorner } from '../tools/RadiusSession'
+import { cornerRadiusOf, supportsCornerRadius } from '../document/types'
+import { worldMatrix as nodeWorldMatrix } from '../document/SceneGraph'
+import { useDocument, useEditorStore, useLiveTransformTick } from '../state/hooks'
 import { RESIZE_HANDLES, type ResizeHandle } from '../tools/DragSession'
 import type { NodeId } from '../document/types'
 import type { Viewport } from '../state/EditorStore'
@@ -62,13 +64,6 @@ const HANDLE_CURSOR: Record<ResizeHandle, string> = {
   se: 'nwse-resize', s: 'ns-resize', sw: 'nesw-resize', w: 'ew-resize',
 }
 
-/** Repaint on every LiveTransform flush so the frame tracks an in-flight drag. */
-function useLiveTick(): number {
-  const [tick, bump] = useReducer((n: number) => n + 1, 0)
-  useEffect(() => liveTransform.subscribe(bump), [])
-  return tick
-}
-
 interface Frame {
   /** Corners in screen space, TL TR BR BL. Rotated for a single selection. */
   corners: Vec2[]
@@ -87,7 +82,7 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
   const nodeEditingId = useEditorStore((s) => s.nodeEditingId)
   const editingContext = useEditorStore((s) => s.editingContext)
   const dragging = useEditorStore((s) => s.isDragging)
-  const tick = useLiveTick()
+  const tick = useLiveTransformTick()
 
   const frame = useMemo(
     () => computeFrame(doc, selection, viewport, tick),
@@ -120,6 +115,10 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
           className="hover-outline"
           points={hoverOutline.map((p) => `${p.x},${p.y}`).join(' ')}
         />
+      )}
+
+      {!nodeEditingId && selection.length === 1 && (
+        <RadiusHandles nodeId={selection[0]!} viewport={viewport} tick={tick} />
       )}
 
       {nodeEditingId ? (
@@ -355,6 +354,77 @@ function SizeBadge({ x, y, text }: { x: number; y: number; text: string }) {
       <text x={width / 2} y={13} textAnchor="middle">
         {text}
       </text>
+    </g>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Corner radius handles
+// ---------------------------------------------------------------------------
+
+/** Keeps the handle grabbable when the radius is 0, in screen pixels. */
+const RADIUS_HANDLE_MIN_INSET = 13
+/** Below this on-screen size the shape is too small to host a handle. */
+const RADIUS_HANDLE_MIN_SHAPE = 34
+
+function RadiusHandles({
+  nodeId,
+  viewport,
+  tick,
+}: {
+  nodeId: NodeId
+  viewport: Viewport
+  tick: number
+}) {
+  void tick
+  const doc = useDocument()
+  const node = doc.nodes[nodeId]
+  if (!node || !supportsCornerRadius(node)) return null
+  if (node.locked) return null
+
+  const world = nodeWorldMatrix(doc, nodeId)
+  // Screen pixels per local unit, so the minimum inset is a constant on screen
+  // regardless of zoom or how far the node's ancestors have scaled it.
+  const pxPerLocal = meanScale(world) * viewport.zoom
+  if (pxPerLocal <= 0) return null
+
+  const { width, height } = node.transform
+  if (width * pxPerLocal < RADIUS_HANDLE_MIN_SHAPE) return null
+  if (height * pxPerLocal < RADIUS_HANDLE_MIN_SHAPE) return null
+
+  const live = getLiveRadius(nodeId)
+  const radius = live ?? cornerRadiusOf(node)
+  const minInset = RADIUS_HANDLE_MIN_INSET / pxPerLocal
+
+  // A box has four independently reachable corners; a polygon's vertices are
+  // generated from its sides, so one handle drives the single scalar radius.
+  const corners: RadiusCorner[] =
+    node.type === 'rect' || node.type === 'image'
+      ? ['nw', 'ne', 'se', 'sw']
+      : ['vertex']
+
+  return (
+    <g className="radius-handles">
+      {corners.map((corner) => {
+        const local = radiusHandlePosition(node, corner, radius, minInset)
+        if (!local) return null
+        const p = docToScreen(viewport, applyToXY(world, local.x, local.y))
+        return (
+          <g key={corner} data-handle="radius" data-corner={corner}>
+            {/* Invisible, larger target so the dot is easy to grab. */}
+            <circle
+              cx={p.x}
+              cy={p.y}
+              r={9}
+              fill="transparent"
+              pointerEvents="all"
+              style={{ cursor: 'nwse-resize' }}
+            />
+            <circle className="radius-handle-ring" cx={p.x} cy={p.y} r={4.5} pointerEvents="none" />
+            <circle className="radius-handle-dot" cx={p.x} cy={p.y} r={1.5} pointerEvents="none" />
+          </g>
+        )
+      })}
     </g>
   )
 }

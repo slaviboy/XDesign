@@ -29,7 +29,10 @@ distribution, z-ordering, grouping, locking, hiding, guides and a grid. Corners 
 rotation cursor oriented to the corner and the object's own angle.
 
 **Transform panel** — W/H with an aspect-ratio lock, X/Y, rotation, flips, and match
-width / height / size across a selection.
+width / height / size across a selection. Every readout tracks a drag in real time.
+
+**Corner radius** — draggable handles inside rectangles, triangles, polygons and stars.
+Drag inward to round, outward to sharpen.
 
 **Repeat Grid** — repeat a selection in a grid. Edit any cell and every cell follows,
 because the grid holds one source rather than N copies. Expand turns it into independent
@@ -170,6 +173,43 @@ libraries removed ~1.4 MB from the build.
 System fonts can be used, but their bytes are not readable by the page, so they can only be
 referenced by name. The dialog says so when a system font is in the export.
 
+### Corner rounding is geometry, not a filter
+
+`roundedPolygonPath` walks each vertex back along both its edges by
+`radius / tan(theta/2)` and joins the two points with an arc. Two details make it hold up:
+the tangent length is clamped to half the shorter adjacent edge and the radius is then
+*recomputed* from the clamped tangent, so an over-large radius shrinks instead of producing
+overlapping arcs; and the sweep flag follows the sign of the cross product, which makes a
+star's reflex inner vertices round inward with no special case.
+
+Rounding a sharp apex necessarily pulls the outline in — a triangle rounded at 8px no
+longer touches the top of its box, though a square still does, because its flat edges do.
+The node's own width and height never change; only the drawn path insets.
+
+The handles ride the arc's centre, at `radius / sin(theta/2)` along the inward bisector,
+so they visibly track the curve rather than drifting off it. Dragging projects the pointer
+onto that bisector, so moving sideways along an edge does not change the radius.
+
+Rect and image carry four addressable corners; triangle, polygon and star carry a single
+scalar, because their vertices are generated from sides/points and there is nothing stable
+to key per-corner values to.
+
+### Live readouts without breaking the no-store-writes rule
+
+The inspector updates during a drag, which sits awkwardly with the rule that drags never
+write to the store. The resolution is that it subscribes to the same LiveTransform channel
+the selection overlay uses, and reads the in-flight matrices from the session modules.
+
+That means the inspector re-renders once per animation frame while a gesture runs. This is
+a deliberate, bounded exception: the inspector is a few dozen elements, whereas writing to
+the store would re-run every node's selector, which is O(document). The cost does not grow
+with the size of the drawing.
+
+Three cases have to be distinguished, and the readout handles each separately: a
+single-node resize writes a new intrinsic size, a multi-node resize instead scales the
+matrix, and a move or rotate changes neither — so the scale has to be decomposed from the
+live matrix when there is one.
+
 ### The theme colours the chrome, never the artwork
 
 A dark UI must not repaint the document. A white artboard stays white in dark mode,
@@ -255,8 +295,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 139 unit tests (Vitest)
-npm run test:e2e   # 76 end-to-end tests (Playwright, real Chromium)
+npm test           # 164 unit tests (Vitest)
+npm run test:e2e   # 97 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```
