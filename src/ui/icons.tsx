@@ -494,6 +494,14 @@ export const InfoIcon = (p: IconProps) => (
     <path d="M8 4.9v.1" />
   </Icon>
 )
+/** A column grid: three bars with gutters between them. */
+export const ColumnGridIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="2.5" y="2.5" width="3" height="11" />
+    <rect x="6.5" y="2.5" width="3" height="11" />
+    <rect x="10.5" y="2.5" width="3" height="11" />
+  </Icon>
+)
 export const MagnetIcon = (p: IconProps) => (
   <Icon {...p}><path d="M4 12V6.5a4 4 0 018 0V12" /><path d="M4 12h3V9.5M12 12H9V9.5" /></Icon>
 )

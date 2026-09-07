@@ -17,9 +17,11 @@ import {
   distributeSelection,
   flipSelection,
   setCornerRadius,
+  setArtboardGrid,
   setBlur,
   setFill,
   setShadow,
+  type ArtboardGridPatch,
   setMarkedForExport,
   setNodeTransform,
   setOpacity,
@@ -45,7 +47,7 @@ import { getLiveRadius } from '../tools/RadiusSession'
 import { getLiveStarRatio } from '../tools/StarRatioSession'
 import { toCss, toHex } from '../document/color'
 import { fontsByCategory, isBundledFont, nearestWeight } from '../text/FontRegistry'
-import { openDialog, setCornerRadiusMode, setEditor } from '../state/EditorStore'
+import { openDialog, saveDefaultGrid, setCornerRadiusMode, setEditor } from '../state/EditorStore'
 import { useDocument, useEditorStore, useLiveTransformTick, useSelectedNodes } from '../state/hooks'
 import { IconSelect, NumberField, Section, Select, TextField, common, IconButton } from './primitives'
 import { PaintPopover, PAINT_POPOVER_WIDTH } from './ColorPicker'
@@ -65,13 +67,18 @@ import {
   BLUR_BRIGHTNESS_MAX,
   CORNER_ORDER,
   DEFAULT_BLUR,
+  DEFAULT_LAYOUT_GRID,
   DEFAULT_SHADOW,
+  DEFAULT_SQUARE_GRID,
+  gutterForColumnWidth,
+  layoutColumns,
   cornerRadiusOf,
   hasStyle,
   isContainer,
   isUniformCornerRadius,
   supportsCornerRadius,
   usesOwnBox,
+  type ArtboardNode,
   type BlurEffect,
   type DesignDocument,
   type DesignNode,
@@ -109,7 +116,13 @@ function DocumentSection() {
         </div>
       </Section>
 
-      <Section title="Grid">
+      {/* Named to distinguish it from an artboard's own grid, which is a
+          different feature with different settings. */}
+      <Section title="Canvas Grid">
+        <div className="multi-note">
+          A drawing aid across the whole canvas. An artboard's own Square or
+          Layout grid is set on the artboard.
+        </div>
         <label className="checkbox-row">
           <input
             type="checkbox"
@@ -132,7 +145,10 @@ function DocumentSection() {
             value={doc.settings.gridSize}
             min={1}
             max={500}
-            onChange={(v) => updateSettings({ gridSize: Math.round(v) })}
+            precision={0}
+            onChange={(v, committing) =>
+              updateSettings({ gridSize: Math.round(v) }, committing ? undefined : 'grid-size')
+            }
           />
         </div>
       </Section>
@@ -341,6 +357,7 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
       </Section>
 
       {styled.length > 0 && <AppearanceSection nodes={styled} />}
+      <ArtboardSection nodes={nodes} />
       <RepeatGridSection nodes={nodes} />
       <ShapeSection nodes={nodes} />
       <TextSection nodes={nodes} />
@@ -1034,6 +1051,179 @@ const CORNER_LABELS: Record<(typeof CORNER_ORDER)[number], string> = {
   ne: 'Top right corner radius',
   se: 'Bottom right corner radius',
   sw: 'Bottom left corner radius',
+}
+
+/**
+ * The Grid section for a selected artboard — Adobe: "select one or more
+ * artboards. Navigate to the Grid section in the Property Inspector and choose
+ * either Layout or Square."
+ *
+ * Column width is shown but not editable, because it is not stored: it falls
+ * out of the artboard's width, the column count, the gutter and the margins.
+ * That is exactly how Adobe keeps the grid "within the bounds of artboard" —
+ * there is no width to author that could fail to fit.
+ */
+function ArtboardSection({ nodes }: { nodes: DesignNode[] }) {
+  const [picking, setPicking] = useState<{ x: number; y: number } | null>(null)
+  const boards = nodes.filter((n): n is ArtboardNode => n.type === 'artboard')
+  if (boards.length === 0) return null
+
+  const ids = boards.map((b) => b.id)
+  const first = boards[0]!
+  const grid = first.grid
+  const kind = grid?.type ?? 'square'
+  const on = !!grid?.visible
+  const color = grid?.color ?? (kind === 'square' ? DEFAULT_SQUARE_GRID.color : DEFAULT_LAYOUT_GRID.color)
+  const width = first.transform.width
+  const columns = grid?.type === 'layout' ? layoutColumns(width, grid) : []
+
+  const set = (patch: ArtboardGridPatch, key?: string) => setArtboardGrid(ids, patch, key)
+
+  return (
+    <>
+      <Section title="Grid">
+        <div className="paint-row">
+          <PaintToggle
+            on={on}
+            label="Grid"
+            onChange={(next) =>
+              set(grid ? { visible: next } : { ...defaultGridOf(kind), visible: next })
+            }
+          />
+          {/* A plain Select, not the icon dropdown: that one shows the icon
+              alone, and there is no 16px glyph that distinguishes "Square" from
+              "Layout" the way a cap or a join draws itself. */}
+          <Select
+            value={kind}
+            options={[
+              { value: 'square', label: 'Square' },
+              { value: 'layout', label: 'Layout' },
+            ]}
+            onChange={(v) => set({ type: v as 'square' | 'layout', visible: true })}
+            title="Grid type"
+          />
+          <Swatch
+            paint={{ type: 'solid', color }}
+            onClick={(e) => {
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+              setPicking({ x: rect.left - (PAINT_POPOVER_WIDTH + 10), y: rect.top })
+            }}
+          />
+        </div>
+
+        {on && kind === 'square' && (
+          <div className="field-row cols-3">
+            <NumberField
+              label="Size"
+              title="Square Size"
+              min={1}
+              value={common(boards, (b) => (b.grid?.type === 'square' ? b.grid.size : 0))}
+              onChange={(v, committing) =>
+                set({ type: 'square', size: v }, committing ? undefined : 'grid-size')
+              }
+            />
+          </div>
+        )}
+
+        {on && kind === 'layout' && (
+          <>
+            <div className="field-row cols-3">
+              <NumberField
+                label="Cols"
+                title="Number of columns"
+                min={1}
+                value={common(boards, (b) => (b.grid?.type === 'layout' ? b.grid.columns : 0))}
+                onChange={(v, committing) =>
+                  set({ type: 'layout', columns: v }, committing ? undefined : 'grid-cols')
+                }
+              />
+              <NumberField
+                label="Gut"
+                title="Gutter width"
+                min={0}
+                value={common(boards, (b) => (b.grid?.type === 'layout' ? b.grid.gutter : 0))}
+                onChange={(v, committing) =>
+                  set({ type: 'layout', gutter: v }, committing ? undefined : 'grid-gutter')
+                }
+              />
+              <NumberField
+                label="W"
+                title="Column width — adjusting it moves the gutter, since the artboard's width is fixed"
+                min={1}
+                disabled={(grid?.type === 'layout' ? grid.columns : 1) < 2}
+                value={columns.length ? round2(columns[0]!.width) : null}
+                onChange={(v, committing) => {
+                  if (grid?.type !== 'layout') return
+                  const gutter = gutterForColumnWidth(width, grid, v)
+                  if (gutter === null) return
+                  set({ type: 'layout', gutter }, committing ? undefined : 'grid-colw')
+                }}
+              />
+            </div>
+            <div className="field-row cols-3">
+              <NumberField
+                label="L"
+                title="Left margin"
+                min={0}
+                value={common(boards, (b) => (b.grid?.type === 'layout' ? b.grid.marginLeft : 0))}
+                onChange={(v, committing) =>
+                  set({ type: 'layout', marginLeft: v }, committing ? undefined : 'grid-ml')
+                }
+              />
+              <NumberField
+                label="R"
+                title="Right margin"
+                min={0}
+                value={common(boards, (b) => (b.grid?.type === 'layout' ? b.grid.marginRight : 0))}
+                onChange={(v, committing) =>
+                  set({ type: 'layout', marginRight: v }, committing ? undefined : 'grid-mr')
+                }
+              />
+            </div>
+            {on && columns.length === 0 && (
+              <div className="multi-note">
+                The margins and gutters leave no room for {first.grid?.type === 'layout'
+                  ? first.grid.columns
+                  : 0}{' '}
+                columns on a {round2(width)}-wide artboard.
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
+          <button
+            type="button"
+            className="button"
+            title="Use this grid for new artboards, in this and future documents"
+            onClick={() => saveDefaultGrid(first.grid ?? defaultGridOf(kind))}
+          >
+            Make Default
+          </button>
+        </div>
+      </Section>
+
+      {picking && (
+        <PaintPopover
+          paint={{ type: 'solid', color }}
+          anchor={picking}
+          // A grid line has a colour, not a paint: a gradient grid is not a
+          // thing in XD, and the alpha is the point (Adobe's example is 20%).
+          allowGradient={false}
+          onChange={(paint, committing) => {
+            if (paint.type === 'solid') {
+              set({ color: paint.color }, committing ? undefined : 'grid-color')
+            }
+          }}
+          onClose={() => setPicking(null)}
+        />
+      )}
+    </>
+  )
+}
+
+function defaultGridOf(kind: 'square' | 'layout') {
+  return kind === 'square' ? { ...DEFAULT_SQUARE_GRID } : { ...DEFAULT_LAYOUT_GRID }
 }
 
 function RepeatGridSection({ nodes }: { nodes: DesignNode[] }) {

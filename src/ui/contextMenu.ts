@@ -6,21 +6,75 @@
  */
 
 import {
-  alignSelection, canMaskSelection, canOutlineStrokeSelection, deleteSelection,
-  distributeSelection, flipSelection, groupSelection, maskWithShape, orderCommand,
-  outlineStrokeSelection, rotateSelection, setLocked, setMarkedForExport,
-  setVisibility, ungroupMask, ungroupSelection,
+  alignSelection, canMaskSelection, canOutlineStrokeSelection, clearGuides, copyGuides,
+  deleteSelection, distributeSelection, flipSelection, groupSelection, hasCopiedGuides,
+  maskWithShape, orderCommand, outlineStrokeSelection, pasteGuides, rotateSelection,
+  setGuidesLocked, setLocked, setMarkedForExport, setVisibility, ungroupMask,
+  ungroupSelection,
 } from '../history/Commands'
 import { runBooleanOperation } from '../history/BooleanCommands'
 import { copySelection, cutSelection, duplicateInPlace, hasClipboardContent, paste } from '../state/Clipboard'
 import { getDoc } from '../state/DocumentStore'
 import { editorStore, openDialog } from '../state/EditorStore'
-import { isMaskGroup, isShape } from '../document/types'
+import { isMaskGroup, isShape, type DesignDocument, type NodeId } from '../document/types'
+import { artboardIds, geometryBounds } from '../document/SceneGraph'
+import { containsPoint } from '../geometry/Bounds'
 import { MOD_LABEL } from '../shortcuts/bindings'
 import type { MenuItemSpec } from './Menu'
 import type { Vec2 } from '../geometry/Matrix'
 
 const MOD = MOD_LABEL
+
+/**
+ * The artboards a Guides command should act on.
+ *
+ * Selected artboards if there are any; otherwise the one under the pointer, so
+ * right-clicking empty artboard space reaches its guides — which is where Adobe
+ * puts the command ("right-click on the artboard and select Guides > Lock All
+ * Guides").
+ */
+function guideTargets(doc: DesignDocument, selection: readonly NodeId[], at: Vec2): NodeId[] {
+  const selected = selection.filter((id) => doc.nodes[id]?.type === 'artboard')
+  if (selected.length > 0) return selected
+  const under = artboardIds(doc).filter((id) => containsPoint(geometryBounds(doc, id), at))
+  return under.length ? [under[under.length - 1]!] : []
+}
+
+/** Adobe's Guides submenu, shared by the empty-canvas and selection menus. */
+function guidesSubmenu(doc: DesignDocument, targets: readonly NodeId[]): MenuItemSpec {
+  const boards = targets.map((id) => doc.nodes[id]).filter((n) => n?.type === 'artboard')
+  const locked = boards.length > 0 && boards.every((n) => n && 'guidesLocked' in n && n.guidesLocked)
+  const any = boards.some((n) => n && 'guides' in n && !!n.guides?.length)
+  return {
+    kind: 'submenu',
+    label: 'Guides',
+    items: [
+      {
+        label: 'Copy Guides',
+        disabled: targets.length !== 1 || !any,
+        onSelect: () => copyGuides(targets[0]!),
+      },
+      {
+        label: 'Paste Guides',
+        disabled: targets.length === 0 || !hasCopiedGuides(),
+        onSelect: () => pasteGuides(targets),
+      },
+      { kind: 'separator' },
+      {
+        label: 'Remove All Guides',
+        disabled: !any,
+        onSelect: () => clearGuides(targets),
+      },
+      {
+        label: 'Lock All Guides',
+        shortcut: `⇧${MOD};`,
+        checked: locked,
+        disabled: targets.length === 0,
+        onSelect: () => setGuidesLocked(targets, !locked),
+      },
+    ],
+  }
+}
 
 export function buildContextMenu(at: Vec2): MenuItemSpec[] {
   const doc = getDoc()
@@ -32,6 +86,7 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
   const allLocked = has && nodes.every((n) => n!.locked)
   const allHidden = has && nodes.every((n) => !n!.visible)
   const allMarked = has && nodes.every((n) => n!.markedForExport)
+  const guideBoards = guideTargets(doc, selection, at)
 
   if (!has) {
     return [
@@ -39,6 +94,7 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
       { kind: 'separator' },
       { label: 'Select All', shortcut: `${MOD}A`, onSelect: () => import('../history/Commands').then((m) => m.selectAll()) },
       { label: 'New Artboard…', onSelect: () => openDialog('artboard-preset') },
+      ...(guideBoards.length ? [guidesSubmenu(doc, guideBoards)] : []),
       { kind: 'separator' },
       { label: 'Export…', shortcut: `${MOD}E`, onSelect: () => openDialog('export') },
     ]
@@ -77,6 +133,7 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
       disabled: !canOutlineStrokeSelection(),
       onSelect: () => outlineStrokeSelection(),
     },
+    ...(guideBoards.length ? [guidesSubmenu(doc, guideBoards)] : []),
     { kind: 'separator' },
     {
       kind: 'submenu',

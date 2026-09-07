@@ -11,10 +11,8 @@
 
 import { memo, useMemo } from 'react'
 import { visibleDocBounds } from './Viewport'
+import { gridStepForZoom } from './gridMath'
 import { useDocumentStore, useEditorStore } from '../state/hooks'
-
-/** Below this on-screen spacing the grid is stepped up to the next multiple. */
-const MIN_SCREEN_SPACING = 6
 
 export const GridOverlay = memo(function GridOverlay() {
   const visible = useDocumentStore((s) => s.doc.settings.gridVisible)
@@ -24,8 +22,7 @@ export const GridOverlay = memo(function GridOverlay() {
 
   const lines = useMemo(() => {
     if (!visible || gridSize <= 0) return null
-    let step = gridSize
-    while (step * viewport.zoom < MIN_SCREEN_SPACING) step *= 2
+    const step = gridStepForZoom(gridSize, viewport.zoom)
     // Guard against a pathological zoom producing an unbounded loop of lines.
     const view = visibleDocBounds(viewport, canvasSize, 0)
     const cols = Math.ceil(view.width / step)

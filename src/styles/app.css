@@ -164,7 +164,19 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .canvas-svg { display: block; }
 
 .grid-overlay line { stroke: var(--grid-line); stroke-width: 1; }
-.guides-overlay .guide { stroke: var(--guide); opacity: 0.85; }
+.artboard-guides .guide { stroke: var(--guide); stroke-width: 1; opacity: 0.85; }
+/* Wide enough to catch without hunting, invisible so it does not thicken the
+   line. Stroke, not fill: a line has no interior. */
+.artboard-guides .guide-hit { stroke: transparent; stroke-width: 9; }
+/* A locked guide is still shown — Adobe's lock stops it moving, not showing —
+   but it is dimmed so the reason it will not budge is visible. */
+.artboard-guides .guide.locked { opacity: 0.45; }
+
+/* The pull-out areas on an artboard's top and left border. Invisible until
+   hovered: they sit in the margin around the artboard, and a permanently
+   painted band there would read as part of the artwork. */
+.guide-strip { fill: transparent; }
+.guide-strip:hover { fill: var(--guide); fill-opacity: 0.18; }
 
 .selection-frame {
   fill: none;

@@ -253,8 +253,16 @@ export function PreferencesDialog() {
         info="The spacing between grid lines, in document units — the same units as the W and H fields."
       >
         <div className="dialog-row" style={{ marginTop: 10 }}>
-          <label>Grid size</label>
-          <NumberField value={doc.settings.gridSize} min={1} max={500} precision={0} onChange={(v) => updateSettings({ gridSize: Math.round(v) })} />
+          <label>Canvas grid size</label>
+          <NumberField
+            value={doc.settings.gridSize}
+            min={1}
+            max={500}
+            precision={0}
+            onChange={(v, committing) =>
+              updateSettings({ gridSize: Math.round(v) }, committing ? undefined : 'grid-size')
+            }
+          />
         </div>
       </PreferenceRow>
 

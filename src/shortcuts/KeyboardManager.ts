@@ -18,6 +18,7 @@ import {
   deleteSelection,
   groupSelection,
   maskWithShape,
+  setGuidesLocked,
   outlineStrokeSelection,
   moveSelection,
   orderCommand,
@@ -40,7 +41,7 @@ import {
   zoomAt,
 } from '../state/EditorStore'
 import { centerViewport, fitViewport, nextZoomStep } from '../canvas/Viewport'
-import { boundsOfNodes, documentBounds } from '../document/SceneGraph'
+import { artboardIds, boundsOfNodes, documentBounds } from '../document/SceneGraph'
 import { getTool, TOOL_SHORTCUTS } from '../tools/ToolRegistry'
 import type { ToolContext } from '../tools/types'
 
@@ -208,17 +209,32 @@ export function installKeyboard(ctx: ToolContext, handlers: KeyboardHandlers): (
           return
         case "'": {
           e.preventDefault()
-          const settings = getDoc().settings
-          updateSettings({ gridVisible: !settings.gridVisible })
+          if (e.shiftKey) {
+            // Moved here from ⇧⌘; so that key can carry Adobe's Lock Guides.
+            // It sits next to ⌘' (toggle grid), which reads well.
+            setEditor({ snapEnabled: !editorStore.getState().snapEnabled })
+          } else {
+            updateSettings({ gridVisible: !getDoc().settings.gridVisible })
+          }
           return
         }
         case ';': {
           e.preventDefault()
           if (e.shiftKey) {
-            setEditor({ snapEnabled: !editorStore.getState().snapEnabled })
+            // Adobe's binding for "Lock All Guides", applied to the selected
+            // artboards or, with nothing selected, to every artboard.
+            const doc = getDoc()
+            const selected = editorStore
+              .getState()
+              .selection.filter((id) => doc.nodes[id]?.type === 'artboard')
+            const targets = selected.length ? selected : artboardIds(doc)
+            const locked = targets.every((id) => {
+              const n = doc.nodes[id]
+              return n?.type === 'artboard' && n.guidesLocked
+            })
+            setGuidesLocked(targets, !locked)
           } else {
-            const settings = getDoc().settings
-            updateSettings({ guidesVisible: !settings.guidesVisible })
+            updateSettings({ guidesVisible: !getDoc().settings.guidesVisible })
           }
           return
         }

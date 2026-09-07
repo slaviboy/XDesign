@@ -8,7 +8,7 @@
 
 import { createStore } from 'zustand/vanilla'
 import { subscribeWithSelector } from 'zustand/middleware'
-import type { NodeId } from '../document/types'
+import type { ArtboardGrid, NodeId } from '../document/types'
 import type { Bounds } from '../geometry/Bounds'
 
 /** One path point (or one of its two handles), addressed unambiguously. */
@@ -222,6 +222,37 @@ export function setMarqueeMode(mode: MarqueeMode): void {
     localStorage.setItem(MARQUEE_MODE_STORAGE_KEY, mode)
   } catch {
     // Storage blocked: the choice still applies for this session.
+  }
+}
+
+/**
+ * Adobe's "Make Default": the grid new artboards start with.
+ *
+ * "This option sets the default grid option for your account. Any new files you
+ * open with XD has this new default." — so it belongs in localStorage beside
+ * the theme and the marquee mode, not in the document.
+ */
+export const DEFAULT_GRID_STORAGE_KEY = 'xdesign.defaultGrid'
+
+export function saveDefaultGrid(grid: ArtboardGrid): void {
+  try {
+    localStorage.setItem(DEFAULT_GRID_STORAGE_KEY, JSON.stringify(grid))
+  } catch {
+    // Storage blocked: nothing to do, and nothing worth telling the user.
+  }
+}
+
+/** The saved default, or null. Shape-checked: it is user-editable storage. */
+export function readDefaultGrid(): ArtboardGrid | null {
+  try {
+    const raw = localStorage.getItem(DEFAULT_GRID_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as ArtboardGrid
+    if (parsed?.type === 'square' && typeof parsed.size === 'number') return parsed
+    if (parsed?.type === 'layout' && typeof parsed.columns === 'number') return parsed
+    return null
+  } catch {
+    return null
   }
 }
 

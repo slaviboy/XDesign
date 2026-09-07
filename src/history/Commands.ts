@@ -12,6 +12,7 @@ import {
   clearSelection,
   editorStore,
   notify,
+  readDefaultGrid,
   setSelection,
   type ToolId,
 } from '../state/EditorStore'
@@ -46,14 +47,18 @@ import {
 } from '../document/SceneGraph'
 import { outlineStroke } from '../geometry/StrokeOutline'
 import { rgbaEquals } from '../document/color'
-import { createSwatchId } from '../document/ids'
+import { createGuideId, createSwatchId } from '../document/ids'
 import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
 import { createArtboard, createGroup, createPath } from '../document/NodeFactory'
 import { current, isDraft } from 'immer'
 import { invert, multiply, rotationAbout, type Mat2D } from '../geometry/Matrix'
 import { center, containsPoint, type Bounds } from '../geometry/Bounds'
 import type {
+  ArtboardGrid,
   BlurEffect,
+  Guide,
+  LayoutGrid,
+  SquareGrid,
   DesignDocument,
   DesignNode,
   NodeId,
@@ -68,7 +73,9 @@ import {
   BLUR_AMOUNT_MAX,
   BLUR_BRIGHTNESS_MAX,
   DEFAULT_BLUR,
+  DEFAULT_LAYOUT_GRID,
   DEFAULT_SHADOW,
+  DEFAULT_SQUARE_GRID,
   DEFAULT_STROKE,
   cornerIndex,
   hasScalarCornerRadius,
@@ -153,6 +160,9 @@ export function createArtboardCommand(
     width: Math.max(1, bounds.width),
     height: Math.max(1, bounds.height),
   })
+  // Adobe's "Make Default" applies to artboards made from here on.
+  const preset = readDefaultGrid()
+  if (preset) artboard.grid = { ...preset }
   const ok = transaction('Create artboard', (draft) => {
     addNode(draft, artboard, draft.rootId)
   })
@@ -999,10 +1009,17 @@ export function moveNodeInTree(id: NodeId, newParentId: NodeId, index: number): 
 // Document settings
 // ---------------------------------------------------------------------------
 
-export function updateSettings(patch: Partial<DesignDocument['settings']>): boolean {
-  return transaction('Settings', (draft) => {
-    draft.settings = { ...draft.settings, ...patch }
-  })
+export function updateSettings(
+  patch: Partial<DesignDocument['settings']>,
+  coalesceKey?: string,
+): boolean {
+  return transaction(
+    'Settings',
+    (draft) => {
+      draft.settings = { ...draft.settings, ...patch }
+    },
+    { coalesceKey },
+  )
 }
 
 export function renameDocument(name: string): boolean {
@@ -1015,40 +1032,212 @@ export function renameDocument(name: string): boolean {
   })
 }
 
-export function addGuide(axis: 'x' | 'y', position: number, id: string): boolean {
-  return transaction('Add guide', (draft) => {
-    draft.guides.push({ id, axis, position })
+// ---------------------------------------------------------------------------
+// Guides
+// ---------------------------------------------------------------------------
+
+/**
+ * Guides belong to an artboard and are positioned in ITS local space.
+ *
+ * `addGuide` mints its own id. The previous signature took one from the caller,
+ * which is part of why it had no callers at all: there was nothing convenient
+ * to call.
+ */
+export function addGuide(artboardId: NodeId, axis: 'x' | 'y', position: number): string | null {
+  const id = createGuideId()
+  const ok = transaction('Add guide', (draft) => {
+    const board = draft.nodes[artboardId]
+    if (!board || board.type !== 'artboard') return false
+    // A locked guide layer takes no new guides either: the edge strips are
+    // hidden while it is locked, so allowing it here would only be reachable
+    // by a command that the UI does not offer.
+    if (board.guidesLocked) return false
+    board.guides = [...(board.guides ?? []), { id, axis, position }]
+    return undefined
   })
+  return ok ? id : null
 }
 
-export function moveGuide(id: string, position: number): boolean {
+/**
+ * The coalesce key is the CALLER's to choose, not a default.
+ *
+ * A default initializer fires on an explicit `undefined`, so a caller asking
+ * for its own history entry would silently get the shared key and be merged
+ * into whatever came before it.
+ */
+export function moveGuide(
+  artboardId: NodeId,
+  guideId: string,
+  position: number,
+  coalesceKey?: string,
+): boolean {
   return transaction(
     'Move guide',
     (draft) => {
-      const g = draft.guides.find((x) => x.id === id)
+      const board = draft.nodes[artboardId]
+      if (!board || board.type !== 'artboard' || board.guidesLocked) return false
+      const g = board.guides?.find((x) => x.id === guideId)
       if (!g) return false
       g.position = position
       return undefined
     },
-    { coalesceKey: `guide:${id}` },
+    { coalesceKey },
   )
 }
 
-export function removeGuide(id: string): boolean {
+export function removeGuide(artboardId: NodeId, guideId: string): boolean {
   return transaction('Remove guide', (draft) => {
-    const i = draft.guides.findIndex((g) => g.id === id)
-    if (i < 0) return false
-    draft.guides.splice(i, 1)
+    const board = draft.nodes[artboardId]
+    if (!board || board.type !== 'artboard' || board.guidesLocked) return false
+    const next = (board.guides ?? []).filter((g) => g.id !== guideId)
+    if (next.length === (board.guides ?? []).length) return false
+    board.guides = next
     return undefined
   })
 }
 
-export function clearGuides(): boolean {
-  return transaction('Clear guides', (draft) => {
-    if (draft.guides.length === 0) return false
-    draft.guides = []
-    return undefined
+/** Adobe's "Remove All Guides", over every artboard given. */
+export function clearGuides(artboardIds: readonly NodeId[]): boolean {
+  return transaction('Remove all guides', (draft) => {
+    let touched = false
+    for (const id of artboardIds) {
+      const board = draft.nodes[id]
+      if (!board || board.type !== 'artboard' || board.guidesLocked) continue
+      if (!board.guides?.length) continue
+      board.guides = []
+      touched = true
+    }
+    return touched ? undefined : false
   })
+}
+
+/** Adobe's "Lock All Guides": still drawn, no longer draggable. */
+export function setGuidesLocked(artboardIds: readonly NodeId[], locked: boolean): boolean {
+  return transaction(locked ? 'Lock guides' : 'Unlock guides', (draft) => {
+    let touched = false
+    for (const id of artboardIds) {
+      const board = draft.nodes[id]
+      if (!board || board.type !== 'artboard') continue
+      if (!!board.guidesLocked === locked) continue
+      board.guidesLocked = locked
+      touched = true
+    }
+    return touched ? undefined : false
+  })
+}
+
+/**
+ * The guide clipboard.
+ *
+ * Deliberately not the system clipboard: copying guides is an in-app operation
+ * on chrome, and the real clipboard already carries nodes — putting guides
+ * there would make Copy Guides and Copy fight over it.
+ */
+let copiedGuides: Guide[] | null = null
+
+export function copyGuides(artboardId: NodeId): number {
+  const board = getDoc().nodes[artboardId]
+  if (!board || board.type !== 'artboard') return 0
+  copiedGuides = (board.guides ?? []).map((g) => ({ ...g }))
+  return copiedGuides.length
+}
+
+export function hasCopiedGuides(): boolean {
+  return !!copiedGuides && copiedGuides.length > 0
+}
+
+/**
+ * Paste onto every artboard given, REPLACING what is there.
+ *
+ * Positions are local, so the same set lands in the same place relative to each
+ * artboard — which is the point of the feature: one set of guides applied
+ * across a set of screens.
+ */
+export function pasteGuides(artboardIds: readonly NodeId[]): boolean {
+  const source = copiedGuides
+  if (!source || source.length === 0) return false
+  return transaction('Paste guides', (draft) => {
+    let touched = false
+    for (const id of artboardIds) {
+      const board = draft.nodes[id]
+      if (!board || board.type !== 'artboard' || board.guidesLocked) continue
+      board.guides = source.map((g) => ({ ...g, id: createGuideId() }))
+      touched = true
+    }
+    return touched ? undefined : false
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Artboard grids
+// ---------------------------------------------------------------------------
+
+export type ArtboardGridPatch =
+  | ({ type: 'square' } & Partial<Omit<SquareGrid, 'type'>>)
+  | ({ type: 'layout' } & Partial<Omit<LayoutGrid, 'type'>>)
+  | (Partial<Omit<SquareGrid, 'type'>> & Partial<Omit<LayoutGrid, 'type'>> & { type?: undefined })
+
+/**
+ * Set or edit the grid on every artboard given.
+ *
+ * Switching `type` starts from that kind's defaults rather than trying to carry
+ * a square's `size` across to a layout grid's `columns`, which share nothing.
+ * A patch with no `type` edits whatever kind is already there.
+ *
+ * Takes a coalesce key, as setRepeatGridParams does — without one, every
+ * keystroke in a column-count field is its own undo entry.
+ */
+export function setArtboardGrid(
+  artboardIds: readonly NodeId[],
+  patch: ArtboardGridPatch,
+  coalesceKey?: string,
+): boolean {
+  return transaction(
+    'Grid',
+    (draft) => {
+      let touched = false
+      for (const id of artboardIds) {
+        const board = draft.nodes[id]
+        if (!board || board.type !== 'artboard') continue
+        const base: ArtboardGrid =
+          patch.type && patch.type !== board.grid?.type
+            ? patch.type === 'square'
+              ? { ...DEFAULT_SQUARE_GRID }
+              : { ...DEFAULT_LAYOUT_GRID }
+            : (board.grid ?? { ...DEFAULT_SQUARE_GRID })
+        board.grid = clampGrid({ ...base, ...clonePlain(patch) } as ArtboardGrid)
+        touched = true
+      }
+      return touched ? undefined : false
+    },
+    { coalesceKey },
+  )
+}
+
+/** Remove the grid entirely, as opposed to hiding it. */
+export function removeArtboardGrid(artboardIds: readonly NodeId[]): boolean {
+  return transaction('Remove grid', (draft) => {
+    let touched = false
+    for (const id of artboardIds) {
+      const board = draft.nodes[id]
+      if (!board || board.type !== 'artboard' || !board.grid) continue
+      delete board.grid
+      touched = true
+    }
+    return touched ? undefined : false
+  })
+}
+
+/** Exported so the file reader clamps by exactly the same rules as the editor. */
+export function clampGrid(grid: ArtboardGrid): ArtboardGrid {
+  if (grid.type === 'square') return { ...grid, size: Math.max(1, grid.size) }
+  return {
+    ...grid,
+    columns: Math.max(1, Math.round(grid.columns)),
+    gutter: Math.max(0, grid.gutter),
+    marginLeft: Math.max(0, grid.marginLeft),
+    marginRight: Math.max(0, grid.marginRight),
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -106,13 +106,11 @@ describe('file format round trip', () => {
     expect(Object.values(back.nodes).some((n) => n.type === 'rect')).toBe(true)
   })
 
-  it('round-trips guides and settings', () => {
+  it('round-trips settings', () => {
     const doc = docWith((d) => {
-      d.guides = [{ id: 'g1', axis: 'x', position: 120 }]
       d.settings = { ...d.settings, gridSize: 16, gridVisible: true, snapToGrid: true }
     })
     const back = deserializeDocument(serializeDocument(doc))
-    expect(back.guides).toEqual([{ id: 'g1', axis: 'x', position: 120 }])
     expect(back.settings.gridSize).toBe(16)
     expect(back.settings.snapToGrid).toBe(true)
   })

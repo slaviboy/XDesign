@@ -21,12 +21,21 @@ import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate'
 import {
   DEFAULT_SETTINGS,
   type DesignDocument, type DesignNode, type ImageAsset, type NodeId,
-  type RGBA, type Swatch,
+  type ArtboardGrid, type Guide, type RGBA, type Swatch,
 } from '../document/types'
 import { createDocumentRoot } from '../document/NodeFactory'
+import { artboardIds, createMatrixCache, geometryBounds } from '../document/SceneGraph'
+import { clampGrid } from '../history/Commands'
 
 export const FORMAT_NAME = 'OfflineDesignDocument'
-export const FORMAT_VERSION = 2
+/**
+ * 3: guides moved from `document.guides` onto the artboard that owns them.
+ *
+ * A bump rather than the usual additive field, because this MOVES data: a
+ * version-2 file's guides are read from the old place and distributed, and
+ * nothing is written back there.
+ */
+export const FORMAT_VERSION = 3
 export const FILE_EXTENSION = '.xdesign'
 export const MIME_TYPE = 'application/x-xdesign+zip'
 
@@ -40,7 +49,8 @@ export interface XDesignFile {
     createdAt: number
     modifiedAt: number
     settings: DesignDocument['settings']
-    guides: DesignDocument['guides']
+    /** Version 2 and earlier only; guides now live on their artboard. */
+    guides?: Guide[]
     swatches?: DesignDocument['swatches']
   }
   rootId: NodeId
@@ -85,7 +95,6 @@ export function serializeDocument(
       createdAt: doc.createdAt,
       modifiedAt: Date.now(),
       settings: doc.settings,
-      guides: doc.guides,
       swatches: doc.swatches,
     },
     rootId: doc.rootId,
@@ -249,6 +258,7 @@ function buildDocument(
   }
 
   repairHierarchy(nodes, rootId)
+  sanitizeArtboardExtras(nodes)
 
   const assets: Record<string, ImageAsset> = {}
   for (const asset of payload.assets ?? []) {
@@ -270,13 +280,12 @@ function buildDocument(
     }
   }
 
-  return {
+  const doc: DesignDocument = {
     id: payload.document?.id ?? `doc${Date.now().toString(36)}`,
     name: payload.document?.name ?? 'Untitled',
     nodes,
     rootId,
     assets,
-    guides: Array.isArray(payload.document?.guides) ? payload.document.guides : [],
     // Absent in files written before swatches existed, which is exactly the
     // right default — no version bump needed for a purely additive field.
     swatches: Array.isArray(payload.document?.swatches)
@@ -286,6 +295,100 @@ function buildDocument(
     createdAt: payload.document?.createdAt ?? Date.now(),
     modifiedAt: payload.document?.modifiedAt ?? Date.now(),
   }
+
+  // After the document is whole, so artboard bounds can be resolved.
+  if (payload.version <= 2 && Array.isArray(payload.document?.guides)) {
+    migrateGuidesToArtboards(doc, payload.document.guides.filter(isGuide))
+  }
+  return doc
+}
+
+/** Repair-what-you-can: a malformed guide is dropped, not fatal. */
+function isGuide(value: unknown): value is Guide {
+  if (!value || typeof value !== 'object') return false
+  const g = value as Guide
+  return (
+    typeof g.id === 'string' &&
+    (g.axis === 'x' || g.axis === 'y') &&
+    typeof g.position === 'number' &&
+    Number.isFinite(g.position)
+  )
+}
+
+/**
+ * Move a version-2 document's guides onto the artboards they fall inside.
+ *
+ * The old guides were world-space lines spanning the whole canvas; the new ones
+ * belong to an artboard and are stored in its local space. A guide that crosses
+ * no artboard has nowhere to go and is dropped — keeping it would mean keeping
+ * the document-level list alive for the one case it no longer serves.
+ */
+function migrateGuidesToArtboards(doc: DesignDocument, legacy: readonly Guide[]): void {
+  if (legacy.length === 0) return
+  const cache = createMatrixCache()
+  const boards = artboardIds(doc)
+
+  for (const guide of legacy) {
+    // Backwards: artboardIds is paint order, so the LAST match is the topmost,
+    // which is the one a click would have chosen too (see containerAtPoint).
+    for (let i = boards.length - 1; i >= 0; i--) {
+      const id = boards[i]!
+      const board = doc.nodes[id]
+      if (!board || board.type !== 'artboard') continue
+      const b = geometryBounds(doc, id, cache)
+      const lo = guide.axis === 'x' ? b.x : b.y
+      const hi = guide.axis === 'x' ? b.x + b.width : b.y + b.height
+      if (guide.position < lo || guide.position > hi) continue
+      board.guides = [...(board.guides ?? []), { ...guide, position: guide.position - lo }]
+      break
+    }
+  }
+}
+
+/**
+ * Trust nothing that came off disk.
+ *
+ * Node fields skip the guide validation above entirely — they arrive inside
+ * `layers` — so a hand-edited or truncated file could put a string where a
+ * position belongs and have the renderer paint NaN. This is the same hole
+ * `isSwatch` exists to close, applied to the artboard's own additions.
+ */
+function sanitizeArtboardExtras(nodes: Record<NodeId, DesignNode>): void {
+  for (const node of Object.values(nodes)) {
+    if (node.type !== 'artboard') continue
+    const guides = Array.isArray(node.guides) ? node.guides.filter(isGuide) : []
+    // Deleted rather than left empty, so an artboard with no guides costs
+    // nothing in the file.
+    if (guides.length) node.guides = guides
+    else delete node.guides
+    if (node.guidesLocked !== true) delete node.guidesLocked
+
+    const grid = readGrid(node.grid)
+    if (grid) node.grid = grid
+    else delete node.grid
+  }
+}
+
+function isRgba(value: unknown): value is RGBA {
+  if (!value || typeof value !== 'object') return false
+  const c = value as RGBA
+  return [c.r, c.g, c.b, c.a].every((n) => typeof n === 'number' && Number.isFinite(n))
+}
+
+/** A grid with any bad field is dropped whole: half a grid is not a grid. */
+function readGrid(value: unknown): ArtboardGrid | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const g = value as ArtboardGrid
+  if (typeof g.visible !== 'boolean' || !isRgba(g.color)) return undefined
+  if (g.type === 'square') {
+    return typeof g.size === 'number' && Number.isFinite(g.size) ? clampGrid(g) : undefined
+  }
+  if (g.type === 'layout') {
+    const numbers = [g.columns, g.gutter, g.marginLeft, g.marginRight]
+    if (!numbers.every((n) => typeof n === 'number' && Number.isFinite(n))) return undefined
+    return clampGrid(g)
+  }
+  return undefined
 }
 
 /** Repair-what-you-can: a malformed swatch is dropped, not fatal. */

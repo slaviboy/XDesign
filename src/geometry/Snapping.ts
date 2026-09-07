@@ -119,16 +119,21 @@ export function candidatesFromBounds(b: Bounds, kind: SnapKind = 'edge'): SnapCa
   ]
 }
 
+/**
+ * @param frame the extent the drawn line should span — the guide's own
+ *   artboard, not the viewport. A guide belongs to an artboard, so a line
+ *   stretching across the whole screen would claim a reach it does not have.
+ */
 export function candidatesFromGuides(
   guides: readonly { axis: 'x' | 'y'; position: number }[],
-  viewport: Bounds,
+  frame: Bounds,
 ): SnapCandidate[] {
   return guides.map((g) => ({
     axis: g.axis,
     position: g.position,
     kind: 'guide' as SnapKind,
-    from: g.axis === 'x' ? viewport.y : viewport.x,
-    to: g.axis === 'x' ? bottom(viewport) : right(viewport),
+    from: g.axis === 'x' ? frame.y : frame.x,
+    to: g.axis === 'x' ? bottom(frame) : right(frame),
   }))
 }
 

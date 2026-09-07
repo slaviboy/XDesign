@@ -49,6 +49,7 @@ import {
   usesOwnBox,
   type DesignDocument,
   type DesignNode,
+  type Guide,
   type NodeId,
   type Transform,
 } from './types'
@@ -386,6 +387,36 @@ export function paintOrderIndex(doc: DesignDocument, id: NodeId): number {
     return undefined
   })
   return found
+}
+
+/**
+ * Every guide in the document, in WORLD space, with the artboard it came from.
+ *
+ * Guides are authored in an artboard's local space so they travel with it, but
+ * snapping and hit-testing both work in world space — so the conversion lives
+ * here rather than being repeated at each call site.
+ */
+export function worldGuides(
+  doc: DesignDocument,
+  cache?: MatrixCache,
+): Array<{ artboardId: NodeId; guide: Guide; position: number }> {
+  const mc = cache ?? createMatrixCache()
+  const out: Array<{ artboardId: NodeId; guide: Guide; position: number }> = []
+  for (const id of artboardIds(doc)) {
+    const node = doc.nodes[id]
+    if (!node || node.type !== 'artboard' || !node.guides?.length) continue
+    const m = mc.world(doc, id)
+    for (const guide of node.guides) {
+      // Only the guide's own axis matters: the other coordinate is arbitrary,
+      // since the line spans the artboard.
+      const p = applyToPoint(m, {
+        x: guide.axis === 'x' ? guide.position : 0,
+        y: guide.axis === 'y' ? guide.position : 0,
+      })
+      out.push({ artboardId: id, guide, position: guide.axis === 'x' ? p.x : p.y })
+    }
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------

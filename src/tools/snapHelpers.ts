@@ -13,7 +13,7 @@ import {
   type SnapCandidate,
   type SnapResult,
 } from '../geometry/Snapping'
-import { createMatrixCache, geometryBounds } from '../document/SceneGraph'
+import { createMatrixCache, geometryBounds, worldGuides } from '../document/SceneGraph'
 import { isContainer } from '../document/types'
 import { visibleDocBounds } from '../canvas/Viewport'
 import type { Bounds } from '../geometry/Bounds'
@@ -82,7 +82,30 @@ export function collectSnapCandidates(
   const root = doc.nodes[doc.rootId]
   if (isContainer(root)) for (const child of root.children) visit(child, 0)
 
-  out.push(...candidatesFromGuides(doc.guides, view))
+  return out
+}
+
+/**
+ * Guide candidates, in world space.
+ *
+ * Separate from the object candidates because guides are separately gated: a
+ * guide is not an object, and turning off "snap to objects" used to silently
+ * take guide snapping with it.
+ */
+export function collectGuideCandidates(doc: DesignDocument): SnapCandidate[] {
+  const cache = createMatrixCache()
+  const byBoard = new Map<NodeId, Array<{ axis: 'x' | 'y'; position: number }>>()
+  for (const g of worldGuides(doc, cache)) {
+    const list = byBoard.get(g.artboardId)
+    const entry = { axis: g.guide.axis, position: g.position }
+    if (list) list.push(entry)
+    else byBoard.set(g.artboardId, [entry])
+  }
+
+  const out: SnapCandidate[] = []
+  for (const [artboardId, guides] of byBoard) {
+    out.push(...candidatesFromGuides(guides, geometryBounds(doc, artboardId, cache)))
+  }
   return out
 }
 
@@ -91,7 +114,14 @@ export interface SnapContext {
   thresholdDoc: number
   gridSize: number
   snapToGridEnabled: boolean
-  snapToObjectsEnabled: boolean
+  /**
+   * Whether to consult `candidates` at all.
+   *
+   * Not "snapToObjects": the list holds guides too, and they are gated
+   * separately — a guide is not an object, and turning off object snapping used
+   * to take guide snapping silently with it.
+   */
+  useCandidates: boolean
 }
 
 export function buildSnapContext(
@@ -103,19 +133,25 @@ export function buildSnapContext(
 ): SnapContext {
   const thresholdDoc = SNAP_THRESHOLD_PX / (viewport.zoom || 1)
   return {
-    candidates: enabled && doc.settings.snapToObjects
-      ? collectSnapCandidates(doc, exclude, viewport, canvasSize)
-      : [],
+    candidates: [
+      ...(enabled && doc.settings.snapToObjects
+        ? collectSnapCandidates(doc, exclude, viewport, canvasSize)
+        : []),
+      // Gated on the guides being shown rather than on "snap to objects": a
+      // hidden guide should not pull, and an object setting should not govern
+      // something that is not an object.
+      ...(enabled && doc.settings.guidesVisible ? collectGuideCandidates(doc) : []),
+    ],
     thresholdDoc,
     gridSize: doc.settings.gridSize,
     snapToGridEnabled: enabled && doc.settings.snapToGrid,
-    snapToObjectsEnabled: enabled && doc.settings.snapToObjects,
+    useCandidates: enabled && (doc.settings.snapToObjects || doc.settings.guidesVisible),
   }
 }
 
 /** Resolve the correction for a moving box. Grid wins only when objects miss. */
 export function resolveSnap(moving: Bounds, ctx: SnapContext): SnapResult {
-  if (ctx.snapToObjectsEnabled) {
+  if (ctx.useCandidates) {
     const objectSnap = computeSnap(moving, ctx.candidates, ctx.thresholdDoc)
     if (objectSnap.dx !== 0 || objectSnap.dy !== 0) return objectSnap
   }

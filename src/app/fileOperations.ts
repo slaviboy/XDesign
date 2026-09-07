@@ -8,7 +8,7 @@
 
 import { createDocument } from '../document/NodeFactory'
 import { documentStore, getDoc, markSaved, replaceDocument, pruneUnusedAssets } from '../state/DocumentStore'
-import { clearSelection, notify, setEditor, setViewport } from '../state/EditorStore'
+import { clearSelection, notify, readDefaultGrid, setEditor, setViewport } from '../state/EditorStore'
 import {
   DocumentFormatError,
   openDocument,
@@ -41,7 +41,17 @@ function confirmDiscard(): boolean {
 
 export function newDocument(): void {
   if (!confirmDiscard()) return
-  replaceDocument(createDocument('Untitled'))
+  const doc = createDocument('Untitled')
+  // The saved default reaches the artboard a new document is seeded with, not
+  // just ones drawn afterwards — Adobe: "any new files you open has this new
+  // default."
+  const preset = readDefaultGrid()
+  if (preset) {
+    for (const node of Object.values(doc.nodes)) {
+      if (node.type === 'artboard') node.grid = { ...preset }
+    }
+  }
+  replaceDocument(doc)
   saveTarget = { handle: null, fileName: '' }
   clearSelection()
   setViewport({ x: 120, y: 100, zoom: 0.6 })

@@ -24,8 +24,9 @@ import {
   rectPath,
 } from '../geometry/ShapeGeometry'
 import { localMatrix } from '../document/SceneGraph'
-import { useDocumentStore, useLiveTransformTick, useNode } from '../state/hooks'
+import { useDocumentStore, useEditorStore, useLiveTransformTick, useNode } from '../state/hooks'
 import { liveTransform } from './LiveTransform'
+import { gridStepForZoom } from './gridMath'
 import { clipKey, fxKey, geomKey } from './liveKeys'
 import { getLiveSize } from '../tools/DragSession'
 import {
@@ -38,7 +39,13 @@ import {
   sortedStops,
 } from './paint'
 import { toHex } from '../document/color'
-import { hasStyle, isMaskGroup, repeatGridOffsets, repeatGridSize } from '../document/types'
+import {
+  hasStyle,
+  isMaskGroup,
+  layoutColumns,
+  repeatGridOffsets,
+  repeatGridSize,
+} from '../document/types'
 import {
   activeBlur,
   backdropClipId,
@@ -575,6 +582,83 @@ function GroupBody({ node, copy }: { node: GroupNode; copy: CopyMode }): ReactNo
   )
 }
 
+/**
+ * The grid drawn over one artboard.
+ *
+ * Adobe's two kinds. A SQUARE grid is emitted as an SVG <pattern> rather than a
+ * few hundred <line> elements: the artboard bounds it, but an 8px grid on a
+ * tall artboard is still thousands of nodes, and the browser tiles a pattern
+ * for free.
+ *
+ * Drawn between the artboard's background and its children — over the fill,
+ * under the artwork — which is where XD puts it and the only place that can be
+ * reached from inside the artboard's own body.
+ *
+ * It lives inside the document layer but is NOT exportable: the exporter has
+ * its own emitBody for artboards and never emits this. A test pins that.
+ */
+function ArtboardGrid({ node }: { node: ArtboardNode }): ReactNode {
+  // Read before the early return: hooks cannot be conditional.
+  const zoom = useEditorStore((s) => s.viewport.zoom)
+  const grid = node.grid
+  const { width, height } = node.transform
+  if (!grid || !grid.visible || width <= 0 || height <= 0) return null
+
+  const color = toHex(grid.color)
+  const opacity = grid.color.a
+
+  if (grid.type === 'square') {
+    // Stepped up as you zoom out, exactly as the canvas grid is: an 8px grid at
+    // 5% is a solid block of ink otherwise.
+    const size = gridStepForZoom(Math.max(1, grid.size), zoom)
+    const patternId = `abgrid-${node.id}`
+    return (
+      <>
+        <defs>
+          <pattern id={patternId} width={size} height={size} patternUnits="userSpaceOnUse">
+            {/* One cell's top and left edge; tiling draws the rest. */}
+            <path
+              d={`M${size} 0H0V${size}`}
+              fill="none"
+              stroke={color}
+              strokeOpacity={opacity}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+          </pattern>
+        </defs>
+        <rect
+          className="artboard-grid"
+          data-grid="square"
+          width={width}
+          height={height}
+          fill={`url(#${patternId})`}
+          pointerEvents="none"
+        />
+      </>
+    )
+  }
+
+  const columns = layoutColumns(width, grid)
+  if (columns.length === 0) return null
+  return (
+    <g className="artboard-grid" data-grid="layout" pointerEvents="none">
+      {columns.map((c, i) => (
+        <rect
+          key={i}
+          className="layout-column"
+          x={c.x}
+          y={0}
+          width={c.width}
+          height={height}
+          fill={color}
+          fillOpacity={opacity}
+        />
+      ))}
+    </g>
+  )
+}
+
 function ArtboardBody({ node, copy }: { node: ArtboardNode; copy: CopyMode }): ReactNode {
   const { width, height } = node.transform
   const bg = paintToAttrs(node.background, node.id, 'fill')
@@ -593,6 +677,8 @@ function ArtboardBody({ node, copy }: { node: ArtboardNode; copy: CopyMode }): R
       {node.background.type !== 'none' && (
         <rect width={width} height={height} fill={bg.value} fillOpacity={bg.opacity} />
       )}
+      {/* Over the fill, under the artwork. */}
+      <ArtboardGrid node={node} />
       <g clipPath={node.clipContent ? `url(#${clipId})` : undefined}>
         <Children ids={node.children} copy={copy} />
       </g>

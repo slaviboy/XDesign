@@ -90,8 +90,9 @@ export const SHORTCUTS: ShortcutSpec[] = [
   { group: 'View', keys: `${MOD}+=`, label: 'Zoom in' },
   { group: 'View', keys: `${MOD}+-`, label: 'Zoom out' },
   { group: 'View', keys: `${MOD}+'`, label: 'Toggle grid' },
+  { group: 'View', keys: `⇧${MOD}+'`, label: 'Toggle snapping' },
   { group: 'View', keys: `${MOD}+;`, label: 'Toggle guides' },
-  { group: 'View', keys: `⇧${MOD}+;`, label: 'Toggle snapping' },
+  { group: 'View', keys: `⇧${MOD}+;`, label: 'Lock guides' },
   { group: 'View', keys: `${MOD}+scroll`, label: 'Zoom' },
 ]
 

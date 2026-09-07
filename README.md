@@ -46,6 +46,20 @@ Double-clicking a shape with the arrow does the same thing, and lights up the Di
 button while it is doing it — the rail names the mode the canvas is actually in, and the two
 pointers hand the points back and forth without dropping them.
 
+**Guides** — Adobe's model, which is not Photoshop's: there are no rulers down the side of the
+window. Every artboard grows a strip along its top and left border that you pull a guide out of,
+and the guide belongs to that artboard. Dragging one snaps to the artboard's edges and centres,
+to every object on it, and to its other guides; hold `⌘`/`Ctrl` to suspend that, `Shift` to move
+in tens. Drag a guide off the artboard to remove it. `⌘;` hides them, `⇧⌘;` locks them, and
+right-clicking an artboard offers Copy, Paste, Remove All and Lock All Guides — pasting applies
+one set of guides across as many artboards as you have selected.
+
+**Artboard grids** — select an artboard and pick **Square** or **Layout** in its Grid section.
+A square grid takes a size; a layout grid takes columns, a gutter and margins, and shows the
+column width it works out from them. Both take a colour with an alpha, and **Make Default**
+keeps the current grid for new artboards and new documents. This is separate from the
+canvas-wide grid on the pasteboard, which keeps its own toggle and `⌘'`.
+
 **Artboards** — double-click a name label on the canvas to rename it in place, with the whole
 name selected so typing replaces it. `Enter` or clicking away commits, `Escape` abandons, and
 an empty name keeps the old one rather than leaving an artboard with no name at all. Dragging
@@ -502,6 +516,70 @@ exact and needs no intersection points, and 3 with a point-in-path test of the b
 the shape's own fill rule — so the hole in a donut is correctly not part of it. The old function
 is gone rather than kept beside the new one: there was never a case that wanted the weaker answer.
 
+### Guides belong to an artboard, and that is what makes copy and paste mean anything
+
+Guides used to be a document-level list: one set of world-space lines across the whole canvas.
+Everything about them worked — they drew, dragged, snapped and saved — except that **nothing
+could create one**. `addGuide` had no callers, `createGuideId` had no callers, and the
+`rulersVisible` setting that implied a way in was written by nothing and read by nothing.
+
+Moving them onto the artboard is what Adobe's own feature set requires. "Copy and paste guides
+across artboards" has nothing to copy between when there is one global set; a guide dragged out
+of an artboard's border is a statement about that artboard; and positions stored in the
+artboard's local space are what let one set of guides land the same way on a run of screens.
+
+The cost is a real file-format change rather than the additive kind this codebase usually gets
+away with, so `FORMAT_VERSION` went to 3 and a version-2 file's guides are distributed on load
+onto the artboard each one crossed, converted to local coordinates. A guide crossing no artboard
+is dropped: keeping it would mean keeping the document-level list alive for the one case it no
+longer serves. Where two artboards overlap the **topmost** claims it, which is the same artboard
+a click would have resolved to.
+
+### A guide drag writes nothing until you let go
+
+The obvious implementation calls `moveGuide` on every pointermove, and that is what this one did
+first. It is the exact thing the store forbids: a write runs every subscribed component's
+selector, so each frame re-rendered the whole inspector and the whole layer tree, marked the
+document dirty and woke autosave — for one line moving.
+
+The gesture now holds the position in its own session and commits once on release, with the
+overlay drawing from `liveGuide()` while it runs. A guide being pulled out of the edge does not
+exist in the document at all until the pointer comes up, which is also why creating one is a
+single undo entry rather than an "Add guide" followed by a run of moves.
+
+### A layout grid has no column width to store
+
+Adobe: "layout grid parameters are calculated based on artboard width and number of columns so
+that the grid is kept within the bounds of artboard." The way to make that true is not to clamp
+a stored width — it is to have no stored width:
+
+```
+usable      = W - marginLeft - marginRight - (columns - 1) * gutter
+columnWidth = usable / columns
+```
+
+The last column ends at `W - marginRight` identically, so the grid cannot spill however the
+artboard is resized — including *while* it is being resized. The inspector still lets you type a
+column width, because Adobe's does; since the artboard's width is fixed, what gives is the
+gutter, and `gutterForColumnWidth` is the inverse. When the margins and gutters leave no room,
+`layoutColumns` returns nothing at all and the panel says so, rather than drawing a negative
+column as a mirrored rectangle.
+
+### The grid's colour is document data; the canvas grid's is not
+
+`tokens.css` states the rule: the theme colours the chrome, and every colour lives in that file.
+An artboard's grid colour breaks it deliberately, and is the second thing to do so after
+`ArtboardNode.background` and the saved swatches — Adobe lets you set it, alpha included, so it
+travels with the artwork the way a fill does. The pasteboard grid keeps `var(--grid-line)` and
+stays chrome, which is also what keeps the token audit in `theme.test.ts` honest.
+
+The artboard grid draws inside the artboard's own body, between its background and its children,
+because that is the only place that is over the fill and under the artwork — a grid beneath an
+opaque artboard background is invisible, which is the defect the pasteboard grid still has by
+design. That puts it inside `.document-layer`, so the structural "chrome cannot be exported"
+guarantee no longer covers it; the exporter has its own artboard emitter that never emits it,
+and a test asserts the exported SVG contains no grid markup.
+
 ### Live resize reaches three kinds of geometry, not one
 
 A drag only moves things, so a matrix covers it. A resize changes what a node *is*, and how it
@@ -728,8 +806,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 164 unit tests (Vitest)
-npm run test:e2e   # 97 end-to-end tests (Playwright, real Chromium)
+npm test           # 283 unit tests (Vitest)
+npm run test:e2e   # 199 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

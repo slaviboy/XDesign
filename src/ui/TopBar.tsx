@@ -16,14 +16,16 @@ import {
 } from '../app/fileOperations'
 import { redo, undo } from '../state/DocumentStore'
 import {
-  alignSelection, deleteSelection, distributeSelection, flipSelection, groupSelection,
-  maskWithShape, orderCommand, outlineStrokeSelection, renameDocument, selectAll,
-  ungroupMask, ungroupSelection, updateSettings,
+  alignSelection, clearGuides, copyGuides, deleteSelection, distributeSelection,
+  flipSelection, groupSelection, maskWithShape, orderCommand, outlineStrokeSelection,
+  pasteGuides, renameDocument, selectAll, setGuidesLocked, ungroupMask,
+  ungroupSelection, updateSettings,
 } from '../history/Commands'
 import { copySelection, cutSelection, duplicateInPlace, paste } from '../state/Clipboard'
 import { stepZoom, zoomTo, zoomToFit, zoomToSelection } from '../shortcuts/KeyboardManager'
 import { openDialog, setEditor, type WorkspaceTab } from '../state/EditorStore'
 import { useDocumentStore, useEditorStore } from '../state/hooks'
+import { artboardIds } from '../document/SceneGraph'
 import { MOD_LABEL } from '../shortcuts/bindings'
 import { MenuHost, useMenuState, type MenuItemSpec } from './Menu'
 import {
@@ -44,6 +46,19 @@ export const TopBar = memo(function TopBar() {
   const dirty = useDocumentStore((s) => s.dirty)
   const history = useDocumentStore((s) => s.history)
   const gridVisible = useDocumentStore((s) => s.doc.settings.gridVisible)
+  const guidesVisible = useDocumentStore((s) => s.doc.settings.guidesVisible)
+  const doc = useDocumentStore((s) => s.doc)
+  const selection = useEditorStore((s) => s.selection)
+  // Selected artboards, or all of them: a document-level menu acts on the
+  // document unless you have narrowed it yourself.
+  const selectedBoards = selection.filter((id) => doc.nodes[id]?.type === 'artboard')
+  const guideBoards = selectedBoards.length ? selectedBoards : artboardIds(doc)
+  const guidesLocked =
+    guideBoards.length > 0 &&
+    guideBoards.every((id) => {
+      const n = doc.nodes[id]
+      return n?.type === 'artboard' && !!n.guidesLocked
+    })
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const tab = useEditorStore((s) => s.tab)
   const selectionCount = useEditorStore((s) => s.selection.length)
@@ -132,8 +147,29 @@ export const TopBar = memo(function TopBar() {
           { label: 'Zoom to 100%', shortcut: `${MOD}1`, onSelect: () => zoomTo(1) },
           { label: 'Zoom to Selection', shortcut: `${MOD}2`, disabled: !hasSelection, onSelect: zoomToSelection },
           { kind: 'separator' },
-          { label: 'Show Grid', checked: gridVisible, onSelect: () => updateSettings({ gridVisible: !gridVisible }) },
-          { label: 'Snapping', checked: snapEnabled, onSelect: () => setEditor({ snapEnabled: !snapEnabled }) },
+          { label: 'Show Grid', shortcut: `${MOD}'`, checked: gridVisible, onSelect: () => updateSettings({ gridVisible: !gridVisible }) },
+          { label: 'Show Guides', shortcut: `${MOD};`, checked: guidesVisible, onSelect: () => updateSettings({ guidesVisible: !guidesVisible }) },
+          { label: 'Snapping', shortcut: `⇧${MOD}'`, checked: snapEnabled, onSelect: () => setEditor({ snapEnabled: !snapEnabled }) },
+          { kind: 'separator' },
+          // Adobe's Guides commands. With nothing selected they apply to every
+          // artboard, which is what "Lock All Guides" means on a document.
+          {
+            kind: 'submenu',
+            label: 'Guides',
+            items: [
+              { label: 'Copy Guides', disabled: guideBoards.length !== 1, onSelect: () => copyGuides(guideBoards[0]!) },
+              { label: 'Paste Guides', disabled: !guideBoards.length, onSelect: () => pasteGuides(guideBoards) },
+              { kind: 'separator' },
+              { label: 'Remove All Guides', disabled: !guideBoards.length, onSelect: () => clearGuides(guideBoards) },
+              {
+                label: 'Lock All Guides',
+                shortcut: `⇧${MOD};`,
+                checked: guidesLocked,
+                disabled: !guideBoards.length,
+                onSelect: () => setGuidesLocked(guideBoards, !guidesLocked),
+              },
+            ],
+          },
         ],
       },
       { label: 'New Artboard…', onSelect: () => openDialog('artboard-preset') },
@@ -151,7 +187,10 @@ export const TopBar = memo(function TopBar() {
       { label: 'Keyboard Shortcuts', shortcut: `${MOD}/`, onSelect: () => openDialog('shortcuts') },
       { label: 'About XDesign', onSelect: () => openDialog('about') },
     ]
-  }, [gridVisible, history.canRedo, history.canUndo, selectionCount, snapEnabled, themePreference])
+  }, [
+    gridVisible, guidesVisible, guideBoards, guidesLocked,
+    history.canRedo, history.canUndo, selectionCount, snapEnabled, themePreference,
+  ])
 
   return (
     <header className="topbar">

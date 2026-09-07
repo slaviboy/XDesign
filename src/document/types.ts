@@ -376,6 +376,21 @@ export interface ArtboardNode extends BaseNode {
   background: Paint
   /** When true, content is clipped to the artboard on canvas and on export. */
   clipContent: boolean
+  /**
+   * Ruler guides belonging to this artboard, in ITS local space.
+   *
+   * Per artboard rather than per document because that is what makes Adobe's
+   * "copy and paste guides across artboards" mean anything, and because a guide
+   * dragged out of an artboard's edge is a statement about that artboard.
+   *
+   * Optional, like the two fields below: a node loaded from an older file is
+   * never backfilled with new keys, so every reader has to tolerate `undefined`.
+   */
+  guides?: Guide[]
+  /** Adobe's "Lock All Guides": the guides stay visible but cannot be moved. */
+  guidesLocked?: boolean
+  /** The square or layout grid drawn over this artboard. Absent means none. */
+  grid?: ArtboardGrid
 }
 
 export interface GroupNode extends StyledNode {
@@ -558,6 +573,11 @@ export interface ImageAsset {
 // Document
 // ---------------------------------------------------------------------------
 
+/**
+ * A ruler guide. `axis: 'x'` is a VERTICAL line at that x.
+ *
+ * `position` is in the owning artboard's local space — see ArtboardNode.guides.
+ */
 export interface Guide {
   id: string
   axis: 'x' | 'y'
@@ -575,13 +595,116 @@ export interface Swatch {
   color: RGBA
 }
 
+// ---------------------------------------------------------------------------
+// Artboard grids
+// ---------------------------------------------------------------------------
+
+/**
+ * Adobe's two grid kinds, chosen per artboard in the Grid section of the
+ * Property Inspector.
+ *
+ * A SQUARE grid is a drawing aid — "horizontal and vertical lines for precise
+ * sizing and aligning objects". A LAYOUT grid is a column grid, "useful when
+ * aligning design objects or designing for different screen sizes".
+ *
+ * The colour is document data rather than a theme token, unlike the canvas
+ * grid: Adobe lets you set it (and its alpha) per artboard, so it travels with
+ * the artwork the way a fill does.
+ */
+export type ArtboardGrid = SquareGrid | LayoutGrid
+
+export interface SquareGrid {
+  type: 'square'
+  visible: boolean
+  /** Adobe's "Square Size". */
+  size: number
+  color: RGBA
+}
+
+export interface LayoutGrid {
+  type: 'layout'
+  visible: boolean
+  columns: number
+  /** Space BETWEEN columns, not around them. */
+  gutter: number
+  /** Distance from the artboard edge to the first and last column. */
+  marginLeft: number
+  marginRight: number
+  color: RGBA
+}
+
+/** Adobe's worked example: square size 8, drawn at 20% alpha. */
+export const DEFAULT_SQUARE_GRID: SquareGrid = {
+  type: 'square',
+  visible: true,
+  size: 8,
+  color: { r: 0, g: 0, b: 0, a: 0.2 },
+}
+
+export const DEFAULT_LAYOUT_GRID: LayoutGrid = {
+  type: 'layout',
+  visible: true,
+  columns: 12,
+  gutter: 20,
+  marginLeft: 16,
+  marginRight: 16,
+  color: { r: 255, g: 45, b: 85, a: 0.1 },
+}
+
+/**
+ * The gutter that would produce a requested column width.
+ *
+ * Adobe's inspector lets you adjust the column width even though it is derived:
+ * the artboard's width is fixed, so something else has to give, and the gutter
+ * is the one parameter with no other job. Null when there are fewer than two
+ * columns — with one column there is no gutter to solve for.
+ */
+export function gutterForColumnWidth(
+  artboardWidth: number,
+  grid: LayoutGrid,
+  columnWidth: number,
+): number | null {
+  const columns = Math.max(1, Math.round(grid.columns))
+  if (columns < 2) return null
+  const gutter =
+    (artboardWidth - grid.marginLeft - grid.marginRight - columns * columnWidth) / (columns - 1)
+  return Number.isFinite(gutter) ? Math.max(0, gutter) : null
+}
+
+/**
+ * The columns a layout grid paints, in artboard-local units.
+ *
+ * Column width is DERIVED and never stored, which is the whole of Adobe's
+ * "layout grid parameters are calculated based on artboard width and number of
+ * columns so that the grid is kept within the bounds of artboard": there is no
+ * way to author a width that does not fit, because the width is not authored.
+ *
+ * Returns nothing at all when the margins and gutters have eaten the artboard,
+ * so an over-constrained grid draws nothing rather than spilling past the edge.
+ */
+export function layoutColumns(
+  artboardWidth: number,
+  grid: LayoutGrid,
+): Array<{ x: number; width: number }> {
+  const columns = Math.max(1, Math.round(grid.columns))
+  const gutter = Math.max(0, grid.gutter)
+  const usable = artboardWidth - grid.marginLeft - grid.marginRight - (columns - 1) * gutter
+  const width = usable / columns
+  if (!Number.isFinite(width) || width < 1) return []
+
+  const out: Array<{ x: number; width: number }> = []
+  for (let i = 0; i < columns; i++) {
+    out.push({ x: grid.marginLeft + i * (width + gutter), width })
+  }
+  return out
+}
+
 export interface DocumentSettings {
   gridSize: number
   gridVisible: boolean
   snapToGrid: boolean
   snapToObjects: boolean
   guidesVisible: boolean
-  rulersVisible: boolean
 }
 
 export const DEFAULT_SETTINGS: DocumentSettings = {
@@ -590,7 +713,6 @@ export const DEFAULT_SETTINGS: DocumentSettings = {
   snapToGrid: false,
   snapToObjects: true,
   guidesVisible: true,
-  rulersVisible: false,
 }
 
 export interface DesignDocument {
@@ -600,7 +722,6 @@ export interface DesignDocument {
   nodes: Record<NodeId, DesignNode>
   rootId: NodeId
   assets: Record<AssetId, ImageAsset>
-  guides: Guide[]
   swatches: Swatch[]
   settings: DocumentSettings
   createdAt: number

@@ -26,7 +26,7 @@ import {
 import { DocumentLayer } from './NodeRenderer'
 import { SelectionOverlay } from './SelectionOverlay'
 import { GridOverlay } from './GridOverlay'
-import { GuidesOverlay } from './GuidesOverlay'
+import { ArtboardGuides, GuideStrips } from './ArtboardGuides'
 import { ToolOverlay } from './ToolOverlay'
 import { ArtboardLabels, ArtboardNameEditor } from './ArtboardLabels'
 import { TextEditor } from './TextEditor'
@@ -347,11 +347,14 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
         >
           <GridOverlay />
           <DocumentLayer />
-          <GuidesOverlay />
+          {/* Above the artwork: a guide is chrome and has to stay visible. */}
+          <ArtboardGuides />
         </g>
 
         {/* Screen space: constant-size handles, previews, smart guides. */}
         <g className="overlay-layer">
+          {/* Before the labels, so a label's own drag wins where they meet. */}
+          <GuideStrips />
           <ArtboardLabels />
           <SelectionOverlay />
           <ToolOverlay />

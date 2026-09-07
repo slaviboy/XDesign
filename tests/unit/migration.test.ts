@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
-  deserializeDocument, FORMAT_NAME, FORMAT_VERSION, migrateLegacyNode,
+  deserializeDocument, FORMAT_NAME, FORMAT_VERSION, migrateLegacyNode, serializeDocument,
 } from '@/persistence/FileFormat'
 import { polygonStarPoints } from '@/geometry/ShapeGeometry'
 import type { DesignNode } from '@/document/types'
@@ -140,3 +140,120 @@ function fillBox(pts: Array<{ x: number; y: number }>) {
     y: ((p.y - minY) / (maxY - minY)) * 100,
   }))
 }
+
+// --------------------------------------------------- guides moved to artboards --
+
+/** A version-2 document: guides still on the document, artboards as nodes. */
+function v2File(guides: unknown[], boards: Array<{ id: string; x: number; width: number }>) {
+  const artboard = (b: { id: string; x: number; width: number }) => ({
+    id: b.id, type: 'artboard', name: b.id, parentId: 'root', children: [],
+    visible: true, locked: false, markedForExport: false, metadata: {},
+    background: { type: 'solid', color: { r: 255, g: 255, b: 255, a: 1 } },
+    clipContent: true,
+    transform: {
+      x: b.x, y: 0, width: b.width, height: 400, rotation: 0,
+      scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, originX: 0.5, originY: 0.5,
+    },
+  })
+  const payload = {
+    format: FORMAT_NAME,
+    version: 2,
+    document: { id: 'doc', name: 'V2', createdAt: 0, modifiedAt: 0, settings: {}, guides },
+    rootId: 'root',
+    layers: [
+      {
+        id: 'root', type: 'document', name: 'Document', parentId: null,
+        children: boards.map((b) => b.id),
+        visible: true, locked: false, markedForExport: false, metadata: {},
+        transform: { x: 0, y: 0, width: 0, height: 0, rotation: 0, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0, originX: 0.5, originY: 0.5 },
+      },
+      ...boards.map(artboard),
+    ],
+  }
+  return new TextEncoder().encode(JSON.stringify(payload))
+}
+
+const guidesOn = (doc: ReturnType<typeof deserializeDocument>, id: string) => {
+  const n = doc.nodes[id]
+  return n?.type === 'artboard' ? (n.guides ?? []) : []
+}
+
+describe('guides move onto their artboard', () => {
+  it('lands a document guide on the artboard it crossed, in local units', () => {
+    const doc = deserializeDocument(
+      v2File([{ id: 'g1', axis: 'x', position: 1300 }], [{ id: 'ab', x: 1200, width: 400 }]),
+    )
+    expect(guidesOn(doc, 'ab')).toEqual([{ id: 'g1', axis: 'x', position: 100 }])
+    expect(doc).not.toHaveProperty('guides')
+  })
+
+  it('the TOPMOST artboard claims an overlapping guide', () => {
+    // Paint order, so the later one is on top — the same one a click resolves
+    // to. Taking the first match would hand it to whatever was underneath.
+    const doc = deserializeDocument(
+      v2File([{ id: 'g1', axis: 'x', position: 250 }], [
+        { id: 'under', x: 0, width: 400 },
+        { id: 'over', x: 200, width: 400 },
+      ]),
+    )
+    expect(guidesOn(doc, 'over')).toHaveLength(1)
+    expect(guidesOn(doc, 'under')).toHaveLength(0)
+  })
+
+  it('a guide crossing no artboard is dropped, not kept homeless', () => {
+    const doc = deserializeDocument(
+      v2File([{ id: 'g1', axis: 'x', position: 9000 }], [{ id: 'ab', x: 0, width: 400 }]),
+    )
+    expect(guidesOn(doc, 'ab')).toHaveLength(0)
+  })
+
+  it('migrating twice changes nothing the second time', () => {
+    const once = deserializeDocument(
+      v2File([{ id: 'g1', axis: 'x', position: 100 }], [{ id: 'ab', x: 0, width: 400 }]),
+    )
+    const twice = deserializeDocument(serializeDocument(once))
+    expect(guidesOn(twice, 'ab')).toEqual(guidesOn(once, 'ab'))
+  })
+
+  it('still refuses a file from a newer build', () => {
+    const bytes = v2File([], [{ id: 'ab', x: 0, width: 400 }])
+    const payload = JSON.parse(new TextDecoder().decode(bytes)) as { version: number }
+    payload.version = FORMAT_VERSION + 1
+    expect(() => deserializeDocument(new TextEncoder().encode(JSON.stringify(payload)))).toThrow()
+  })
+})
+
+describe('what comes off disk is not trusted', () => {
+  const withArtboardFields = (fields: Record<string, unknown>) => {
+    const bytes = v2File([], [{ id: 'ab', x: 0, width: 400 }])
+    const payload = JSON.parse(new TextDecoder().decode(bytes)) as {
+      layers: Array<Record<string, unknown>>
+    }
+    Object.assign(payload.layers[1]!, fields)
+    return deserializeDocument(new TextEncoder().encode(JSON.stringify(payload)))
+  }
+
+  it('keeps the good guides and drops the rest', () => {
+    const doc = withArtboardFields({
+      guides: [
+        { id: 'ok', axis: 'x', position: 10 },
+        { axis: 'y', position: 5 },
+        null,
+        { id: 'bad-axis', axis: 'z', position: 1 },
+        { id: 'nan', axis: 'x', position: 'over there' },
+      ],
+    })
+    expect(guidesOn(doc, 'ab')).toEqual([{ id: 'ok', axis: 'x', position: 10 }])
+  })
+
+  it('drops a half-formed grid whole rather than painting NaN', () => {
+    const board = (g: unknown) => withArtboardFields({ grid: g }).nodes.ab as { grid?: unknown }
+    expect(board({ type: 'square', size: 'big', visible: true, color: { r: 0, g: 0, b: 0, a: 1 } }).grid).toBeUndefined()
+    expect(board({ type: 'square', size: 8, visible: true }).grid).toBeUndefined()
+    expect(board({ type: 'nonsense' }).grid).toBeUndefined()
+    expect(board('grid').grid).toBeUndefined()
+    // And a well-formed one still loads, so the check is not just refusing.
+    expect(board({ type: 'square', size: 8, visible: true, color: { r: 0, g: 0, b: 0, a: 0.2 } }).grid)
+      .toEqual({ type: 'square', size: 8, visible: true, color: { r: 0, g: 0, b: 0, a: 0.2 } })
+  })
+})
