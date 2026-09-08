@@ -5,6 +5,9 @@ An offline-first vector design editor, in the shape of Adobe XD's Design workspa
 No account. No login. No server. No database. No telemetry. Once the app has loaded,
 it needs no network connection at all, and every document lives on your own machine.
 
+*An independent project, not affiliated with or endorsed by Adobe Inc. Apache-2.0 —
+see [License](#license).*
+
 ```bash
 npm install
 npm run dev      # http://localhost:5173
@@ -1184,3 +1187,24 @@ actually runs. The service worker precaches the rest in the background.
 
 Opening `dist/index.html` directly with `file://` will not work — browsers block ES modules
 on that scheme. Use `npm run preview` or any static host.
+
+---
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
+
+```
+Copyright (C) 2026 Stanislav Georgiev
+https://github.com/slaviboy
+```
+
+You may use, modify and redistribute this code, including commercially, provided you keep
+the copyright notice and the per-file licence headers, state the changes you made, and
+carry the [`NOTICE`](NOTICE) file with any redistribution or derivative work.
+
+## Trademarks
+
+This project is not affiliated with, endorsed by, or sponsored by Adobe Inc. "Adobe" and
+"Adobe XD" are trademarks of Adobe Inc., referred to here only to describe the interface
+this editor takes its shape from.

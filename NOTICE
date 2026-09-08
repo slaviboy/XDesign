@@ -1,0 +1,22 @@
+XDesign
+Copyright 2026 Stanislav Georgiev
+https://github.com/slaviboy
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file for the
+full terms. Redistributions and derivative works must retain this notice, the
+copyright headers in the source files, and a copy of the License.
+
+This product is not affiliated with, endorsed by, or sponsored by Adobe Inc.
+"Adobe" and "Adobe XD" are trademarks of Adobe Inc., used here only to describe
+the interface this project takes its shape from.
+
+--------------------------------------------------------------------------------
+Third-party material bundled in this repository:
+
+Spell-check dictionaries in public/dictionaries/ are derived from
+"all-words-in-all-languages" (https://github.com/eymenefealtun/all-words-in-all-languages),
+processed by scripts/build-dictionaries.mjs.
+
+Web fonts are supplied at build time by the @fontsource packages listed in
+package.json; each family carries its own upstream license (SIL Open Font
+License or Apache License 2.0).

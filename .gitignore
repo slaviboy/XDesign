@@ -9,3 +9,5 @@ test-results
 *.local
 *.tsbuildinfo
 .workflows
+.env
+.env.*
