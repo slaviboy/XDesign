@@ -438,3 +438,65 @@ describe('preserveAspectRatio', () => {
     expect(e.y).toBeCloseTo(-50, 3)
   })
 })
+
+/**
+ * Text structure.
+ *
+ * `<text>` used to be flattened through `el.textContent`, which turned every
+ * tspan — styling and line structure alike — into one space-joined line.
+ */
+describe('tspans keep their meaning', () => {
+  it('turns a styling tspan into a run over one text object', () => {
+    const r = importSvg(
+      wrap(`<text x="0" y="20" font-size="16">Hello <tspan font-weight="700">world</tspan></text>`),
+    )
+    const texts = Object.values(r.nodes).filter((n) => n.type === 'text')
+    // One object: the text still flows as one paragraph.
+    expect(texts).toHaveLength(1)
+    const node = texts[0]!
+    expect(node.text).toBe('Hello world')
+    expect(node.runs).toHaveLength(1)
+    expect(node.runs![0]).toMatchObject({ start: 6, end: 11, style: { fontWeight: 700 } })
+  })
+
+  it('records a tspan fill as a run fill', () => {
+    const r = importSvg(
+      wrap(`<text x="0" y="20" fill="#000000">ab<tspan fill="#ff0000">cd</tspan></text>`),
+    )
+    const node = Object.values(r.nodes).find((n) => n.type === 'text')!
+    expect(node.runs![0]).toMatchObject({
+      start: 2,
+      end: 4,
+      fill: { type: 'solid', color: { r: 255, g: 0, b: 0, a: 1 } },
+    })
+  })
+
+  it('splits independently positioned tspans into their own objects', () => {
+    // Two tspans with their own x/y do not flow together — they are placed.
+    const r = importSvg(
+      wrap(`<text font-size="12"><tspan x="0" y="10">one</tspan><tspan x="0" y="30">two</tspan></text>`),
+    )
+    const texts = Object.values(r.nodes).filter((n) => n.type === 'text')
+    expect(texts.map((t) => t.text).sort()).toEqual(['one', 'two'])
+    // Grouped, so they still move together.
+    expect(Object.values(r.nodes).some((n) => n.type === 'group')).toBe(true)
+  })
+
+  it('leaves ordinary text with no runs at all', () => {
+    const r = importSvg(wrap(`<text x="0" y="20">plain</text>`))
+    const node = Object.values(r.nodes).find((n) => n.type === 'text')!
+    expect(node.text).toBe('plain')
+    expect(node.runs).toBeUndefined()
+  })
+
+  it('handles a nested tspan inheriting from the one around it', () => {
+    const r = importSvg(
+      wrap(`<text font-size="16">a<tspan font-size="24">b<tspan font-weight="700">c</tspan></tspan></text>`),
+    )
+    const node = Object.values(r.nodes).find((n) => n.type === 'text')!
+    expect(node.text).toBe('abc')
+    // "c" carries both the inherited size and its own weight.
+    const inner = node.runs!.find((run) => run.start === 2)!
+    expect(inner.style).toMatchObject({ fontSize: 24, fontWeight: 700 })
+  })
+})

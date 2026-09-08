@@ -30,13 +30,33 @@
 
 import { fontStack } from './FontRegistry'
 import { applyTextTransform } from '../document/types'
-import type { TextStyle } from '../document/types'
+import type { Paint, TextRun, TextStyle } from '../document/types'
 
 export interface TextLine {
   text: string
   width: number
   /** Baseline offset from the top of the text box. */
   baseline: number
+  /**
+   * The differently-styled pieces of this line, left to right.
+   *
+   * Absent for uniform text, which is the overwhelmingly common case and which
+   * takes a code path unchanged from before rich text existed — so nothing
+   * about ordinary text can regress through this.
+   */
+  segments?: TextSegment[]
+}
+
+/** One stretch of a line drawn in a single style. */
+export interface TextSegment {
+  text: string
+  /** Fully resolved style: the node's textStyle with the run's overrides on top. */
+  style: TextStyle
+  width: number
+  /** Offset from the start of the line. */
+  x: number
+  /** The run's fill override, when it had one. */
+  fill?: Paint
 }
 
 export interface TextLayoutResult {
@@ -133,7 +153,9 @@ export function layoutText(
   text: string,
   style: TextStyle,
   maxWidth?: number,
+  runs?: readonly TextRun[],
 ): TextLayoutResult {
+  if (runs?.length) return layoutRich(text, style, maxWidth, runs)
   const lineHeightPx = style.fontSize * style.lineHeight
   const { ascent } = fontMetrics(style)
   // Center the text within its line box rather than sitting on the em baseline.
@@ -171,6 +193,198 @@ export function layoutText(
     lineHeightPx,
     ascent,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Rich text
+// ---------------------------------------------------------------------------
+
+/**
+ * Layout for text whose characters do not all share one style.
+ *
+ * Kept as a separate path rather than generalizing the uniform one. Mixed
+ * styling changes three things at once — measurement is per piece, a line's
+ * height and baseline come from the tallest piece on it rather than from the
+ * node, and wrapping has to split tokens at run boundaries — and folding all of
+ * that into the common path would put the cost and the risk on every text
+ * object in every document to serve the few that need it.
+ *
+ * Character indices are tracked through wrapping so a line can be mapped back
+ * to the runs it covers. Text transforms are applied per character, so a
+ * transform that changes a string's length (ß to SS) would shift the mapping;
+ * that is noted rather than handled, because the alternative is to lay out
+ * transformed text against untransformed indices, which is worse.
+ */
+function layoutRich(
+  text: string,
+  base: TextStyle,
+  maxWidth: number | undefined,
+  runs: readonly TextRun[],
+): TextLayoutResult {
+  const transformed = applyTextTransform(text, base.transform)
+  const styleAt = buildStyleIndex(transformed.length, base, runs)
+
+  const wrapping = base.sizing !== 'auto-width' && !!maxWidth && maxWidth > 0
+  const paragraphGap = Math.max(0, base.paragraphSpacing)
+
+  const lines: TextLine[] = []
+  const gaps: number[] = []
+  let accumulated = 0
+
+  let cursor = 0
+  const paragraphs = transformed.split('\n')
+  paragraphs.forEach((paragraph, i) => {
+    const start = cursor
+    cursor += paragraph.length + 1 // the newline itself
+    const ranges = wrapping
+      ? wrapRangesRich(paragraph, start, styleAt, maxWidth!)
+      : [{ from: start, to: start + paragraph.length }]
+    for (const range of ranges) {
+      lines.push(buildRichLine(transformed, range.from, range.to, styleAt))
+      gaps.push(accumulated)
+    }
+    if (i < paragraphs.length - 1) accumulated += paragraphGap
+  })
+
+  // Each line is as tall as its tallest piece, so a larger run pushes the lines
+  // after it down rather than overlapping them.
+  let y = 0
+  let widest = 0
+  let firstAscent = 0
+  let lastLineHeight = base.fontSize * base.lineHeight
+  lines.forEach((line, i) => {
+    const metrics = lineMetrics(line, base)
+    if (i === 0) firstAscent = metrics.ascent
+    lastLineHeight = metrics.lineHeightPx
+    line.baseline =
+      y + gaps[i]! + (metrics.lineHeightPx - metrics.fontSize) / 2 + metrics.ascent
+    y += metrics.lineHeightPx
+    if (line.width > widest) widest = line.width
+  })
+
+  return {
+    lines,
+    width: widest,
+    height: Math.max(lastLineHeight, y + accumulated),
+    lineHeightPx: base.fontSize * base.lineHeight,
+    ascent: firstAscent || fontMetrics(base).ascent,
+  }
+}
+
+/** The resolved style for every character index, shared where runs agree. */
+function buildStyleIndex(
+  length: number,
+  base: TextStyle,
+  runs: readonly TextRun[],
+): Array<{ style: TextStyle; fill?: Paint }> {
+  const out = new Array<{ style: TextStyle; fill?: Paint }>(length)
+  const plain = { style: base }
+  for (let i = 0; i < length; i++) out[i] = plain
+  for (const run of runs) {
+    // One resolved object per run, so segment building can compare by identity.
+    const resolved = { style: { ...base, ...run.style }, ...(run.fill ? { fill: run.fill } : {}) }
+    const from = Math.max(0, run.start)
+    const to = Math.min(length, run.end)
+    for (let i = from; i < to; i++) out[i] = resolved
+  }
+  return out
+}
+
+/** Split [from, to) at style boundaries, measuring and positioning each piece. */
+function buildRichLine(
+  text: string,
+  from: number,
+  to: number,
+  styleAt: ReadonlyArray<{ style: TextStyle; fill?: Paint }>,
+): TextLine {
+  const segments: TextSegment[] = []
+  let x = 0
+  let i = from
+  while (i < to) {
+    const entry = styleAt[i] ?? { style: styleAt[from]!.style }
+    let j = i + 1
+    while (j < to && styleAt[j] === entry) j++
+    const piece = text.slice(i, j)
+    const width = measureText(piece, entry.style)
+    segments.push({ text: piece, style: entry.style, width, x, ...(entry.fill ? { fill: entry.fill } : {}) })
+    x += width
+    i = j
+  }
+  return { text: text.slice(from, to), width: x, baseline: 0, segments }
+}
+
+/** The tallest piece on a line decides its metrics. */
+function lineMetrics(
+  line: TextLine,
+  base: TextStyle,
+): { lineHeightPx: number; ascent: number; fontSize: number } {
+  let lineHeightPx = 0
+  let ascent = 0
+  let fontSize = 0
+  for (const seg of line.segments ?? []) {
+    lineHeightPx = Math.max(lineHeightPx, seg.style.fontSize * seg.style.lineHeight)
+    ascent = Math.max(ascent, fontMetrics(seg.style).ascent)
+    fontSize = Math.max(fontSize, seg.style.fontSize)
+  }
+  if (lineHeightPx === 0) {
+    lineHeightPx = base.fontSize * base.lineHeight
+    ascent = fontMetrics(base).ascent
+    fontSize = base.fontSize
+  }
+  return { lineHeightPx, ascent, fontSize }
+}
+
+/** Wrap one paragraph, returning character ranges rather than strings. */
+function wrapRangesRich(
+  paragraph: string,
+  offset: number,
+  styleAt: ReadonlyArray<{ style: TextStyle; fill?: Paint }>,
+  maxWidth: number,
+): Array<{ from: number; to: number }> {
+  if (paragraph.length === 0) return [{ from: offset, to: offset }]
+
+  const widthOf = (from: number, to: number) => {
+    let w = 0
+    let i = from
+    while (i < to) {
+      const entry = styleAt[i]!
+      let j = i + 1
+      while (j < to && styleAt[j] === entry) j++
+      w += measureText(paragraph.slice(i - offset, j - offset), entry.style)
+      i = j
+    }
+    return w
+  }
+
+  const out: Array<{ from: number; to: number }> = []
+  let lineStart = offset
+  let lastBreak = -1
+  let i = offset
+  const end = offset + paragraph.length
+
+  while (i < end) {
+    const ch = paragraph[i - offset]!
+    if (/\s/.test(ch)) lastBreak = i
+
+    if (widthOf(lineStart, i + 1) > maxWidth && i > lineStart) {
+      if (lastBreak > lineStart) {
+        // Break at the space, and swallow it rather than starting a line with it.
+        out.push({ from: lineStart, to: lastBreak })
+        lineStart = lastBreak + 1
+        i = lineStart
+        lastBreak = -1
+        continue
+      }
+      // A single word wider than the box has to be broken mid-word.
+      out.push({ from: lineStart, to: i })
+      lineStart = i
+      lastBreak = -1
+      continue
+    }
+    i++
+  }
+  out.push({ from: lineStart, to: end })
+  return out
 }
 
 function wrapParagraph(paragraph: string, style: TextStyle, maxWidth: number): TextLine[] {
@@ -238,8 +452,9 @@ export function intrinsicTextSize(
   text: string,
   style: TextStyle,
   maxWidth?: number,
+  runs?: readonly TextRun[],
 ): { width: number; height: number } {
-  const layout = layoutText(text, style, maxWidth)
+  const layout = layoutText(text, style, maxWidth, runs)
   return {
     width: Math.max(1, Math.ceil(layout.width)),
     height: Math.max(1, Math.ceil(layout.height)),

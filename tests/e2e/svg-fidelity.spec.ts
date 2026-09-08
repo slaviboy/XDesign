@@ -269,3 +269,69 @@ test.describe('references', () => {
     expect(rows).toBeGreaterThanOrEqual(2)
   })
 })
+
+test.describe('rich text', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page)
+  })
+
+  test('a styled tspan renders as its own styled piece, in one text object', async ({ page }) => {
+    await importMarkup(
+      page,
+      svgDoc(`<text x="10" y="40" font-size="16" fill="#000000">Hello <tspan font-weight="700" fill="#ff0000">world</tspan></text>`),
+    )
+    await expect(nodesOfType(page, 'text')).toHaveCount(1)
+
+    const tspans = await page.locator('.document-layer text tspan').evaluateAll((els) =>
+      els.map((e) => ({
+        text: e.textContent,
+        weight: e.getAttribute('font-weight'),
+        fill: e.getAttribute('fill'),
+      })),
+    )
+    expect(tspans).toHaveLength(2)
+    expect(tspans[0]).toMatchObject({ text: 'Hello ' })
+    expect(tspans[1]).toMatchObject({ text: 'world', weight: '700', fill: '#ff0000' })
+  })
+
+  test('the styled piece sits after the plain one, not on top of it', async ({ page }) => {
+    await importMarkup(
+      page,
+      svgDoc(`<text x="10" y="40" font-size="16">Hello <tspan font-size="28">world</tspan></text>`),
+    )
+    const xs = await page.locator('.document-layer text tspan').evaluateAll((els) =>
+      els.map((e) => Number(e.getAttribute('x'))),
+    )
+    expect(xs).toHaveLength(2)
+    expect(xs[1]).toBeGreaterThan(xs[0]!)
+  })
+
+  test('plain text still renders as one tspan per line', async ({ page }) => {
+    await importMarkup(page, svgDoc(`<text x="10" y="40" font-size="16">just plain text</text>`))
+    await expect(page.locator('.document-layer text tspan')).toHaveCount(1)
+  })
+
+  test('rich text survives export and re-import', async ({ page }) => {
+    await importMarkup(
+      page,
+      svgDoc(`<text x="10" y="40" font-size="16">Hello <tspan font-weight="700">world</tspan></text>`),
+    )
+    await selectAll(page)
+    const out = await captureDownload(page, async () => {
+      await openExportDialog(page)
+      await page
+        .locator('[role="dialog"] .dialog-row', { hasText: 'Format' })
+        .locator('select')
+        .selectOption('svg')
+      await page.locator('button:text-is("Export")').click()
+    })
+    const svg = out.buffer.toString('utf8')
+    // The weight override is written on its own tspan rather than lost.
+    expect(svg).toMatch(/<tspan[^>]*font-weight="700"[^>]*>world<\/tspan>/)
+
+    // Re-import it and the run comes back.
+    await importMarkup(page, svg)
+    const weights = await page.locator('.document-layer text tspan[font-weight="700"]').count()
+    expect(weights).toBeGreaterThan(0)
+  })
+})

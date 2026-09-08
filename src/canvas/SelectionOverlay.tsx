@@ -126,7 +126,7 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
     if (selection.length !== 1) return null
     const node = doc.nodes[selection[0]!]
     if (node?.type !== 'text' || node.textStyle.sizing !== 'fixed') return null
-    const needed = intrinsicTextSize(node.text, node.textStyle, node.transform.width).height
+    const needed = intrinsicTextSize(node.text, node.textStyle, node.transform.width, node.runs).height
     return needed > node.transform.height + 0.5 ? node.id : null
   }, [doc, selection])
   const tick = useLiveTransformTick()

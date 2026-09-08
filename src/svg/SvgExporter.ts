@@ -487,7 +487,7 @@ function emitText(ctx: EmitContext, node: Extract<DesignNode, { type: 'text' }>)
   // this wrong here and right on the canvas would export a paragraph as one
   // very long line.
   const boxWidth = ts.sizing === 'auto-width' ? undefined : node.transform.width
-  const layout = layoutText(node.text, ts, boxWidth)
+  const layout = layoutText(node.text, ts, boxWidth, node.runs)
   const width = boxWidth ?? layout.width
 
   // Adobe's Fixed Size crops what does not fit, so the export has to crop it
@@ -502,11 +502,40 @@ function emitText(ctx: EmitContext, node: Extract<DesignNode, { type: 'text' }>)
   }
 
   const tspans = layout.lines
-    .map(
-      (line) =>
-        `<tspan x="${round(lineOffsetX(line.width, width, ts.align), p)}" y="${round(line.baseline, p)}">` +
-        `${escapeText(line.text)}</tspan>`,
-    )
+    .map((line) => {
+      const originX = lineOffsetX(line.width, width, ts.align)
+      // Uniform text stays one tspan per line, exactly as before.
+      if (!line.segments) {
+        return (
+          `<tspan x="${round(originX, p)}" y="${round(line.baseline, p)}">` +
+          `${escapeText(line.text)}</tspan>`
+        )
+      }
+      // A run writes only what it overrides; the rest is inherited from the
+      // <text>, so the output stays readable and re-imports as the same runs.
+      return line.segments
+        .map((seg) => {
+          const attrs =
+            (seg.style.fontFamily !== ts.fontFamily
+              ? ` font-family="${escapeAttr(fontStack(seg.style.fontFamily))}"`
+              : '') +
+            (seg.style.fontSize !== ts.fontSize ? ` font-size="${round(seg.style.fontSize, p)}"` : '') +
+            (seg.style.fontWeight !== ts.fontWeight ? ` font-weight="${seg.style.fontWeight}"` : '') +
+            (seg.style.fontStyle !== ts.fontStyle ? ` font-style="${seg.style.fontStyle}"` : '') +
+            (seg.style.letterSpacing !== ts.letterSpacing
+              ? ` letter-spacing="${round(seg.style.letterSpacing * seg.style.fontSize, p)}"`
+              : '') +
+            (seg.fill?.type === 'solid'
+              ? ` fill="${toHex(seg.fill.color)}"` +
+                (seg.fill.color.a < 1 ? ` fill-opacity="${round(seg.fill.color.a, 3)}"` : '')
+              : '')
+          return (
+            `<tspan x="${round(originX + seg.x, p)}" y="${round(line.baseline, p)}"${attrs}>` +
+            `${escapeText(seg.text)}</tspan>`
+          )
+        })
+        .join('')
+    })
     .join('')
 
   const decoration = [ts.underline ? 'underline' : '', ts.strikethrough ? 'line-through' : '']

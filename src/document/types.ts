@@ -610,10 +610,93 @@ export interface PathNode extends StyledNode {
 
 export type BooleanOp = 'union' | 'subtract' | 'intersect' | 'exclude'
 
+/**
+ * A stretch of characters styled differently from the rest of its text object.
+ *
+ * SVG's `<tspan>` lets one `<text>` mix sizes, weights and colours, and so does
+ * every design tool. Runs are stored as ranges over the node's single `text`
+ * string rather than as a tree of spans, for two reasons: the whole string
+ * stays the thing the user edits — the canvas text editor is a plain textarea
+ * and needs no knowledge of this — and `runs` being absent is exactly what
+ * every document saved before rich text existed already contains.
+ *
+ * Ranges are half-open, non-overlapping and sorted. `style` overrides only the
+ * keys it names; anything absent falls through to the node's own textStyle.
+ */
+export interface TextRun {
+  /** Inclusive character index into TextNode.text. */
+  start: number
+  /** Exclusive character index into TextNode.text. */
+  end: number
+  /** Overrides on top of the node's textStyle. */
+  style?: Partial<TextStyle>
+  /** Overrides the node's fill for these characters. */
+  fill?: Paint
+}
+
 export interface TextNode extends StyledNode {
   type: 'text'
   text: string
   textStyle: TextStyle
+  /** Absent means the whole string uses `textStyle`, which is the common case. */
+  runs?: TextRun[]
+}
+
+/**
+ * Tidy a run list: drop empties, clamp to the text, sort, and merge neighbours
+ * that say the same thing. Editing text moves ranges around, so this is what
+ * keeps the list from accumulating slivers.
+ */
+export function normalizeRuns(
+  runs: readonly TextRun[] | undefined,
+  textLength: number,
+): TextRun[] | undefined {
+  if (!runs?.length) return undefined
+  const clamped = runs
+    .map((r) => ({
+      ...r,
+      start: Math.max(0, Math.min(textLength, Math.floor(r.start))),
+      end: Math.max(0, Math.min(textLength, Math.floor(r.end))),
+    }))
+    .filter((r) => r.end > r.start && (r.style !== undefined || r.fill !== undefined))
+    .sort((a, b) => a.start - b.start)
+
+  const out: TextRun[] = []
+  for (const run of clamped) {
+    const last = out[out.length - 1]
+    if (last && last.end === run.start && sameRunStyle(last, run)) last.end = run.end
+    else out.push(run)
+  }
+  return out.length ? out : undefined
+}
+
+function sameRunStyle(a: TextRun, b: TextRun): boolean {
+  return JSON.stringify(a.style ?? null) === JSON.stringify(b.style ?? null) &&
+    JSON.stringify(a.fill ?? null) === JSON.stringify(b.fill ?? null)
+}
+
+/**
+ * Shift run ranges to follow an edit that replaced [from, to) with `inserted`
+ * characters, so styling stays attached to the words it was applied to.
+ */
+export function shiftRuns(
+  runs: readonly TextRun[] | undefined,
+  from: number,
+  to: number,
+  inserted: number,
+  newLength: number,
+): TextRun[] | undefined {
+  if (!runs?.length) return undefined
+  const delta = inserted - (to - from)
+  // Each endpoint moves by where it sits relative to the edited span: entirely
+  // before it stays put, entirely after it shifts, and inside it collapses to
+  // the edit's start. Testing `<= from` before `>= to` matters at a caret-sized
+  // edit, where from === to: text typed at a run's end belongs to what comes
+  // after the run, not to the run.
+  const move = (index: number) =>
+    index <= from ? index : index >= to ? index + delta : from
+  const moved = runs.map((r) => ({ ...r, start: move(r.start), end: move(r.end) }))
+  return normalizeRuns(moved, newLength)
 }
 
 export type ImageFit = 'fill' | 'contain' | 'cover'

@@ -69,7 +69,7 @@ import { fxKey, geomKey } from '../canvas/liveKeys'
 import { effectMargin, filterRegion } from '../canvas/effects'
 import { intrinsicTextSize } from '../text/TextLayout'
 import { hasStyle, isContainer, sizingAfterResize, usesOwnBox } from '../document/types'
-import type { DesignDocument, DesignNode, NodeId, TextSizing, TextStyle, Transform } from '../document/types'
+import type { DesignDocument, DesignNode, NodeId, TextSizing, TextStyle, Transform, TextRun } from '../document/types'
 import type { SnapLine } from '../geometry/Snapping'
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
@@ -104,7 +104,7 @@ interface NodeSnapshot {
    * Text and its style, so the in-flight height can be re-fitted without
    * reading the document — which a drag deliberately never does.
    */
-  text?: { text: string; style: TextStyle }
+  text?: { text: string; style: TextStyle; runs?: TextRun[] }
 }
 
 export interface DragSessionState {
@@ -235,7 +235,7 @@ export function beginDrag(
       cornerRadius: node.type === 'rect' || node.type === 'image' ? node.cornerRadius : undefined,
       vertexRadius: node.type === 'polygon' ? node.cornerRadius : undefined,
       effectMargin: hasStyle(node) ? effectMargin(node.style) : 0,
-      text: node.type === 'text' ? { text: node.text, style: node.textStyle } : undefined,
+      text: node.type === 'text' ? { text: node.text, style: node.textStyle, runs: node.runs } : undefined,
     }
   })
 
@@ -457,7 +457,7 @@ function liveTextSize(
   // an Auto Width style does not wrap, so asking it for a height at this width
   // would give one line however narrow the box gets.
   const style = sizing === snap.text.style.sizing ? snap.text.style : { ...snap.text.style, sizing }
-  return { width: box.width, height: intrinsicTextSize(snap.text.text, style, box.width).height }
+  return { width: box.width, height: intrinsicTextSize(snap.text.text, style, box.width, snap.text.runs).height }
 }
 
 interface LocalResizeBox {

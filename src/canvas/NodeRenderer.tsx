@@ -364,8 +364,8 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
 
   // Both modes that own their width wrap to it; Auto Width never does.
   const layout = useMemo(
-    () => layoutText(node.text, style, sizing === 'auto-width' ? undefined : width),
-    [node.text, style, sizing, width, fontsTick],
+    () => layoutText(node.text, style, sizing === 'auto-width' ? undefined : width, node.runs),
+    [node.text, style, sizing, width, node.runs, fontsTick],
   )
 
   const boxWidth = sizing === 'auto-width' ? layout.width : width
@@ -412,19 +412,50 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
           strokeWidth={hasStroke ? node.style.stroke.width : undefined}
           style={{ whiteSpace: 'pre' } as CSSProperties}
         >
-          {layout.lines.map((line, i) => (
-            <tspan
-              key={i}
-              x={lineOffsetX(line.width, boxWidth, style.align)}
-              y={line.baseline}
-            >
-              {line.text === '' ? ' ' : line.text}
-            </tspan>
-          ))}
+          {layout.lines.map((line, i) => {
+            const originX = lineOffsetX(line.width, boxWidth, style.align)
+            // A line of uniform text stays exactly one <tspan>, so ordinary
+            // text renders byte-for-byte as it did before rich text existed.
+            if (!line.segments) {
+              return (
+                <tspan key={i} x={originX} y={line.baseline}>
+                  {line.text === '' ? ' ' : line.text}
+                </tspan>
+              )
+            }
+            return line.segments.map((seg, j) => (
+              <tspan
+                key={`${i}-${j}`}
+                x={originX + seg.x}
+                y={line.baseline}
+                fontFamily={fontStack(seg.style.fontFamily)}
+                fontSize={seg.style.fontSize}
+                fontWeight={seg.style.fontWeight}
+                fontStyle={seg.style.fontStyle}
+                letterSpacing={seg.style.letterSpacing * seg.style.fontSize}
+                {...(seg.fill ? paintToTspanFill(seg.fill, node.id, j) : {})}
+              >
+                {seg.text === '' ? ' ' : seg.text}
+              </tspan>
+            ))
+          })}
         </text>
       </g>
     </>
   )
+}
+
+/**
+ * A run's own fill, as tspan attributes.
+ *
+ * Only solid paint is resolved here. A gradient on a single run would need a
+ * paint server keyed to that run, and no design tool offers one — so a run
+ * carrying a gradient keeps the text object's own fill rather than silently
+ * painting itself a flat colour picked from the middle of the ramp.
+ */
+function paintToTspanFill(paint: Paint, _nodeId: NodeId, _index: number): { fill?: string; fillOpacity?: number } {
+  if (paint.type !== 'solid') return {}
+  return { fill: toHex(paint.color), fillOpacity: paint.color.a }
 }
 
 /**

@@ -108,6 +108,7 @@ import {
   type RGBA,
   type TextNode,
   type TextSizing,
+  shiftRuns,
 } from '../document/types'
 
 // ---------------------------------------------------------------------------
@@ -930,8 +931,11 @@ function refitTextNode(node: TextNode): boolean {
 
   const size =
     sizing === 'auto-width'
-      ? intrinsicTextSize(node.text, node.textStyle)
-      : { width: node.transform.width, height: intrinsicTextSize(node.text, node.textStyle, node.transform.width).height }
+      ? intrinsicTextSize(node.text, node.textStyle, undefined, node.runs)
+      : {
+          width: node.transform.width,
+          height: intrinsicTextSize(node.text, node.textStyle, node.transform.width, node.runs).height,
+        }
 
   if (
     Math.abs(size.width - node.transform.width) < 0.5 &&
@@ -966,6 +970,25 @@ export function setText(id: NodeId, text: string): boolean {
       const node = draft.nodes[id]
       if (!node || node.type !== 'text') return false
       if (node.text === text) return false
+
+      // Style runs are ranges into the string, so an edit has to move them or
+      // the styling detaches from the words it was applied to. The edited span
+      // is found by matching the common prefix and suffix, which is what a
+      // textarea edit actually looks like — one contiguous replacement.
+      if (node.runs?.length) {
+        const before = node.text
+        let from = 0
+        while (from < before.length && from < text.length && before[from] === text[from]) from++
+        let tail = 0
+        while (
+          tail < before.length - from &&
+          tail < text.length - from &&
+          before[before.length - 1 - tail] === text[text.length - 1 - tail]
+        ) {
+          tail++
+        }
+        node.runs = shiftRuns(node.runs, from, before.length - tail, text.length - tail - from, text.length)
+      }
       node.text = text
       if (!node.name || node.name === 'Text' || node.name.startsWith(node.text.slice(0, 8))) {
         node.name = text.split('\n')[0]!.slice(0, 40) || 'Text'

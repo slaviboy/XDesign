@@ -61,7 +61,7 @@ import { parseCssColor } from '../document/color'
 import { sanitizeSvg } from './SvgSanitizer'
 import { createCssLookup, parseStyleSheets, type CssLookup } from './SvgCss'
 import { namespaceRawSvg } from './IdNamespacer'
-import { DEFAULT_STROKE, DEFAULT_TEXT_STYLE } from '../document/types'
+import { DEFAULT_STROKE, DEFAULT_TEXT_STYLE, normalizeRuns } from '../document/types'
 import type {
   DesignNode,
   GradientStop,
@@ -70,6 +70,8 @@ import type {
   Paint,
   Style,
   TextAlign,
+  TextRun,
+  TextStyle,
 } from '../document/types'
 import type { LineCap, LineJoin, FillRule } from '../geometry/PathUtils'
 
@@ -821,13 +823,71 @@ function addPathNode(
   return node.id
 }
 
+/**
+ * `<text>`, including its `<tspan>` structure.
+ *
+ * Two different things wear the same tag. A tspan that only restyles part of
+ * the string is a STYLE RUN — the text still flows as one paragraph, so it
+ * stays one text object with runs over it. A tspan that carries its own x or y
+ * is POSITIONING: it is placed independently, does not flow with what came
+ * before, and is therefore its own text object. Collapsing either into
+ * `textContent`, as this used to, threw away both the styling and the line
+ * structure and left one space-joined line.
+ */
 function importText(el: Element, ctx: ImportContext, style: InheritedStyle, matrix: Mat2D): NodeId | null {
-  const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+  const positioned = positionedSpans(el)
+  if (positioned.length > 1) {
+    const parts: NodeId[] = []
+    for (const span of positioned) {
+      const id = importTextPiece(span.el, ctx, style, matrix, span.x, span.y)
+      if (id) parts.push(id)
+    }
+    if (parts.length === 0) return null
+    if (parts.length === 1) return parts[0]!
+
+    const group = createGroup(parts, { x: 0, y: 0, width: 1, height: 1 })
+    group.name = elementName(el, 'Text')
+    for (const c of parts) ctx.nodes[c]!.parentId = group.id
+    ctx.nodes[group.id] = group
+    sizeGroupToChildren(group.id, ctx)
+    return group.id
+  }
+  return importTextPiece(el, ctx, style, matrix, null, null)
+}
+
+/**
+ * The independently-positioned pieces of a `<text>`.
+ *
+ * Returns one entry when nothing inside sets its own x/y, which is the ordinary
+ * case and keeps the text a single editable object.
+ */
+function positionedSpans(el: Element): Array<{ el: Element; x: number | null; y: number | null }> {
+  const spans = Array.from(el.children).filter((c) => c.tagName.toLowerCase() === 'tspan')
+  const anyPositioned = spans.some(
+    (c) => c.getAttribute('x') !== null || c.getAttribute('y') !== null,
+  )
+  if (!anyPositioned || spans.length === 0) return [{ el, x: null, y: null }]
+  return spans.map((c) => ({
+    el: c,
+    x: c.getAttribute('x') !== null ? num(c, 'x', 0) : null,
+    y: c.getAttribute('y') !== null ? num(c, 'y', 0) : null,
+  }))
+}
+
+function importTextPiece(
+  el: Element,
+  ctx: ImportContext,
+  style: InheritedStyle,
+  matrix: Mat2D,
+  spanX: number | null,
+  spanY: number | null,
+): NodeId | null {
+  const { text, runs } = collectTextRuns(el, style, ctx)
   if (!text) return null
 
   const measured = ctx.measure(el)
-  const x = num(el, 'x', 0)
-  const y = num(el, 'y', 0)
+  const x = spanX ?? num(el, 'x', 0)
+  const y = spanY ?? num(el, 'y', 0)
   const width = measured?.width ?? text.length * style.fontSize * 0.5
   const height = measured?.height ?? style.fontSize * 1.2
 
@@ -849,9 +909,77 @@ function importText(el: Element, ctx: ImportContext, style: InheritedStyle, matr
       sizing: 'auto-width',
     },
   )
+  if (runs) node.runs = runs
   node.name = elementName(el, text.slice(0, 30) || 'Text')
   ctx.nodes[node.id] = node
   return node.id
+}
+
+/**
+ * Flatten a `<text>` or `<tspan>` into one string plus the style runs over it.
+ *
+ * Walks the children in order, tracking where each one's characters land so a
+ * nested tspan's overrides become a range. Whitespace is collapsed the way SVG
+ * collapses it, and the offsets are taken from the collapsed string so the
+ * ranges line up with what is actually drawn.
+ */
+function collectTextRuns(
+  el: Element,
+  base: InheritedStyle,
+  ctx: ImportContext,
+): { text: string; runs: TextRun[] | undefined } {
+  const runs: TextRun[] = []
+  let text = ''
+
+  const walk = (node: Node, inherited: InheritedStyle) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === 3) {
+        text += (child.textContent ?? '').replace(/\s+/g, ' ')
+        continue
+      }
+      if (child.nodeType !== 1) continue
+      const childEl = child as Element
+      if (childEl.tagName.toLowerCase() !== 'tspan') continue
+
+      const style = resolveStyle(childEl, inherited, ctx)
+      const start = text.length
+      walk(childEl, style)
+      const end = text.length
+      if (end > start) {
+        const override = runOverride(style, base, ctx, childEl)
+        if (override) runs.push({ start, end, ...override })
+      }
+    }
+  }
+  walk(el, base)
+
+  // Collapsed as it was built, so only the outer trim can move the offsets —
+  // and it only ever removes from the front, by exactly this much.
+  const lead = /^\s*/.exec(text)![0].length
+  text = text.trim()
+  const shifted = runs.map((r) => ({ ...r, start: r.start - lead, end: r.end - lead }))
+  return { text, runs: normalizeRuns(shifted, text.length) }
+}
+
+/** What a tspan's style says that its parent's did not. */
+function runOverride(
+  style: InheritedStyle,
+  base: InheritedStyle,
+  ctx: ImportContext,
+  el: Element,
+): { style?: Partial<TextStyle>; fill?: Paint } | null {
+  const over: Partial<TextStyle> = {}
+  if (style.fontFamily !== base.fontFamily) over.fontFamily = style.fontFamily
+  if (style.fontSize !== base.fontSize) over.fontSize = style.fontSize
+  if (style.fontWeight !== base.fontWeight) over.fontWeight = style.fontWeight
+  if (style.fontStyle !== base.fontStyle) over.fontStyle = style.fontStyle
+  if (style.letterSpacing !== base.letterSpacing) {
+    over.letterSpacing = style.fontSize > 0 ? style.letterSpacing / style.fontSize : 0
+  }
+
+  const fill = style.fill !== base.fill ? paintFrom(style.fill, ctx, el) : null
+  if (Object.keys(over).length === 0 && !fill) return null
+  return { ...(Object.keys(over).length ? { style: over } : {}), ...(fill ? { fill } : {}) }
 }
 
 function importImage(el: Element, ctx: ImportContext, style: InheritedStyle, matrix: Mat2D): NodeId | null {
