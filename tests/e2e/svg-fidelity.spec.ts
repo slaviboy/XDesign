@@ -138,3 +138,134 @@ test('exports back to SVG as vector, with its clip and gradients intact', async 
   const referenced = [...svg.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1])
   expect(referenced.filter((id) => !defined.has(id!))).toEqual([])
 })
+
+/**
+ * CSS and references.
+ *
+ * These are e2e rather than unit tests for a specific reason: happy-dom's
+ * parser mangles a <style> element inside an <svg>, swallowing its siblings, so
+ * a unit test here would be measuring the test environment rather than the app.
+ * Real Chromium is the only place this behaves like itself.
+ */
+const svgDoc = (inner: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="120" viewBox="0 0 200 120">${inner}</svg>`
+
+async function importMarkup(page: import('@playwright/test').Page, markup: string) {
+  await dropFiles(page, [{ name: 'case.svg', type: 'image/svg+xml', text: markup }], { x: 500, y: 350 })
+}
+
+/** The fill actually painted for each shape, in document order. */
+function paintedFills(page: import('@playwright/test').Page) {
+  return page.locator('.document-layer path[data-fill], .document-layer path').evaluateAll(
+    (els) => els.map((e) => e.getAttribute('fill')),
+  )
+}
+
+test.describe('CSS styling', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page)
+  })
+
+  test('a class selector colours the shape instead of leaving it black', async ({ page }) => {
+    await importMarkup(
+      page,
+      svgDoc(`<style>.cls-1{fill:#ff0000}</style><rect class="cls-1" width="40" height="40"/>`),
+    )
+    expect(await paintedFills(page)).toContain('#ff0000')
+  })
+
+  test('a stylesheet rule beats a presentation attribute', async ({ page }) => {
+    // Presentation attributes sit at the bottom of the cascade.
+    await importMarkup(
+      page,
+      svgDoc(`<style>.c{fill:#00ff00}</style><rect class="c" width="40" height="40" fill="#000000"/>`),
+    )
+    const fills = await paintedFills(page)
+    expect(fills).toContain('#00ff00')
+    expect(fills).not.toContain('#000000')
+  })
+
+  test('an inline style beats a stylesheet rule, and !important beats inline', async ({ page }) => {
+    await importMarkup(
+      page,
+      svgDoc(
+        `<style>.a{fill:#00ff00}.b{fill:#0000ff!important}</style>` +
+          `<rect class="a" width="20" height="20" style="fill:#ff0000"/>` +
+          `<rect class="b" x="40" width="20" height="20" style="fill:#ff0000"/>`,
+      ),
+    )
+    const fills = await paintedFills(page)
+    expect(fills).toContain('#ff0000') // inline won over the plain rule
+    expect(fills).toContain('#0000ff') // !important won over inline
+  })
+
+  test('specificity decides, not document order', async ({ page }) => {
+    await importMarkup(
+      page,
+      svgDoc(`<style>rect{fill:#ff0000}.win{fill:#00ff00}rect{fill:#000000}</style>` +
+        `<rect class="win" width="40" height="40"/>`),
+    )
+    // The class rule outranks both type rules even though one comes after it.
+    expect(await paintedFills(page)).toContain('#00ff00')
+  })
+
+  test('@media rules are not baked into the artwork', async ({ page }) => {
+    await importMarkup(
+      page,
+      svgDoc(`<style>.c{fill:#00ff00}@media print{.c{fill:#ff0000}}</style><rect class="c" width="40" height="40"/>`),
+    )
+    const fills = await paintedFills(page)
+    expect(fills).toContain('#00ff00')
+    expect(fills).not.toContain('#ff0000')
+  })
+})
+
+test.describe('references', () => {
+  test.beforeEach(async ({ page }) => {
+    await openApp(page)
+  })
+
+  test('<use> becomes real editable nodes, not an opaque blob', async ({ page }) => {
+    await importMarkup(
+      page,
+      svgDoc(`<defs><rect id="box" width="30" height="30" fill="#ff0000"/></defs>` +
+        `<use href="#box" x="10" y="10"/><use href="#box" x="60" y="10"/>`),
+    )
+    await expect(nodesOfType(page, 'svg')).toHaveCount(0)
+    // Two instances, each a real rect.
+    expect(await nodesOfType(page, 'rect').count()).toBe(2)
+  })
+
+  test('<use> of a <symbol> scales its viewBox into the given box', async ({ page }) => {
+    await importMarkup(
+      page,
+      svgDoc(`<defs><symbol id="s" viewBox="0 0 10 10"><rect width="10" height="10" fill="#00ff00"/></symbol></defs>` +
+        `<use href="#s" x="0" y="0" width="80" height="80"/>`),
+    )
+    await expect(nodesOfType(page, 'svg')).toHaveCount(0)
+    await expect(nodesOfType(page, 'rect')).toHaveCount(1)
+  })
+
+  test('a self-referencing <use> is refused rather than hanging', async ({ page }) => {
+    await importMarkup(page, svgDoc(`<g id="loop"><use href="#loop"/><rect width="20" height="20"/></g>`))
+    // The rect still imports; the recursion is declined.
+    await expect(nodesOfType(page, 'rect')).toHaveCount(1)
+  })
+
+  test('a hyperlinked shape stays editable', async ({ page }) => {
+    await importMarkup(page, svgDoc(`<a href="#x"><rect width="40" height="40" fill="#ff0000"/></a>`))
+    await expect(nodesOfType(page, 'svg')).toHaveCount(0)
+    await expect(nodesOfType(page, 'rect')).toHaveCount(1)
+  })
+
+  test('display:none content is kept hidden, not discarded', async ({ page }) => {
+    await importMarkup(
+      page,
+      svgDoc(`<rect width="20" height="20" display="none"/><rect x="40" width="20" height="20"/>`),
+    )
+    // One rendered, but both are in the Layers panel.
+    await expect(nodesOfType(page, 'rect')).toHaveCount(1)
+    const rows = await page.locator('.layer-row').count()
+    expect(rows).toBeGreaterThanOrEqual(2)
+  })
+})

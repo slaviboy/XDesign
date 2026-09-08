@@ -179,11 +179,18 @@ describe('importSvg', () => {
     expect(result.warnings.length).toBeGreaterThan(0)
   })
 
-  it('skips display:none content', () => {
+  it('imports display:none content hidden rather than discarding it', () => {
     const result = importSvg(wrap('<rect width="10" height="10" display="none"/><circle cx="1" cy="1" r="1"/>'))
-    const types = Object.values(result.nodes).map((n) => n.type)
-    expect(types).not.toContain('rect')
-    expect(types).toContain('ellipse')
+    const rect = Object.values(result.nodes).find((n) => n.type === 'rect')
+    // Kept, so the artwork is not silently lost and the user can unhide it.
+    expect(rect).toBeTruthy()
+    expect(rect!.visible).toBe(false)
+    expect(Object.values(result.nodes).find((n) => n.type === 'ellipse')?.visible).toBe(true)
+  })
+
+  it('treats visibility:hidden the same way', () => {
+    const result = importSvg(wrap('<rect width="10" height="10" visibility="hidden"/>'))
+    expect(Object.values(result.nodes).find((n) => n.type === 'rect')?.visible).toBe(false)
   })
 })
 

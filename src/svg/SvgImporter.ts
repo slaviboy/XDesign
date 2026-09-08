@@ -58,6 +58,7 @@ import {
 } from '../document/NodeFactory'
 import { parseCssColor } from '../document/color'
 import { sanitizeSvg } from './SvgSanitizer'
+import { createCssLookup, parseStyleSheets, type CssLookup } from './SvgCss'
 import { namespaceRawSvg } from './IdNamespacer'
 import { DEFAULT_STROKE, DEFAULT_TEXT_STYLE } from '../document/types'
 import type {
@@ -91,6 +92,11 @@ export interface SvgImportResult {
 /** Elements we map to first-class nodes. Everything else is preserved verbatim. */
 const NATIVE_TAGS = new Set([
   'g', 'rect', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'path', 'text', 'image', 'svg',
+  // <a> is a plain grouping element as far as artwork is concerned; treating it
+  // as unknown turned every hyperlinked shape into an uneditable blob.
+  'a',
+  // <use> is instantiated (see importUse) rather than preserved as markup.
+  'use',
 ])
 
 /** Elements that only define resources and must not be walked as content. */
@@ -148,10 +154,14 @@ interface ImportContext {
   gradients: Map<string, Paint>
   /** Serialized <defs> content needed by preservation nodes. */
   defsMarkup: string
+  /** Every element carrying an id, so <use> can resolve its target. */
+  byId: Map<string, Element>
   /** Every identified <defs> entry, by id — the lookup, not the output. */
   defsById: Map<string, string>
   /** Only the entries something still references raw; the document emits these. */
   svgDefs: Record<string, string>
+  /** Declarations from the file's <style> blocks. */
+  css: CssLookup
   /** <clipPath> and <mask> elements by id, so a reference can be materialized. */
   clipDefs: Map<string, { el: Element; mode: 'clip' | 'luminance' }>
   /** Ids currently being materialized, so a self-referencing clip cannot loop. */
@@ -194,6 +204,8 @@ export function importSvg(source: string, name = 'SVG'): SvgImportResult {
       warnings,
       gradients: collectGradients(root),
       defsMarkup: collectDefsMarkup(root),
+      css: createCssLookup(parseStyleSheets(root)),
+      byId: collectById(root),
       defsById: collectSvgDefs(root),
       svgDefs: {},
       clipDefs: collectClipDefs(root),
@@ -303,10 +315,18 @@ function walkElement(
 ): NodeId | null {
   const tag = el.tagName.toLowerCase()
   if (DEFINITION_TAGS.has(tag)) return null
-  if (el.getAttribute('display') === 'none') return null
 
-  const style = resolveStyle(el, inherited)
-  const own = parseSvgTransform(el.getAttribute('transform'))
+  const style = resolveStyle(el, inherited, ctx)
+
+  // Hidden, not discarded. Dropping display:none content loses artwork the file
+  // still contains and the user can never get back; importing it hidden keeps
+  // it in the Layers panel with its eye closed, which is both what Illustrator
+  // does and reversible.
+  const hidden =
+    attr(el, 'display', ctx) === 'none' || attr(el, 'visibility', ctx) === 'hidden'
+
+  // Read through the cascade too: a stylesheet may set the transform.
+  const own = parseSvgTransform(attr(el, 'transform', ctx))
   const matrix = multiply(parentMatrix, own)
 
   // Anything we cannot model natively is preserved verbatim rather than dropped.
@@ -324,8 +344,11 @@ function walkElement(
   const contentMatrix = clip && !isGroup ? IDENTITY : matrix
   const id = importByTag(tag, el, ctx, style, contentMatrix)
   if (!id) return null
+  if (hidden) ctx.nodes[id]!.visible = false
   if (!clip) return id
-  return applyClip(id, clip, ctx, isGroup ? null : matrix)
+  const wrapped = applyClip(id, clip, ctx, isGroup ? null : matrix)
+  if (hidden) ctx.nodes[wrapped]!.visible = false
+  return wrapped
 }
 
 function importByTag(
@@ -337,8 +360,11 @@ function importByTag(
 ): NodeId | null {
   switch (tag) {
     case 'g':
+    case 'a':
     case 'svg':
       return importGroup(el, ctx, style, matrix)
+    case 'use':
+      return importUse(el, ctx, style, matrix)
     case 'rect':
       return importRect(el, ctx, style, matrix)
     case 'circle':
@@ -395,6 +421,84 @@ function importGroup(
   // Size the group to its content so the selection frame is meaningful.
   sizeGroupToChildren(group.id, ctx)
   return group.id
+}
+
+/**
+ * `<use>`: instantiate the referenced subtree as real nodes.
+ *
+ * A `<use>` is a copy, not a shared object — SVG defines it as deep-cloning the
+ * referenced element into the tree — so the honest import is a group of real,
+ * editable nodes rather than an opaque blob that cannot be selected into. The
+ * editor has no component model to point the copy back at its source, and
+ * inventing one to avoid duplicating a handful of shapes would be the tail
+ * wagging the dog.
+ *
+ * `x`/`y` translate the instance. A `<use>` of a `<symbol>` or `<svg>` also
+ * takes `width`/`height`, which scale the referenced viewBox into that box.
+ */
+function importUse(
+  el: Element,
+  ctx: ImportContext,
+  style: InheritedStyle,
+  matrix: Mat2D,
+): NodeId | null {
+  const href = el.getAttribute('href') ?? el.getAttribute('xlink:href') ?? ''
+  const id = href.startsWith('#') ? href.slice(1) : ''
+  const target = id ? ctx.byId.get(id) : undefined
+  if (!target) {
+    ctx.warnings.add(`A <use> element referenced "${id || href}", which the file does not define.`)
+    return null
+  }
+  // Circular by construction: using an element that contains you would clone
+  // your own ancestor, and SVG treats that as an error rather than a deep copy.
+  // The resolving set catches the indirect case (A uses B, B uses A); this
+  // catches the direct one, which would otherwise duplicate the subtree once
+  // before the set noticed.
+  if (ctx.resolving.has(id) || target === el || target.contains(el)) {
+    ctx.warnings.add('A <use> element referenced itself and was skipped to avoid a loop.')
+    return null
+  }
+
+  const x = num(el, 'x', 0)
+  const y = num(el, 'y', 0)
+  let local: Mat2D = multiply(matrix, translation(x, y))
+
+  // A <symbol>/<svg> target maps its viewBox into the width/height given here.
+  const tag = target.tagName.toLowerCase()
+  if (tag === 'symbol' || tag === 'svg') {
+    const vb = parseViewBox(target)
+    const w = num(el, 'width', vb?.width ?? 0)
+    const h = num(el, 'height', vb?.height ?? 0)
+    if (vb && vb.width > 0 && vb.height > 0 && w > 0 && h > 0) {
+      local = multiply(
+        local,
+        compose(translation(-vb.x, -vb.y), [w / vb.width, 0, 0, h / vb.height, 0, 0]),
+      )
+    }
+  }
+
+  ctx.resolving.add(id)
+  try {
+    // A <symbol> is a container of content; any other target is one element.
+    const sources = tag === 'symbol' || tag === 'svg' ? Array.from(target.children) : [target]
+    const parts: NodeId[] = []
+    for (const src of sources) {
+      const childId = walkElement(src, ctx, style, IDENTITY)
+      if (childId) parts.push(childId)
+    }
+    if (parts.length === 0) return null
+
+    const group = createGroup(parts, { x: 0, y: 0, width: 1, height: 1 })
+    group.name = elementName(el, target.getAttribute('data-name') ?? id ?? 'Instance')
+    group.transform = transformFromMatrix(local, 1, 1, 0, 0)
+    group.style.opacity = style.opacity
+    for (const c of parts) ctx.nodes[c]!.parentId = group.id
+    ctx.nodes[group.id] = group
+    sizeGroupToChildren(group.id, ctx)
+    return group.id
+  } finally {
+    ctx.resolving.delete(id)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -514,6 +618,16 @@ function collectClipDefs(root: Element): Map<string, { el: Element; mode: 'clip'
       (el.getAttribute('mask-type') === 'alpha' ||
         /mask-type\s*:\s*alpha/i.test(el.getAttribute('style') ?? ''))
     out.set(id, { el, mode: isMask && !alpha ? 'luminance' : 'clip' })
+  }
+  return out
+}
+
+/** Every element with an id, for <use> to resolve against. */
+function collectById(root: Element): Map<string, Element> {
+  const out = new Map<string, Element>()
+  for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+    const id = el.getAttribute('id')
+    if (id && !out.has(id)) out.set(id, el)
   }
   return out
 }
@@ -788,10 +902,21 @@ function createPreservationNode(
 // Style resolution
 // ---------------------------------------------------------------------------
 
-/** Presentation attribute, falling back to inline style, then to inheritance. */
-function attr(el: Element, name: string): string | null {
+/**
+ * One styling property for one element, in CSS cascade order.
+ *
+ * Presentation attributes sit at the very bottom of the cascade — below any
+ * stylesheet rule — which is the whole reason `.cls-1 { fill: red }` beats
+ * `fill="black"` written on the same element. An inline `style` beats a normal
+ * rule but loses to an `!important` one.
+ */
+function attr(el: Element, name: string, ctx?: ImportContext): string | null {
+  const css = ctx && !ctx.css.empty ? ctx.css.value(el, name) : null
+  if (css !== null && ctx!.css.isImportant(el, name)) return css
+
   const inline = inlineStyleValue(el, name)
   if (inline !== null) return inline
+  if (css !== null) return css
   return el.getAttribute(name)
 }
 
@@ -803,63 +928,63 @@ function inlineStyleValue(el: Element, prop: string): string | null {
   return m ? m[1]!.trim() : null
 }
 
-function resolveStyle(el: Element, parent: InheritedStyle): InheritedStyle {
+function resolveStyle(el: Element, parent: InheritedStyle, ctx: ImportContext): InheritedStyle {
   const next: InheritedStyle = { ...parent }
 
-  const fill = attr(el, 'fill')
+  const fill = attr(el, 'fill', ctx)
   if (fill !== null) next.fill = fill.trim()
-  const stroke = attr(el, 'stroke')
+  const stroke = attr(el, 'stroke', ctx)
   if (stroke !== null) next.stroke = stroke.trim()
 
-  const fo = numAttr(attr(el, 'fill-opacity'))
+  const fo = numAttr(attr(el, 'fill-opacity', ctx))
   if (fo !== null) next.fillOpacity = clamp01(fo)
-  const so = numAttr(attr(el, 'stroke-opacity'))
+  const so = numAttr(attr(el, 'stroke-opacity', ctx))
   if (so !== null) next.strokeOpacity = clamp01(so)
-  const op = numAttr(attr(el, 'opacity'))
+  const op = numAttr(attr(el, 'opacity', ctx))
   next.opacity = op !== null ? clamp01(op) : 1 // opacity is NOT inherited in SVG
 
-  const sw = numAttr(attr(el, 'stroke-width'))
+  const sw = numAttr(attr(el, 'stroke-width', ctx))
   if (sw !== null) next.strokeWidth = Math.max(0, sw)
 
-  const fr = attr(el, 'fill-rule') ?? attr(el, 'clip-rule')
+  const fr = attr(el, 'fill-rule', ctx) ?? attr(el, 'clip-rule', ctx)
   if (fr === 'evenodd' || fr === 'nonzero') next.fillRule = fr
 
-  const cap = attr(el, 'stroke-linecap')
+  const cap = attr(el, 'stroke-linecap', ctx)
   if (cap === 'butt' || cap === 'round' || cap === 'square') next.lineCap = cap
-  const join = attr(el, 'stroke-linejoin')
+  const join = attr(el, 'stroke-linejoin', ctx)
   if (join === 'miter' || join === 'round' || join === 'bevel') next.lineJoin = join
-  const ml = numAttr(attr(el, 'stroke-miterlimit'))
+  const ml = numAttr(attr(el, 'stroke-miterlimit', ctx))
   if (ml !== null) next.miterLimit = ml
 
-  const dash = attr(el, 'stroke-dasharray')
+  const dash = attr(el, 'stroke-dasharray', ctx)
   if (dash !== null) {
     next.dashArray =
       dash === 'none'
         ? []
         : dash.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n) && n >= 0)
   }
-  const dashOff = numAttr(attr(el, 'stroke-dashoffset'))
+  const dashOff = numAttr(attr(el, 'stroke-dashoffset', ctx))
   if (dashOff !== null) next.dashOffset = dashOff
 
-  const family = attr(el, 'font-family')
+  const family = attr(el, 'font-family', ctx)
   if (family) next.fontFamily = family.split(',')[0]!.trim().replace(/["']/g, '')
-  const size = numAttr(attr(el, 'font-size'))
+  const size = numAttr(attr(el, 'font-size', ctx))
   if (size !== null) next.fontSize = size
-  const weight = attr(el, 'font-weight')
+  const weight = attr(el, 'font-weight', ctx)
   if (weight) {
     const n = Number(weight)
     next.fontWeight = Number.isFinite(n) ? n : weight === 'bold' ? 700 : 400
   }
-  const fontStyle = attr(el, 'font-style')
+  const fontStyle = attr(el, 'font-style', ctx)
   if (fontStyle === 'italic' || fontStyle === 'oblique') next.fontStyle = 'italic'
   else if (fontStyle === 'normal') next.fontStyle = 'normal'
 
-  const anchor = attr(el, 'text-anchor')
+  const anchor = attr(el, 'text-anchor', ctx)
   if (anchor === 'middle') next.textAnchor = 'center'
   else if (anchor === 'end') next.textAnchor = 'right'
   else if (anchor === 'start') next.textAnchor = 'left'
 
-  const ls = numAttr(attr(el, 'letter-spacing'))
+  const ls = numAttr(attr(el, 'letter-spacing', ctx))
   if (ls !== null) next.letterSpacing = ls
 
   return next
