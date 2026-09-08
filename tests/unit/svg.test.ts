@@ -335,3 +335,106 @@ describe('nothing is dropped without saying so', () => {
     expect(r.warnings.join(' ')).toMatch(/<use>/)
   })
 })
+
+/**
+ * Gradient fidelity.
+ *
+ * All three of these used to be approximations that changed the artwork: a
+ * userSpaceOnUse gradient had its direction erased by Math.abs, a userSpace
+ * radial was reset to a centred default, and spreadMethod was never read at all.
+ */
+describe('gradients keep the space they were authored in', () => {
+  const grad = (attrs: string, inner = '<stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/>') =>
+    wrap(`<defs><linearGradient id="g" ${attrs}>${inner}</linearGradient></defs>
+          <rect width="40" height="40" fill="url(#g)"/>`)
+
+  const fillOf = (svg: string) => {
+    const r = importSvg(svg)
+    const node = Object.values(r.nodes).find((n) => n.type === 'rect')
+    return node && 'style' in node ? node.style.fill : null
+  }
+
+  it('keeps a right-to-left gradient running right to left', () => {
+    // x1 > x2. Normalizing through Math.abs used to flip it.
+    const fill = fillOf(grad('gradientUnits="userSpaceOnUse" x1="100" y1="0" x2="0" y2="0"'))
+    expect(fill).toMatchObject({ type: 'linear', units: 'userSpaceOnUse' })
+    expect((fill as { x1: number }).x1).toBeGreaterThan((fill as { x2: number }).x2)
+  })
+
+  it('keeps a userSpaceOnUse radial where it was put', () => {
+    const r = importSvg(
+      wrap(`<defs><radialGradient id="g" gradientUnits="userSpaceOnUse" cx="17" cy="23" r="9">
+              <stop offset="0" stop-color="#000"/></radialGradient></defs>
+            <rect width="40" height="40" fill="url(#g)"/>`),
+    )
+    const node = Object.values(r.nodes).find((n) => n.type === 'rect')!
+    expect(node.style.fill).toMatchObject({ type: 'radial', cx: 17, cy: 23, r: 9, units: 'userSpaceOnUse' })
+  })
+
+  it('carries spreadMethod through', () => {
+    expect(fillOf(grad('spreadMethod="reflect"'))).toMatchObject({ spread: 'reflect' })
+    // pad is the default and is not worth storing.
+    expect(fillOf(grad('spreadMethod="pad"'))).not.toHaveProperty('spread')
+  })
+
+  it('carries gradientTransform through instead of only folding it into linear endpoints', () => {
+    const fill = fillOf(grad('gradientTransform="rotate(45)"'))
+    expect(fill).toHaveProperty('transform')
+    // An identity transform is not worth storing.
+    expect(fillOf(grad('gradientTransform="translate(0 0)"'))).not.toHaveProperty('transform')
+  })
+
+  it('shifts a userSpaceOnUse gradient by the amount the shape was rebased', () => {
+    // The rect starts at (50,60); its geometry is rebased to (0,0), so the
+    // gradient has to move with it or the paint stays where the artwork was.
+    const r = importSvg(
+      wrap(`<defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="50" y1="60" x2="90" y2="60">
+              <stop offset="0" stop-color="#000"/></linearGradient></defs>
+            <rect x="50" y="60" width="40" height="40" fill="url(#g)"/>`),
+    )
+    const node = Object.values(r.nodes).find((n) => n.type === 'rect')!
+    expect(node.style.fill).toMatchObject({ transform: [1, 0, 0, 1, -50, -60] })
+  })
+})
+
+describe('preserveAspectRatio', () => {
+  // transformFromMatrix keeps the intrinsic size in width/height and puts the
+  // mapping in scaleX/scaleY, so the drawn extent is the product of the two.
+  const extentOf = (svg: string) => {
+    const r = importSvg(svg)
+    const t = Object.values(r.nodes).find((n) => n.type === 'rect')!.transform
+    return { w: t.width * t.scaleX, h: t.height * t.scaleY, x: t.x, y: t.y }
+  }
+
+  it('letterboxes rather than stretching a square viewBox into a wide box', () => {
+    const e = extentOf(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 100 100">
+         <rect width="100" height="100"/></svg>`,
+    )
+    // Scale 1 both ways — still square — with 50 units of letterbox either side.
+    expect(e.w).toBeCloseTo(100, 3)
+    expect(e.h).toBeCloseTo(100, 3)
+    expect(e.x).toBeCloseTo(50, 3)
+  })
+
+  it('stretches when told to', () => {
+    const e = extentOf(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 100 100"
+            preserveAspectRatio="none"><rect width="100" height="100"/></svg>`,
+    )
+    expect(e.w).toBeCloseTo(200, 3)
+    expect(e.h).toBeCloseTo(100, 3)
+    expect(e.x).toBeCloseTo(0, 3)
+  })
+
+  it('fills and overflows with slice', () => {
+    const e = extentOf(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 100 100"
+            preserveAspectRatio="xMidYMid slice"><rect width="100" height="100"/></svg>`,
+    )
+    // Scale 2 covers the box; the vertical overflow is split evenly.
+    expect(e.w).toBeCloseTo(200, 3)
+    expect(e.h).toBeCloseTo(200, 3)
+    expect(e.y).toBeCloseTo(-50, 3)
+  })
+})

@@ -33,7 +33,7 @@
  */
 
 import { memo, useCallback, useMemo, type CSSProperties, type ReactNode } from 'react'
-import { toSvgMatrix } from '../geometry/Matrix'
+import { toSvgMatrix, type Mat2D } from '../geometry/Matrix'
 import {
   ellipsePath,
   linePath,
@@ -176,8 +176,17 @@ function GradientDef({ paint, id }: { paint: Paint; id: string }): ReactNode {
     )
   }
 
+  // Units, gradientTransform and spreadMethod are passed through rather than
+  // approximated: an imported gradient authored in user space under a transform
+  // is not the same gradient once flattened into bounding-box coordinates.
+  const shared = {
+    ...(paint.units ? { gradientUnits: paint.units } : {}),
+    ...(paint.transform ? { gradientTransform: toSvgMatrix(paint.transform as Mat2D) } : {}),
+    ...(paint.spread ? { spreadMethod: paint.spread } : {}),
+  }
+
   return paint.type === 'linear' ? (
-    <linearGradient id={id} x1={paint.x1} y1={paint.y1} x2={paint.x2} y2={paint.y2}>
+    <linearGradient id={id} x1={paint.x1} y1={paint.y1} x2={paint.x2} y2={paint.y2} {...shared}>
       {stops}
     </linearGradient>
   ) : (
@@ -188,6 +197,8 @@ function GradientDef({ paint, id }: { paint: Paint; id: string }): ReactNode {
       r={paint.r}
       fx={paint.fx ?? paint.cx}
       fy={paint.fy ?? paint.cy}
+      {...(paint.fr !== undefined ? { fr: paint.fr } : {})}
+      {...shared}
     >
       {stops}
     </radialGradient>

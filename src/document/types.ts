@@ -139,6 +139,20 @@ export interface LinearGradientPaint {
   x2: number
   y2: number
   stops: GradientStop[]
+  /**
+   * Which space x1/y1/x2/y2 are in. Absent means objectBoundingBox — 0..1 of the
+   * node's own box, which is what everything drawn in the editor uses and what
+   * makes a gradient rescale with its shape for free.
+   *
+   * An imported gradient may instead be authored in user units. Converting it to
+   * objectBoundingBox is not a rescale — under a non-square box the two are not
+   * the same gradient — so the space is recorded and SVG is left to do the maths.
+   */
+  units?: 'userSpaceOnUse'
+  /** SVG gradientTransform, in the same 6-tuple order as Mat2D. */
+  transform?: readonly [number, number, number, number, number, number]
+  /** SVG spreadMethod. Absent means 'pad'. */
+  spread?: 'reflect' | 'repeat'
 }
 
 export interface RadialGradientPaint {
@@ -150,6 +164,14 @@ export interface RadialGradientPaint {
   fx?: number
   fy?: number
   stops: GradientStop[]
+  /** See LinearGradientPaint.units. */
+  units?: 'userSpaceOnUse'
+  /** SVG gradientTransform, in the same 6-tuple order as Mat2D. */
+  transform?: readonly [number, number, number, number, number, number]
+  /** SVG spreadMethod. Absent means 'pad'. */
+  spread?: 'reflect' | 'repeat'
+  /** SVG 2 focal radius. */
+  fr?: number
 }
 
 /**

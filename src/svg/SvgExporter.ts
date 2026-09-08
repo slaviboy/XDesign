@@ -659,16 +659,26 @@ function emitGradient(paint: Paint, id: string): string {
 
   // objectBoundingBox is SVG's default unit, and is what the model stores — so
   // the gradient rescales with the shape in any renderer that opens the file.
+  // Units, gradientTransform and spreadMethod ride along when present, so an
+  // imported gradient exports as the gradient it was rather than an
+  // objectBoundingBox approximation of it.
+  const shared =
+    (paint.units ? ` gradientUnits="${paint.units}"` : '') +
+    (paint.transform ? ` gradientTransform="${toSvgMatrix(paint.transform as Mat2D)}"` : '') +
+    (paint.spread ? ` spreadMethod="${paint.spread}"` : '')
+
   if (paint.type === 'linear') {
     return (
       `<linearGradient id="${id}" x1="${round(paint.x1, 4)}" y1="${round(paint.y1, 4)}" ` +
-      `x2="${round(paint.x2, 4)}" y2="${round(paint.y2, 4)}">${stops}</linearGradient>`
+      `x2="${round(paint.x2, 4)}" y2="${round(paint.y2, 4)}"${shared}>${stops}</linearGradient>`
     )
   }
   return (
     `<radialGradient id="${id}" cx="${round(paint.cx, 4)}" cy="${round(paint.cy, 4)}" r="${round(paint.r, 4)}"` +
     (paint.fx !== undefined ? ` fx="${round(paint.fx, 4)}"` : '') +
     (paint.fy !== undefined ? ` fy="${round(paint.fy, 4)}"` : '') +
+    (paint.fr !== undefined ? ` fr="${round(paint.fr, 4)}"` : '') +
+    shared +
     `>${stops}</radialGradient>`
   )
 }

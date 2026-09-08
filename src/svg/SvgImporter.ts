@@ -44,6 +44,7 @@ import {
   type Mat2D,
 } from '../geometry/Matrix'
 import { pathBounds, transformPath } from '../geometry/PathUtils'
+import { parsePreserveAspectRatio, viewBoxMatrix } from '../geometry/ViewBox'
 import { transformFromMatrix } from '../document/DocumentModel'
 import { createAssetId, createStopId } from '../document/ids'
 import {
@@ -216,13 +217,18 @@ export function importSvg(source: string, name = 'SVG'): SvgImportResult {
     const viewBox = parseViewBox(root)
     const size = intrinsicSize(root, viewBox)
 
-    // The viewBox maps the source coordinate system onto the placed size.
+    // The viewBox maps the source coordinate system onto the placed size,
+    // honouring preserveAspectRatio. Scaling the axes independently — which is
+    // what this used to do — is only correct for align="none"; every other
+    // value, including the default, keeps one scale and letterboxes.
     const rootMatrix: Mat2D = viewBox
-      ? compose(
-          translation(-viewBox.x, -viewBox.y),
-          [size.width / (viewBox.width || 1), 0, 0, size.height / (viewBox.height || 1), 0, 0],
+      ? viewBoxMatrix(
+          viewBox,
+          size.width,
+          size.height,
+          parsePreserveAspectRatio(root.getAttribute('preserveAspectRatio')),
         )
-      : [1, 0, 0, 1, 0, 0]
+      : IDENTITY
 
     const children: NodeId[] = []
     for (const child of Array.from(root.children)) {
@@ -392,6 +398,14 @@ function importGroup(
   style: InheritedStyle,
   matrix: Mat2D,
 ): NodeId | null {
+  // A nested <svg> is a viewport, not a plain group: it positions itself with
+  // x/y, maps its own viewBox into width/height, and clips to that box. Treating
+  // it as a <g> dropped all three, so its content landed unscaled and unclipped.
+  if (el.tagName.toLowerCase() === 'svg') {
+    const nested = nestedViewportMatrix(el)
+    if (nested) matrix = multiply(matrix, nested)
+  }
+
   // A filter has no first-class model, so a filtered subtree is still preserved
   // verbatim — as vector, and now saying so specifically. Clips and masks are
   // materialized instead (see applyClip), because collapsing a whole subtree for
@@ -665,6 +679,23 @@ function requireDef(id: string, ctx: ImportContext, depth = 0): void {
   }
 }
 
+/**
+ * The extra matrix a nested `<svg>` establishes: its x/y offset, then its own
+ * viewBox mapped into its width/height.
+ */
+function nestedViewportMatrix(el: Element): Mat2D | null {
+  const x = num(el, 'x', 0)
+  const y = num(el, 'y', 0)
+  const vb = parseViewBox(el)
+  const w = num(el, 'width', vb?.width ?? 0)
+  const h = num(el, 'height', vb?.height ?? 0)
+
+  const offset = x !== 0 || y !== 0 ? translation(x, y) : null
+  if (!vb || vb.width <= 0 || vb.height <= 0 || w <= 0 || h <= 0) return offset
+  const map = viewBoxMatrix(vb, w, h, parsePreserveAspectRatio(el.getAttribute('preserveAspectRatio')))
+  return offset ? multiply(offset, map) : map
+}
+
 function sizeGroupToChildren(groupId: NodeId, ctx: ImportContext): void {
   const group = ctx.nodes[groupId]
   if (!group || group.type !== 'group') return
@@ -697,6 +728,7 @@ function importRect(el: Element, ctx: ImportContext, style: InheritedStyle, matr
     [r, r, r, r],
   )
   node.name = elementName(el, 'Rectangle')
+  rebaseUserSpacePaints(node, x, y)
   ctx.nodes[node.id] = node
   return node.id
 }
@@ -718,6 +750,7 @@ function importEllipse(
     toStyle(style, ctx, el),
   )
   node.name = elementName(el, isCircle ? 'Circle' : 'Ellipse')
+  rebaseUserSpacePaints(node, cx - rx, cy - ry)
   ctx.nodes[node.id] = node
   return node.id
 }
@@ -783,6 +816,7 @@ function addPathNode(
     closed,
   )
   node.name = elementName(el, fallbackName)
+  rebaseUserSpacePaints(node, b.x, b.y)
   ctx.nodes[node.id] = node
   return node.id
 }
@@ -1073,46 +1107,79 @@ function parseGradient(
   if (stops.length === 0) return null
 
   const isLinear = el.tagName.toLowerCase() === 'lineargradient'
-  const userSpace = el.getAttribute('gradientUnits') === 'userSpaceOnUse'
-  const gt = parseSvgTransform(el.getAttribute('gradientTransform'))
+
+  // The coordinates are kept exactly as authored, and the space they were
+  // authored in travels with them. The old code normalized userSpaceOnUse into
+  // a unit vector using Math.abs, which threw away the direction — a gradient
+  // running right-to-left came out left-to-right — and reset every userSpace
+  // radial to a centred 0.5/0.5/0.5, which is a different gradient entirely.
+  const units = el.getAttribute('gradientUnits') === 'userSpaceOnUse'
+    ? ({ units: 'userSpaceOnUse' } as const)
+    : {}
+
+  const gtAttr = el.getAttribute('gradientTransform')
+  const gt = gtAttr ? parseSvgTransform(gtAttr) : null
+  // Identity carries no information and only bloats the document.
+  const transform = gt && !isIdentity(gt) ? { transform: [...gt] as const } : {}
+
+  const spreadAttr = el.getAttribute('spreadMethod')
+  const spread =
+    spreadAttr === 'reflect' || spreadAttr === 'repeat' ? ({ spread: spreadAttr } as const) : {}
 
   if (isLinear) {
-    // Coordinates are stored in objectBoundingBox units. A gradientTransform is
-    // affine and these are points, so applying it to the endpoints is exact.
-    let x1 = numOr(el.getAttribute('x1'), 0)
-    let y1 = numOr(el.getAttribute('y1'), 0)
-    let x2 = numOr(el.getAttribute('x2'), 1)
-    let y2 = numOr(el.getAttribute('y2'), 0)
-    if (userSpace) {
-      // Without the element's bbox we cannot convert exactly; a horizontal
-      // sweep is a far better fallback than dropping the gradient.
-      const dx = x2 - x1
-      const dy = y2 - y1
-      const len = Math.hypot(dx, dy) || 1
-      x1 = 0; y1 = 0
-      x2 = Math.abs(dx) / len
-      y2 = Math.abs(dy) / len
-      if (x2 === 0 && y2 === 0) { x2 = 1; y2 = 0 }
+    return {
+      type: 'linear',
+      x1: numOr(el.getAttribute('x1'), 0),
+      y1: numOr(el.getAttribute('y1'), 0),
+      x2: numOr(el.getAttribute('x2'), 1),
+      y2: numOr(el.getAttribute('y2'), 0),
+      stops,
+      ...units,
+      ...transform,
+      ...spread,
     }
-    const p1 = { x: gt[0] * x1 + gt[2] * y1 + gt[4], y: gt[1] * x1 + gt[3] * y1 + gt[5] }
-    const p2 = { x: gt[0] * x2 + gt[2] * y2 + gt[4], y: gt[1] * x2 + gt[3] * y2 + gt[5] }
-    return { type: 'linear', x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stops }
   }
 
   const cx = numOr(el.getAttribute('cx'), 0.5)
   const cy = numOr(el.getAttribute('cy'), 0.5)
-  const r = numOr(el.getAttribute('r'), 0.5)
-  const fx = el.getAttribute('fx') !== null ? numOr(el.getAttribute('fx'), cx) : undefined
-  const fy = el.getAttribute('fy') !== null ? numOr(el.getAttribute('fy'), cy) : undefined
+  const fr = el.getAttribute('fr')
   return {
     type: 'radial',
-    cx: userSpace ? 0.5 : cx,
-    cy: userSpace ? 0.5 : cy,
-    r: userSpace ? 0.5 : r,
-    ...(fx !== undefined ? { fx: userSpace ? 0.5 : fx } : {}),
-    ...(fy !== undefined ? { fy: userSpace ? 0.5 : fy } : {}),
+    cx,
+    cy,
+    r: numOr(el.getAttribute('r'), 0.5),
+    ...(el.getAttribute('fx') !== null ? { fx: numOr(el.getAttribute('fx'), cx) } : {}),
+    ...(el.getAttribute('fy') !== null ? { fy: numOr(el.getAttribute('fy'), cy) } : {}),
+    ...(fr !== null ? { fr: numOr(fr, 0) } : {}),
     stops,
+    ...units,
+    ...transform,
+    ...spread,
   }
+}
+
+function isIdentity(m: Mat2D): boolean {
+  return m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0
+}
+
+/**
+ * Shift a node's userSpaceOnUse gradients by the amount its geometry was moved.
+ *
+ * Every shape is rebased so its local space starts at (0,0), but a
+ * userSpaceOnUse gradient's coordinates are in the space the file was authored
+ * in. Without this the paint stays where the artwork used to be.
+ */
+function rebaseUserSpacePaints(node: DesignNode, dx: number, dy: number): void {
+  if ((dx === 0 && dy === 0) || !('style' in node)) return
+  const shift = (paint: Paint): Paint => {
+    if (paint.type !== 'linear' && paint.type !== 'radial') return paint
+    if (paint.units !== 'userSpaceOnUse') return paint
+    const t = paint.transform ?? [1, 0, 0, 1, 0, 0]
+    // translate(-dx,-dy) composed before the authored gradientTransform.
+    return { ...paint, transform: [t[0], t[1], t[2], t[3], t[4] - dx, t[5] - dy] }
+  }
+  node.style.fill = shift(node.style.fill)
+  node.style.stroke = { ...node.style.stroke, paint: shift(node.style.stroke.paint) }
 }
 
 function collectStops(el: Element, byId: Map<string, Element>, depth: number): GradientStop[] {
