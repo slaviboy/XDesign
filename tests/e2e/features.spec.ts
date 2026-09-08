@@ -1462,3 +1462,45 @@ test('the language menu names each language in itself', async ({ page }) => {
     '日本語',
   ])
 })
+
+test('every icon sits in the middle of the control that holds it', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 300, y: 250 }, { x: 460, y: 360 })
+  await drawShape(page, 'ellipse', { x: 500, y: 250 }, { x: 600, y: 340 })
+  await selectTool(page, 'select')
+  await page.keyboard.press(`${modifier()}+a`)
+  await page.waitForTimeout(300)
+
+  const offset = await page.evaluate(() => {
+    const out: Array<{ where: string; dx: number; dy: number }> = []
+    for (const svg of document.querySelectorAll('svg')) {
+      const host = svg.parentElement
+      if (!(host instanceof HTMLElement)) continue
+      const h = host.getBoundingClientRect()
+      const s = svg.getBoundingClientRect()
+      // Small chrome icons only — not the canvas, not the overlays.
+      if (!s.width || s.width > 40 || h.width > 60) continue
+      out.push({
+        where: `${host.tagName.toLowerCase()}.${host.className.toString().split(' ')[0]} ${
+          host.getAttribute('title') ?? host.getAttribute('aria-label') ?? ''
+        }`.trim(),
+        dx: (s.x + s.width / 2) - (h.x + h.width / 2),
+        dy: (s.y + s.height / 2) - (h.y + h.height / 2),
+      })
+    }
+    return out
+  })
+
+  // Enough of the UI is on screen for this to mean something.
+  expect(offset.length).toBeGreaterThan(30)
+
+  // A button carries the browser's own padding unless it is reset, and with
+  // border-box that shrinks the content box under the icon. A grid track that
+  // overflows its container overflows to ONE side, so the icon lands off centre
+  // rather than merely overflowing evenly — which is how every icon in the app
+  // came to sit two pixels right of where it belonged.
+  const crooked = offset.filter((o) => Math.abs(o.dx) > 0.5 || Math.abs(o.dy) > 0.5)
+  expect(
+    crooked.map((o) => `${o.where} dx=${o.dx.toFixed(2)} dy=${o.dy.toFixed(2)}`),
+  ).toEqual([])
+})

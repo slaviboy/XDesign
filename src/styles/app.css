@@ -367,6 +367,11 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   min-width: 9px;
   cursor: ew-resize;
   user-select: none;
+  /* A label is text in most fields and an icon in a few. Text sits on its
+     baseline and an icon is a block, so without this the icon labels ride a
+     pixel high against the text ones beside them. */
+  display: flex;
+  align-items: center;
 }
 .field input {
   border: none;
@@ -388,6 +393,11 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .icon-button {
   width: 26px; height: 24px;
   display: grid; place-items: center;
+  /* The browser's own button padding is 1px 6px, and with border-box that
+     leaves a 12px content box inside a 26px button. A 16px glyph does not fit
+     it, and a grid track that overflows its container overflows to ONE side —
+     which put every icon in the app exactly 2px right of centre. */
+  padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius);
   background: transparent;

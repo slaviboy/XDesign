@@ -665,6 +665,28 @@ not: by then the size being compared already carries the height this code derive
 side-handle drag would read as a height change and end in Fixed Size. Deciding once is also what
 makes the preview and the result the same answer rather than two that are expected to agree.
 
+### Every icon was two pixels right of centre
+
+`.icon-button` is `display: grid; place-items: center` with a fixed `width: 26px`, which looks
+like it centres its glyph and does not. A `<button>` carries the browser's own `padding: 1px 6px`
+unless something resets it, the reset here only covered fonts, and with the global
+`box-sizing: border-box` those twelve horizontal pixels come out of the *inside*: a 26px button
+minus 2px of border minus 12px of padding leaves a **12px content box** for a **16px** icon.
+
+`place-items: center` then does nothing, because it centres the item within its grid track and
+the track is exactly the item's size. What overflows is the track, and a track that overflows its
+container overflows to one side — so every icon in the application sat exactly 2px right of where
+it belonged. Not enough to look broken; enough to look wrong.
+
+The fix is `padding: 0`. The test is worth more than the fix: it walks every small icon on screen
+and compares its centre to its host's, failing with a list of the offenders and their offsets. It
+covers 53 icons today and will catch the next control that forgets, which is the actual risk —
+this was never a bug anybody would have found by reading the CSS.
+
+One vertical case turned up with it: `.field-label` is text in most fields and an icon in a few,
+and text sits on a baseline where an icon is a block, so the icon labels rode a pixel high against
+the text ones beside them.
+
 ### The rotation cursor is built, not traced
 
 CSS has no rotation cursor and cannot transform the one you supply, so a cursor that points at
@@ -1112,7 +1134,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 309 unit tests (Vitest)
-npm run test:e2e   # 260 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 261 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```
