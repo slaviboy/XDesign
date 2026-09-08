@@ -10,6 +10,7 @@
 import { useEffect, useReducer } from 'react'
 import { subscribeLanguage } from '../i18n'
 import { subscribeSpellCheck } from '../text/spellcheck'
+import { subscribeFonts } from '../text/FontRegistry'
 
 export function useLanguage(): number {
   const [tick, bump] = useReducer((n: number) => n + 1, 0)
@@ -27,5 +28,18 @@ export function useLanguage(): number {
 export function useSpellCheckTick(): number {
   const [tick, bump] = useReducer((n: number) => n + 1, 0)
   useEffect(() => subscribeSpellCheck(bump), [])
+  return tick
+}
+
+/**
+ * Re-render when a font face finishes loading.
+ *
+ * Layout measured against a face the browser had not fetched yet is layout
+ * against the fallback, and the difference shows as text overflowing the box it
+ * was fitted to. This is how a component learns to measure again.
+ */
+export function useFonts(): number {
+  const [tick, bump] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => subscribeFonts(bump), [])
   return tick
 }

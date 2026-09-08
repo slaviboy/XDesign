@@ -28,7 +28,7 @@ import { useDocumentStore, useEditorStore, useLiveTransformTick, useNode } from 
 import { liveTransform } from './LiveTransform'
 import { gridStepForZoom } from './gridMath'
 import { clipKey, fxKey, geomKey } from './liveKeys'
-import { getLiveSize } from '../tools/DragSession'
+import { getLiveSize, getLiveSizing } from '../tools/DragSession'
 import {
   ANGULAR_TILE,
   angularWedges,
@@ -70,7 +70,7 @@ import type {
 } from '../document/types'
 import { layoutText, lineOffsetX, misspelledRuns, cssFont } from '../text/TextLayout'
 import { isMisspelled, isReady, isSpellCheckEnabled } from '../text/spellcheck'
-import { useSpellCheckTick } from '../state/hooks-i18n'
+import { useFonts, useSpellCheckTick } from '../state/hooks-i18n'
 import { fontStack } from '../text/FontRegistry'
 
 /**
@@ -299,6 +299,12 @@ function shapePathData(node: DesignNode): string {
 }
 
 function TextBody({ node }: { node: TextNode }): ReactNode {
+  // While this node is being edited the <textarea> is the rendering. Drawing
+  // both would show two sets of glyphs at once — they cannot line up, because a
+  // textarea centres its text in a CSS line box and SVG sits it on a baseline —
+  // and any mismatch between the two, a wrap or a transformation, doubles the
+  // text visibly instead of subtly.
+  const editing = useEditorStore((s) => s.editingTextId === node.id)
   const fill = paintToAttrs(node.style.fill, node.id, 'fill')
   const stroke = paintToAttrs(node.style.stroke.paint, node.id, 'stroke')
   const hasStroke = node.style.stroke.paint.type !== 'none' && node.style.stroke.width > 0
@@ -308,24 +314,33 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
   // re-renders itself on each live frame instead, reading the in-flight width.
   // Only this node re-renders — the document store is still never written
   // during a gesture, which is the rule that matters.
+  // Measuring against a face that has not arrived measures the fallback, so the
+  // whole layout is redone the moment the real one lands.
+  const fontsTick = useFonts()
   const liveTick = useLiveTransformTick()
-  const width = useMemo(
-    () => getLiveSize(node.id)?.width ?? node.transform.width,
-    [node.id, node.transform.width, liveTick],
+  const live = useMemo(() => getLiveSize(node.id), [node.id, liveTick])
+  const width = live?.width ?? node.transform.width
+  const height = live?.height ?? node.transform.height
+
+  // A resize hands the box a dimension it did not own, so the mode can change
+  // mid-gesture — and the wrap has to follow it while the pointer is still
+  // down rather than snapping when it comes up.
+  const sizing = useMemo(
+    () => getLiveSizing(node.id) ?? node.textStyle.sizing,
+    [node.id, node.textStyle.sizing, liveTick],
+  )
+  const style = useMemo(
+    () => (sizing === node.textStyle.sizing ? node.textStyle : { ...node.textStyle, sizing }),
+    [node.textStyle, sizing],
   )
 
   // Both modes that own their width wrap to it; Auto Width never does.
   const layout = useMemo(
-    () =>
-      layoutText(
-        node.text,
-        node.textStyle,
-        node.textStyle.sizing === 'auto-width' ? undefined : width,
-      ),
-    [node.text, node.textStyle, width],
+    () => layoutText(node.text, style, sizing === 'auto-width' ? undefined : width),
+    [node.text, style, sizing, width, fontsTick],
   )
 
-  const boxWidth = node.textStyle.sizing === 'auto-width' ? layout.width : width
+  const boxWidth = sizing === 'auto-width' ? layout.width : width
   const decoration = [
     node.textStyle.underline ? 'underline' : '',
     node.textStyle.strikethrough ? 'line-through' : '',
@@ -333,8 +348,10 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
 
   // Adobe: Fixed Size "lets you wrap the text to fit inside the text box and
   // crop automatically when it exceeds the height".
-  const clipped = node.textStyle.sizing === 'fixed'
+  const clipped = sizing === 'fixed'
   const clipId = `text-clip-${node.id}`
+
+  if (editing) return null
 
   return (
     <>
@@ -343,37 +360,41 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
         <GradientDef paint={node.style.stroke.paint} id={gradientId(node.id, 'stroke')} />
         {clipped && (
           <clipPath id={clipId}>
-            <rect width={Math.max(0, width)} height={Math.max(0, node.transform.height)} />
+            <rect width={Math.max(0, width)} height={Math.max(0, height)} />
           </clipPath>
         )}
       </defs>
-      {/* Under the glyphs, so a squiggle never sits on top of the letters it
-          is marking. */}
-      <SpellUnderlines node={node} layout={layout} boxWidth={boxWidth} />
-      <text
-        clipPath={clipped ? `url(#${clipId})` : undefined}
-        fontFamily={fontStack(node.textStyle.fontFamily)}
-        fontSize={node.textStyle.fontSize}
-        fontWeight={node.textStyle.fontWeight}
-        fontStyle={node.textStyle.fontStyle}
-        letterSpacing={node.textStyle.letterSpacing * node.textStyle.fontSize}
-        textDecoration={decoration || undefined}
-        fill={fill.value}
-        fillOpacity={fill.opacity * node.style.fillOpacity}
-        stroke={hasStroke ? stroke.value : 'none'}
-        strokeWidth={hasStroke ? node.style.stroke.width : undefined}
-        style={{ whiteSpace: 'pre' } as CSSProperties}
-      >
-        {layout.lines.map((line, i) => (
-          <tspan
-            key={i}
-            x={lineOffsetX(line.width, boxWidth, node.textStyle.align)}
-            y={line.baseline}
-          >
-            {line.text === '' ? ' ' : line.text}
-          </tspan>
-        ))}
-      </text>
+      {/* Both inside one clip: a squiggle marks a word, so it has to disappear
+          with the word. Clipping only the glyphs left red waves floating below
+          a Fixed Size box, under text the box had already cropped away. */}
+      <g clipPath={clipped ? `url(#${clipId})` : undefined}>
+        {/* Under the glyphs, so a squiggle never sits on top of the letters it
+            is marking. */}
+        <SpellUnderlines node={node} layout={layout} boxWidth={boxWidth} />
+        <text
+          fontFamily={fontStack(node.textStyle.fontFamily)}
+          fontSize={node.textStyle.fontSize}
+          fontWeight={node.textStyle.fontWeight}
+          fontStyle={node.textStyle.fontStyle}
+          letterSpacing={node.textStyle.letterSpacing * node.textStyle.fontSize}
+          textDecoration={decoration || undefined}
+          fill={fill.value}
+          fillOpacity={fill.opacity * node.style.fillOpacity}
+          stroke={hasStroke ? stroke.value : 'none'}
+          strokeWidth={hasStroke ? node.style.stroke.width : undefined}
+          style={{ whiteSpace: 'pre' } as CSSProperties}
+        >
+          {layout.lines.map((line, i) => (
+            <tspan
+              key={i}
+              x={lineOffsetX(line.width, boxWidth, style.align)}
+              y={line.baseline}
+            >
+              {line.text === '' ? ' ' : line.text}
+            </tspan>
+          ))}
+        </text>
+      </g>
     </>
   )
 }

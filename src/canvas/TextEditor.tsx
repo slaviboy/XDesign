@@ -19,7 +19,23 @@ import { fontStack } from '../text/FontRegistry'
 import { toHex } from '../document/color'
 import { setEditor } from '../state/EditorStore'
 import { useDocument, useEditorStore } from '../state/hooks'
-import type { NodeId } from '../document/types'
+import type { CSSProperties } from 'react'
+import type { NodeId, TextStyle } from '../document/types'
+
+/**
+ * How each transformation is shown while editing.
+ *
+ * `capitalize` is CSS's nearest word to Title Case; it leaves the rest of a
+ * word as typed where applyTextTransform lowercases it, so an ALL-CAPS word
+ * settles down when you commit. The alternative — showing untransformed text —
+ * is further from the result, not closer.
+ */
+const CSS_TRANSFORM: Record<TextStyle['transform'], CSSProperties['textTransform']> = {
+  none: 'none',
+  uppercase: 'uppercase',
+  lowercase: 'lowercase',
+  titlecase: 'capitalize',
+}
 
 export function TextEditor({ nodeId }: { nodeId: NodeId }) {
   const doc = useDocument()
@@ -79,6 +95,9 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
   if (!node || node.type !== 'text') return null
   const ts = node.textStyle
   const fill = node.style.fill.type === 'solid' ? toHex(node.style.fill.color) : '#000000'
+  const decoration = [ts.underline ? 'underline' : '', ts.strikethrough ? 'line-through' : '']
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <textarea
@@ -113,7 +132,21 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
         margin: 0,
         resize: 'none',
         overflow: 'hidden',
-        whiteSpace: ts.sizing === 'fixed' ? 'pre-wrap' : 'pre',
+        // The same rule the layout engine follows: both modes that own their
+        // width wrap to it, Auto Width never does. With 'pre' on an Auto Height
+        // box the textarea scrolls sideways instead of wrapping, so the text
+        // being edited and the text as it will be drawn are laid out
+        // differently — which is exactly the state this component exists to
+        // avoid.
+        whiteSpace: ts.sizing === 'auto-width' ? 'pre' : 'pre-wrap',
+        // Matches breakLongWord: a word wider than the box is broken rather
+        // than allowed to overflow it.
+        overflowWrap: 'break-word',
+        // The transformation is applied to the DISPLAY only, exactly as it is
+        // when the text is drawn — the textarea's value stays what was typed,
+        // which is what lets None give it back unchanged.
+        textTransform: CSS_TRANSFORM[ts.transform],
+        textDecoration: decoration || undefined,
         caretColor: fill,
       }}
     />

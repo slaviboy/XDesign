@@ -444,9 +444,23 @@ function emitImage(ctx: EmitContext, node: Extract<DesignNode, { type: 'image' }
 function emitText(ctx: EmitContext, node: Extract<DesignNode, { type: 'text' }>): string {
   const ts = node.textStyle
   const p = ctx.options.precision
-  const boxWidth = ts.sizing === 'fixed' ? node.transform.width : undefined
+  // Both modes that own their width wrap to it; Auto Width never does. Getting
+  // this wrong here and right on the canvas would export a paragraph as one
+  // very long line.
+  const boxWidth = ts.sizing === 'auto-width' ? undefined : node.transform.width
   const layout = layoutText(node.text, ts, boxWidth)
   const width = boxWidth ?? layout.width
+
+  // Adobe's Fixed Size crops what does not fit, so the export has to crop it
+  // too — otherwise the file shows text the canvas deliberately hid.
+  const clipped = ts.sizing === 'fixed'
+  const clipId = `textclip-${safeId(node.id)}`
+  if (clipped) {
+    ctx.defs.push(
+      `<clipPath id="${clipId}"><rect width="${round(node.transform.width, 3)}" ` +
+        `height="${round(node.transform.height, 3)}"/></clipPath>`,
+    )
+  }
 
   const tspans = layout.lines
     .map(
@@ -466,6 +480,7 @@ function emitText(ctx: EmitContext, node: Extract<DesignNode, { type: 'text' }>)
     (ts.fontStyle === 'italic' ? ` font-style="italic"` : '') +
     (ts.letterSpacing ? ` letter-spacing="${round(ts.letterSpacing * ts.fontSize, p)}"` : '') +
     (decoration ? ` text-decoration="${decoration}"` : '') +
+    (clipped ? ` clip-path="url(#${clipId})"` : '') +
     ` xml:space="preserve"${styleAttrs(ctx, node.style, node.id, true)}>${tspans}</text>`
   )
 }

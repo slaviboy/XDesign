@@ -49,6 +49,7 @@ import {
 } from '../document/SceneGraph'
 import { outlineStroke } from '../geometry/StrokeOutline'
 import { intrinsicTextSize } from '../text/TextLayout'
+import { preloadFontsFor } from '../text/FontRegistry'
 import { rgbaEquals } from '../document/color'
 import { createGuideId, createSwatchId } from '../document/ids'
 import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
@@ -89,6 +90,7 @@ import {
   type BoxCorner,
   type RGBA,
   type TextNode,
+  type TextSizing,
 } from '../document/types'
 
 // ---------------------------------------------------------------------------
@@ -924,6 +926,22 @@ function refitTextNode(node: TextNode): boolean {
   return true
 }
 
+/**
+ * Apply the resize option a drag settled on, and re-fit the box to it.
+ *
+ * The decision itself is sizingAfterResize, taken while the gesture was still
+ * live so the preview and the result are one answer rather than two that agree.
+ * Ignoring the mode here is what left text hanging out of the bottom of an Auto
+ * Height box after a corner drag.
+ *
+ * Mutates a draft node inside the caller's transaction: the resize and the mode
+ * it implies are one undo entry.
+ */
+export function adoptTextResize(node: TextNode, sizing: TextSizing): void {
+  if (sizing !== node.textStyle.sizing) node.textStyle = { ...node.textStyle, sizing }
+  refitTextNode(node)
+}
+
 export function setText(id: NodeId, text: string): boolean {
   return transaction(
     'Edit text',
@@ -1012,6 +1030,23 @@ export function setTextStyle(patch: Partial<TextStyle>, coalesceKey?: string): b
     },
     { coalesceKey },
   )
+
+  // A face the browser has not fetched yet measures as the fallback, so the box
+  // this transaction just fitted is fitted to the wrong metrics. Ask for the
+  // face and fit again when it is real — the renderer redraws on the same
+  // signal, so the two land together.
+  if (ok && (patch.fontFamily || patch.fontWeight || patch.fontStyle)) {
+    const doc = getDoc()
+    const faces = ids
+      .map((id) => doc.nodes[id])
+      .filter((n): n is TextNode => n?.type === 'text')
+      .map((n) => ({
+        family: n.textStyle.fontFamily,
+        weight: n.textStyle.fontWeight,
+        italic: n.textStyle.fontStyle === 'italic',
+      }))
+    void preloadFontsFor(faces).then(() => refitAutoHeight(ids))
+  }
   return ok
 }
 

@@ -7,6 +7,7 @@
  * pass by reaching past the UI, the UI is what needs fixing.
  */
 
+import { inflateSync } from 'node:zlib'
 import { expect, type Page, type Locator } from '@playwright/test'
 
 export const CANVAS = '[data-testid="canvas-root"]'
@@ -238,4 +239,86 @@ export function pngSize(buffer: Buffer): { width: number; height: number } {
 export async function openExportDialog(page: Page): Promise<void> {
   await press(page, 'e')
   await page.waitForSelector('[role="dialog"][aria-label="Export"]')
+}
+
+// ---------------------------------------------------------------------------
+// Pixels
+// ---------------------------------------------------------------------------
+
+/**
+ * Decode a Playwright screenshot to raw RGBA.
+ *
+ * Some things can only be asserted on what actually reached the screen. A
+ * clipped SVG element still reports its full geometry to getBoundingClientRect
+ * and still answers isVisible(), so "this mark is not drawn" is a claim only
+ * the pixels can settle.
+ *
+ * Playwright writes 8-bit truecolour, with an alpha channel only when the shot
+ * actually has transparency — so both colour types are handled and everything
+ * else is asserted rather than guessed at.
+ */
+export function decodePng(buffer: Buffer): {
+  width: number
+  height: number
+  channels: number
+  data: Buffer
+} {
+  expect(buffer.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  const width = buffer.readUInt32BE(16)
+  const height = buffer.readUInt32BE(20)
+  expect(buffer[24]).toBe(8) // bit depth
+  const colourType = buffer[25]
+  expect([2, 6]).toContain(colourType) // RGB or RGBA
+  const channels = colourType === 6 ? 4 : 3
+
+  const idat: Buffer[] = []
+  let at = 8
+  while (at < buffer.length) {
+    const length = buffer.readUInt32BE(at)
+    const type = buffer.toString('ascii', at + 4, at + 8)
+    if (type === 'IDAT') idat.push(buffer.subarray(at + 8, at + 8 + length))
+    at += length + 12
+    if (type === 'IEND') break
+  }
+
+  const raw = inflateSync(Buffer.concat(idat))
+  const bpp = channels
+  const stride = width * bpp
+  const out = Buffer.alloc(height * stride)
+
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)]!
+    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1))
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? out[y * stride + x - bpp]! : 0
+      const b = y > 0 ? out[(y - 1) * stride + x]! : 0
+      const c = x >= bpp && y > 0 ? out[(y - 1) * stride + x - bpp]! : 0
+      let value = line[x]!
+      switch (filter) {
+        case 1: value += a; break
+        case 2: value += b; break
+        case 3: value += (a + b) >> 1; break
+        case 4: {
+          const p = a + b - c
+          const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c)
+          value += pa <= pb && pa <= pc ? a : pb <= pc ? b : c
+          break
+        }
+      }
+      out[y * stride + x] = value & 0xff
+    }
+  }
+  return { width, height, channels, data: out }
+}
+
+/** How many pixels in a screenshot are unmistakably red — a spell mark, say. */
+export function countRedPixels(buffer: Buffer): number {
+  const { width, height, channels, data } = decodePng(buffer)
+  let n = 0
+  for (let i = 0; i < width * height * channels; i += channels) {
+    const r = data[i]!, g = data[i + 1]!, b = data[i + 2]!
+    const a = channels === 4 ? data[i + 3]! : 255
+    if (a > 128 && r > 140 && g < 110 && b < 110) n++
+  }
+  return n
 }

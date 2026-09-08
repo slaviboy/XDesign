@@ -349,6 +349,28 @@ export interface TextStyle {
   sizing: TextSizing
 }
 
+/**
+ * The resize option a text box takes on after a resize handle changes its box.
+ *
+ * A resize handle is the one edit that argues with the mode, and this is the
+ * answer both the in-flight preview and the commit use — so what you see while
+ * dragging is what you get when you let go.
+ *
+ * Giving a width to Auto Width text makes it Auto Height: you have said how
+ * wide, which is exactly what that mode means. Giving a height to anything
+ * makes it Fixed Size, the name for owning both dimensions. Enforcing the mode
+ * instead would spring the box back to the width of its own text, so the handle
+ * would look broken.
+ */
+export function sizingAfterResize(
+  current: TextSizing,
+  changed: { width: boolean; height: boolean },
+): TextSizing {
+  if (changed.height) return 'fixed'
+  if (changed.width && current === 'auto-width') return 'auto-height'
+  return current
+}
+
 export const DEFAULT_TEXT_STYLE: TextStyle = {
   fontFamily: 'Inter',
   fontSize: 24,

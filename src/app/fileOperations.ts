@@ -18,6 +18,7 @@ import {
 } from '../persistence/FileSystem'
 import { flush, markDocumentSaved } from '../persistence/Autosave'
 import { importFiles } from '../images/ImageImporter'
+import { preloadFontsFor } from '../text/FontRegistry'
 import { documentBounds } from '../document/SceneGraph'
 import { fitViewport } from '../canvas/Viewport'
 import { editorStore } from '../state/EditorStore'
@@ -66,6 +67,10 @@ export async function openDocumentFlow(): Promise<void> {
     await flush()
     const result = await openDocument()
     if (!result) return
+    // Before the document is installed, not after: the first layout of every
+    // text node happens on the first render, and a face that has not arrived by
+    // then is measured as the fallback.
+    await preloadDocumentFonts(result.doc)
     replaceDocument(result.doc)
     saveTarget = result.target
     clearSelection()
@@ -115,8 +120,22 @@ export async function importFilesFlow(): Promise<void> {
   await importFiles(files, at)
 }
 
+/** Every face the document's text actually uses, loaded before it is shown. */
+async function preloadDocumentFonts(doc: ReturnType<typeof getDoc>): Promise<void> {
+  await preloadFontsFor(
+    Object.values(doc.nodes)
+      .filter((n) => n.type === 'text')
+      .map((n) => ({
+        family: n.textStyle.fontFamily,
+        weight: n.textStyle.fontWeight,
+        italic: n.textStyle.fontStyle === 'italic',
+      })),
+  )
+}
+
 /** Open a document that was recovered from autosave. */
-export function adoptRecoveredDocument(doc: ReturnType<typeof getDoc>): void {
+export async function adoptRecoveredDocument(doc: ReturnType<typeof getDoc>): Promise<void> {
+  await preloadDocumentFonts(doc)
   replaceDocument(doc, false)
   saveTarget = { handle: null, fileName: '' }
   clearSelection()

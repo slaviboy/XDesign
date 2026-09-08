@@ -201,7 +201,7 @@ export function App() {
         <RecoveryDialog
           offer={recovery}
           onRecover={() => {
-            adoptRecoveredDocument(recovery.doc)
+            void adoptRecoveredDocument(recovery.doc)
             void dismissRecovery(recovery.doc.id)
             setRecovery(null)
           }}

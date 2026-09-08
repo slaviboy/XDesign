@@ -117,10 +117,78 @@ export async function ensureFontLoaded(
     await document.fonts.load(spec, 'AaBbGg0123')
     await document.fonts.ready
     loaded.add(key)
-    return document.fonts.check(spec)
+    const ok = document.fonts.check(spec)
+    if (ok) emitFontsChanged()
+    return ok
   } catch {
     return false
   }
+}
+
+// ---------------------------------------------------------------------------
+// Knowing when a face has actually arrived
+// ---------------------------------------------------------------------------
+
+/**
+ * A face is fetched the first time something asks to draw it, which is AFTER
+ * the layout that asked for it has already been measured. Until it lands,
+ * measureText answers with the fallback — usually a narrower one — so the lines
+ * come out packed too full, and then the real glyphs arrive and overflow the
+ * box they were fitted to. Switching a text object to Thin put 408 units of
+ * text inside a 400-unit box that way.
+ *
+ * Nothing re-renders on its own when that happens: no prop changed, so React
+ * has no reason to. Hence this signal. Everything that measures text subscribes
+ * to it and measures again once the face is real, which is also what makes a
+ * weight change look immediate instead of arriving a beat late.
+ */
+let fontsVersionCounter = 0
+const fontListeners = new Set<() => void>()
+let watchingFontLoading = false
+
+export function fontsVersion(): number {
+  return fontsVersionCounter
+}
+
+export function subscribeFonts(fn: () => void): () => void {
+  watchFontLoading()
+  fontListeners.add(fn)
+  return () => fontListeners.delete(fn)
+}
+
+function emitFontsChanged(): void {
+  fontsVersionCounter++
+  for (const fn of fontListeners) fn()
+}
+
+/**
+ * Most faces are never requested through ensureFontLoaded at all — the browser
+ * fetches them itself the moment a <text> element first uses one. `loadingdone`
+ * is the only event that covers those, so it is the signal that matters most.
+ */
+function watchFontLoading(): void {
+  if (watchingFontLoading) return
+  if (typeof document === 'undefined' || !('fonts' in document)) return
+  watchingFontLoading = true
+  document.fonts.addEventListener('loadingdone', emitFontsChanged)
+}
+
+/**
+ * Every face of one family, which is exactly the set the Text panel can switch
+ * between.
+ *
+ * Loading them the moment a text object is selected costs about 6ms for a whole
+ * family and makes Bold, Italic and Thin take effect on the click rather than a
+ * beat after it — the beat being the browser fetching a face it has never
+ * needed before.
+ */
+export async function preloadFamily(family: string): Promise<void> {
+  const info = getFontInfo(family)
+  if (!info || !info.bundled) return
+  await preloadFontsFor([
+    ...info.weights.map((weight) => ({ family, weight, italic: false })),
+    ...info.italics.map((weight) => ({ family, weight, italic: true })),
+  ])
 }
 
 /** Preload the faces a document actually uses. Called after open/import. */

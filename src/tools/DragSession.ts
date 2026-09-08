@@ -45,12 +45,14 @@ import {
 } from '../document/SceneGraph'
 import { transformFromMatrix } from '../document/DocumentModel'
 import { transaction } from '../state/DocumentStore'
+import { adoptTextResize } from '../history/Commands'
 import { editorStore } from '../state/EditorStore'
 import { liveTransform } from '../canvas/LiveTransform'
 import { fxKey, geomKey } from '../canvas/liveKeys'
 import { effectMargin, filterRegion } from '../canvas/effects'
-import { hasStyle, isContainer, usesOwnBox } from '../document/types'
-import type { DesignDocument, DesignNode, NodeId, Transform } from '../document/types'
+import { intrinsicTextSize } from '../text/TextLayout'
+import { hasStyle, isContainer, sizingAfterResize, usesOwnBox } from '../document/types'
+import type { DesignDocument, DesignNode, NodeId, TextSizing, TextStyle, Transform } from '../document/types'
 import type { SnapLine } from '../geometry/Snapping'
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
@@ -81,6 +83,11 @@ interface NodeSnapshot {
    * size. See fxKey in liveKeys.
    */
   effectMargin: number
+  /**
+   * Text and its style, so the in-flight height can be re-fitted without
+   * reading the document — which a drag deliberately never does.
+   */
+  text?: { text: string; style: TextStyle }
 }
 
 export interface DragSessionState {
@@ -110,6 +117,17 @@ export interface DragSessionState {
    * size is — this carries it across.
    */
   liveSizes: Map<NodeId, { width: number; height: number }>
+  /**
+   * The resize option a text box takes on from this gesture, decided once while
+   * it is in flight and applied unchanged at commit.
+   *
+   * Recomputing it at commit would compare the FINAL size against the start,
+   * and that size already carries the height this code derived — so a side
+   * handle would look like a height change and every drag would end in Fixed
+   * Size. Deciding once is also what makes the preview and the result the same
+   * thing rather than two computations that happen to agree.
+   */
+  liveSizing: Map<NodeId, TextSizing>
   moved: boolean
 }
 
@@ -130,6 +148,17 @@ export function getLiveMatrix(id: NodeId): Mat2D | undefined {
 
 export function getLiveSize(id: NodeId): { width: number; height: number } | undefined {
   return session?.liveSizes.get(id)
+}
+
+/**
+ * The resize option a text node has taken on for the duration of this gesture.
+ *
+ * The renderer needs it as much as the size does: a box that is becoming Auto
+ * Height has to start wrapping while the pointer is still down, and it cannot
+ * learn that from the document, which a drag never writes to.
+ */
+export function getLiveSizing(id: NodeId): TextSizing | undefined {
+  return session?.liveSizing.get(id)
 }
 
 /**
@@ -189,6 +218,7 @@ export function beginDrag(
       cornerRadius: node.type === 'rect' || node.type === 'image' ? node.cornerRadius : undefined,
       vertexRadius: node.type === 'polygon' ? node.cornerRadius : undefined,
       effectMargin: hasStyle(node) ? effectMargin(node.style) : 0,
+      text: node.type === 'text' ? { text: node.text, style: node.textStyle } : undefined,
     }
   })
 
@@ -201,6 +231,7 @@ export function beginDrag(
     singleAxisResize: usable.length === 1,
     scalesContent: usable.length === 1 && scalesContentOnResize(doc.nodes[usable[0]!]),
     liveSizes: new Map(),
+    liveSizing: new Map(),
     moved: false,
   }
 
@@ -342,8 +373,9 @@ function applyResize(
       pushLiveTransform(snap, world)
       return
     }
-    s.liveSizes.set(snap.id, { width: box.width, height: box.height })
-    pushLiveTransform(snap, world, box.width, box.height)
+    const size = liveTextSize(snap, box)
+    s.liveSizes.set(snap.id, size)
+    pushLiveTransform(snap, world, size.width, size.height)
     return
   }
 
@@ -374,6 +406,41 @@ function applyResize(
     out.set(snap.id, world)
     pushLiveTransform(snap, world)
   }
+}
+
+/**
+ * The size to publish for an in-flight resize.
+ *
+ * Everything but text keeps what the handle says. A text box whose height is
+ * DERIVED does not: narrowing it adds lines, and the frame has to grow with
+ * them while the pointer is still down. Computing it only at commit is what
+ * made the box jump a whole paragraph the moment you let go.
+ *
+ * Which dimensions the box owns after the drag is decided here exactly as
+ * adoptTextResize decides it at commit — a height from the handle means Fixed
+ * Size, and then the handle's height is the answer — so the preview and the
+ * result cannot disagree.
+ */
+function liveTextSize(
+  snap: NodeSnapshot,
+  box: LocalResizeBox,
+): { width: number; height: number } {
+  if (!snap.text) return { width: box.width, height: box.height }
+
+  // What the HANDLE changed, before anything is derived from it.
+  const sizing = sizingAfterResize(snap.text.style.sizing, {
+    width: Math.abs(box.width - snap.transform.width) > 0.5,
+    height: Math.abs(box.height - snap.transform.height) > 0.5,
+  })
+  session!.liveSizing.set(snap.id, sizing)
+
+  // Fixed Size owns its height, so the handle's answer is the answer.
+  if (sizing === 'fixed') return { width: box.width, height: box.height }
+  // Otherwise the height is derived, and from the mode the box is TAKING ON —
+  // an Auto Width style does not wrap, so asking it for a height at this width
+  // would give one line however narrow the box gets.
+  const style = sizing === snap.text.style.sizing ? snap.text.style : { ...snap.text.style, sizing }
+  return { width: box.width, height: intrinsicTextSize(snap.text.text, style, box.width).height }
 }
 
 interface LocalResizeBox {
@@ -629,6 +696,13 @@ export function commitDrag(finalMatrices: Map<NodeId, Mat2D> | null): boolean {
           snap.transform.originX,
           snap.transform.originY,
         )
+
+        // A text box that does not own a dimension has to be told the handle
+        // just gave it one, or it keeps a size its own text does not fit.
+        // The mode was decided while the gesture was live; applying it here
+        // rather than deciding again is what keeps the two identical.
+        const sizing = s.liveSizing.get(snap.id)
+        if (node.type === 'text' && sizing) adoptTextResize(node, sizing)
       } else {
         node.transform = transformFromMatrix(
           local,

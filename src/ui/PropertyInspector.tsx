@@ -50,7 +50,7 @@ import { isGradient as isGradientPaint } from '../canvas/paint'
 import { getLiveRadius } from '../tools/RadiusSession'
 import { getLiveStarRatio } from '../tools/StarRatioSession'
 import { toCss, toHex } from '../document/color'
-import { fontsByCategory, isBundledFont, nearestWeight } from '../text/FontRegistry'
+import { fontsByCategory, isBundledFont, nearestWeight, preloadFamily } from '../text/FontRegistry'
 import {
   clearGuideSelection,
   openDialog,
@@ -1436,6 +1436,22 @@ const TEXT_SIZING_OPTIONS: Array<{
   { value: 'fixed', key: 'label.fixedSize', icon: <FixedSizeIcon /> },
 ]
 
+/**
+ * Load every face of the selected family while the panel is open.
+ *
+ * The controls beside this offer Bold, Italic and five weights; a face the
+ * browser has never fetched arrives a beat after the click, and until it does
+ * the text is measured against the fallback. Asking for them all up front — a
+ * few milliseconds for a whole family, from local files — makes the toggles
+ * immediate. Renders nothing.
+ */
+function FamilyPreload({ family }: { family: string | null }) {
+  useEffect(() => {
+    if (family) void preloadFamily(family)
+  }, [family])
+  return null
+}
+
 function TextSection({ nodes }: { nodes: DesignNode[] }) {
   const texts = nodes.filter((n) => n.type === 'text')
   if (texts.length === 0) return null
@@ -1455,6 +1471,7 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
 
   return (
     <Section title={t('section.text')}>
+      <FamilyPreload family={family} />
       <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
         <Select
           value={family ?? ''}

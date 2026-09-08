@@ -638,6 +638,101 @@ transactions under different coalesce keys, so a typing burst recorded two entri
 character. And `TextEditor` no longer has an opinion about geometry: it calls `setText` and
 stops, which is what a text editor should do.
 
+**A resize handle is the interesting case**, because it is the one edit that argues with the
+mode. `commitDrag` wrote width and height and told the text nothing, so dragging a corner left
+an Auto Height box 279 units tall around 398 units of text — the last lines simply hung out of
+the bottom — and left an Auto Width box 146 wide around 253 of text, spilling out of the right.
+
+Enforcing the mode instead is not the answer: the box would spring back to the width of its own
+text and the handle would look broken. So the drag is read as a statement of intent, which is
+also how Adobe reads it — give a width to Auto Width text and it becomes **Auto Height**,
+wrapping inside what you gave it; give a height to anything and it becomes **Fixed Size**, which
+is the name for owning both dimensions. The segmented control follows, so it is visible rather
+than silent, and because the mode change happens inside the drag's own transaction, one `⌘Z`
+puts back the size and the mode together.
+
+And it all happens **under the pointer**, not on release. A derived height computed only at
+commit means the frame sits at the height you dragged while the text quietly needs another
+paragraph, and then jumps when you let go. So the in-flight size carries the wrapped height, the
+renderer reads the in-flight *mode* as well as the in-flight size — a box becoming Auto Height
+has to start wrapping now, and it cannot learn that from the document, which a drag never writes
+to — and a Fixed Size box's clip tracks the drag instead of revealing the rest of the text all at
+once at the end.
+
+`sizingAfterResize` is where that decision lives, and it is taken **once**, while the gesture is
+live, then carried to commit in the session. Recomputing it at commit looked equivalent and is
+not: by then the size being compared already carries the height this code derived, so every
+side-handle drag would read as a height change and end in Fixed Size. Deciding once is also what
+makes the preview and the result the same answer rather than two that are expected to agree.
+
+### The font arrives after the layout that measured it
+
+A font face is fetched the first time something asks to draw it — which is *after* the layout
+that asked for it has already been measured. Until it lands, `measureText` answers with the
+fallback, usually a narrower one, so the lines come out packed too full. Then the real glyphs
+arrive, wider, in a box that was fitted to the fallback. Switching a text object to Thin put
+**408 units of text inside a 400-unit box**; Italic put 428 in 400. Nothing re-rendered to fix
+it, because no prop had changed — which is why resizing the box by hand appeared to be the cure.
+
+`ensureFontLoaded` was already in the codebase for exactly this, with `TextLayout`'s own header
+saying *"Callers must await ensureFontLoaded() first"*. It had **no caller**. So did
+`preloadFontsFor`, whose comment reads *"Called after open/import"*.
+
+Three things now close it:
+
+- **A font-load signal.** `subscribeFonts` fires on `document.fonts`' `loadingdone` — the only
+  event that covers faces the browser fetched on its own, which is nearly all of them. Anything
+  that measures text subscribes and measures again.
+- **A re-fit when the face is real.** A style change that touches family, weight or slant asks
+  for the face and re-fits the box when it arrives, so the stored height follows the glyphs.
+- **Preloading what the panel offers.** Selecting a text object loads every weight and italic of
+  its family — about **6ms for a whole family** from local files. That is what makes Bold take
+  effect on the click rather than a beat after it, which was the other half of the complaint.
+  Opening a document preloads the faces its text uses *before* the document is installed, so the
+  first layout is measured against the real thing.
+
+Its test asserts with **no settling time at all**: change the style, read the box. "It fixes
+itself a moment later" was the bug, so a test that waits would not see it.
+
+### A spell mark belongs to a word, so it is cropped with the word
+
+Fixed Size text crops what does not fit. The clip was on the `<text>` element alone, and the
+red waves are a sibling of it — so a cropped box left a row of squiggles floating on blank
+canvas, reporting mistakes in text the user could not see, let alone correct. Both now sit
+inside one clipped group; a mark cannot outlive the word it marks.
+
+Its test asserts on **pixels**, not on the DOM, because neither of the usual handles can see a
+clip: a clipped SVG element still reports its full geometry to `getBoundingClientRect` and still
+answers `isVisible()`. `countRedPixels` in the e2e helpers decodes the screenshot and counts —
+17 red pixels below the box before the fix, none after.
+
+The same mistake had been made twice more. The exporter wrapped only Fixed Size text, so an Auto
+Height paragraph exported as one very long line, and it emitted no clip at all, so a Fixed Size
+box exported the text the canvas had cropped. Both are fixed and both are covered: the export
+now has to produce the same number of `<tspan>`s the canvas laid out, and a `clip-path` when the
+canvas has one.
+
+### While you edit, the textarea is the only rendering
+
+Inline editing overlays a real `<textarea>` on the node so the caret, selection and wrapping are
+the browser's rather than reimplemented. The document kept drawing the node underneath it, which
+is fine only while the two agree — and they cannot fully agree, because a textarea centres its
+text in a CSS line box and SVG sits it on a baseline. Every place they disagreed showed up as
+doubled letters: the editor wrapped with `white-space: pre` for anything but Fixed Size, so an
+Auto Height box scrolled sideways instead of wrapping and the same sentence appeared twice at
+two different offsets; a transformation was drawn upper-case behind a textarea showing what you
+typed.
+
+So the node's glyphs are not drawn at all while it is being edited, and the textarea is made to
+match the layout engine instead: it wraps for both modes that own their width, breaks a
+too-long word the way `breakLongWord` does, and carries the transformation as `text-transform`
+— display only, so the value stays what was typed and switching back to None gives it back.
+
+One thing CSS cannot express in a textarea is **paragraph spacing**, so a box with a non-zero ¶
+value edits with its paragraphs closed up and opens out again on commit. Everything else — the
+wrap, the font, the tracking, the alignment, the transformation, underline and strike — is the
+same on both sides of `Escape`.
+
 ### Spell check ships five languages, and says so
 
 The word lists come from `all-words-in-all-languages`, which covers far more than five. Three
@@ -996,7 +1091,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 309 unit tests (Vitest)
-npm run test:e2e   # 244 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 258 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```
