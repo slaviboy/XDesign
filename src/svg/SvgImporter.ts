@@ -479,7 +479,7 @@ function importText(el: Element, ctx: ImportContext, style: InheritedStyle, matr
       fontStyle: style.fontStyle,
       align: style.textAnchor,
       letterSpacing: style.fontSize > 0 ? style.letterSpacing / style.fontSize : 0,
-      sizing: 'auto',
+      sizing: 'auto-width',
     },
   )
   node.name = elementName(el, text.slice(0, 30) || 'Text')

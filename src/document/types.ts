@@ -314,6 +314,23 @@ export const DEFAULT_STYLE: Style = {
 export type TextAlign = 'left' | 'center' | 'right'
 export type FontStyle = 'normal' | 'italic'
 
+/**
+ * Adobe's three text resize options.
+ *
+ * 'auto-width'   the box grows sideways to fit the text on one line. Adobe's
+ *                Auto Width, and what you get by clicking rather than dragging.
+ * 'auto-height'  the width is yours, the height follows the wrapped text.
+ * 'fixed'        both are yours; text that does not fit is clipped, and the
+ *                bottom handle turns red to say so.
+ */
+export type TextSizing = 'auto-width' | 'auto-height' | 'fixed'
+
+/**
+ * Adobe's text transformations. Applied when drawing, never to the stored
+ * text — so switching back to None gives you what you typed, capitals and all.
+ */
+export type TextTransform = 'none' | 'uppercase' | 'lowercase' | 'titlecase'
+
 export interface TextStyle {
   fontFamily: string
   fontSize: number
@@ -323,11 +340,13 @@ export interface TextStyle {
   lineHeight: number
   /** In em units, matching how designers think about tracking. */
   letterSpacing: number
+  /** Extra space after each paragraph, in pixels. */
+  paragraphSpacing: number
   align: TextAlign
   underline: boolean
   strikethrough: boolean
-  /** 'auto' grows the box with the text; 'fixed' wraps inside width. */
-  sizing: 'auto' | 'fixed'
+  transform: TextTransform
+  sizing: TextSizing
 }
 
 export const DEFAULT_TEXT_STYLE: TextStyle = {
@@ -337,10 +356,35 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   fontStyle: 'normal',
   lineHeight: 1.4,
   letterSpacing: 0,
+  paragraphSpacing: 0,
   align: 'left',
   underline: false,
   strikethrough: false,
-  sizing: 'auto',
+  transform: 'none',
+  sizing: 'auto-width',
+}
+
+/**
+ * Apply a text transformation for display.
+ *
+ * Title case only capitalises after whitespace, deliberately: knowing that
+ * "of" and "the" stay lowercase in a real title is a matter of language and
+ * style guide, and guessing it wrong on someone's headline is worse than not
+ * guessing.
+ */
+export function applyTextTransform(text: string, transform: TextTransform): string {
+  switch (transform) {
+    case 'uppercase':
+      return text.toLocaleUpperCase()
+    case 'lowercase':
+      return text.toLocaleLowerCase()
+    case 'titlecase':
+      return text.replace(/\p{L}[\p{L}\p{M}']*/gu, (word) =>
+        word.charAt(0).toLocaleUpperCase() + word.slice(1).toLocaleLowerCase(),
+      )
+    default:
+      return text
+  }
 }
 
 // ---------------------------------------------------------------------------

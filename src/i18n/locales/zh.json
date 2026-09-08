@@ -12,6 +12,7 @@
   "menu.save": "保存",
   "menu.saveAs": "另存为…",
   "menu.import": "导入…",
+  "menu.importText": "导入文本…",
   "menu.export": "导出…",
   "menu.undo": "撤消",
   "menu.redo": "重做",
@@ -154,5 +155,14 @@
   "action.delete": "删除",
   "section.layers": "图层",
   "note.canvasGrid": "覆盖整个画布的绘图辅助。画板自身的方形网格或版面网格在画板上设置。",
-  "document.counts": "{objects} 个对象 · {images} 张图像"
+  "document.counts": "{objects} 个对象 · {images} 张图像",
+  "label.textResize": "文本大小调整",
+  "label.autoWidth": "自动宽度",
+  "label.autoHeight": "自动高度",
+  "label.fixedSize": "固定大小",
+  "label.paragraphSpacing": "段落间距",
+  "label.textTransform": "文本转换",
+  "label.transformNone": "无",
+  "label.importText": "从文件导入文本…",
+  "label.spellCheck": "检查拼写"
 }

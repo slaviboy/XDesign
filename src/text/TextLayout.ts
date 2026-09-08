@@ -12,6 +12,7 @@
  */
 
 import { fontStack } from './FontRegistry'
+import { applyTextTransform } from '../document/types'
 import type { TextStyle } from '../document/types'
 
 export interface TextLine {
@@ -102,9 +103,14 @@ export function fontMetrics(style: TextStyle): FontMetrics {
 /**
  * Break text into laid-out lines.
  *
- * Explicit newlines always break. When `sizing` is 'fixed' and a width is given,
- * greedy word wrapping is applied, falling back to mid-word breaking for a single
- * word too long to fit (otherwise it would overflow silently).
+ * Explicit newlines always break. Wrapping happens for both sizing modes that
+ * own their width — Auto Height and Fixed Size — and never for Auto Width,
+ * whose whole purpose is to grow sideways instead of wrapping.
+ *
+ * Paragraph spacing is added AFTER each paragraph but the last, so a single
+ * paragraph is unaffected and a trailing gap never appears below the text.
+ * The transformation is applied here rather than to the stored text, which is
+ * what lets None give back exactly what was typed.
  */
 export function layoutText(
   text: string,
@@ -116,28 +122,35 @@ export function layoutText(
   // Center the text within its line box rather than sitting on the em baseline.
   const baselineOffset = (lineHeightPx - style.fontSize) / 2 + ascent
 
-  const paragraphs = text.split('\n')
-  const wrapping = style.sizing === 'fixed' && !!maxWidth && maxWidth > 0
+  const paragraphs = applyTextTransform(text, style.transform).split('\n')
+  const wrapping = style.sizing !== 'auto-width' && !!maxWidth && maxWidth > 0
+  const paragraphGap = Math.max(0, style.paragraphSpacing)
 
   const out: TextLine[] = []
-  for (const paragraph of paragraphs) {
-    if (!wrapping) {
-      out.push({ text: paragraph, width: measureText(paragraph, style), baseline: 0 })
-      continue
+  // Extra space accumulated from the paragraph breaks passed so far.
+  const offsets: number[] = []
+  let accumulated = 0
+  paragraphs.forEach((paragraph, i) => {
+    const lines = wrapping
+      ? wrapParagraph(paragraph, style, maxWidth!)
+      : [{ text: paragraph, width: measureText(paragraph, style), baseline: 0 }]
+    for (const line of lines) {
+      out.push(line)
+      offsets.push(accumulated)
     }
-    out.push(...wrapParagraph(paragraph, style, maxWidth!))
-  }
+    if (i < paragraphs.length - 1) accumulated += paragraphGap
+  })
 
   let widest = 0
   out.forEach((line, i) => {
-    line.baseline = baselineOffset + i * lineHeightPx
+    line.baseline = baselineOffset + i * lineHeightPx + offsets[i]!
     if (line.width > widest) widest = line.width
   })
 
   return {
     lines: out,
     width: widest,
-    height: Math.max(lineHeightPx, out.length * lineHeightPx),
+    height: Math.max(lineHeightPx, out.length * lineHeightPx + accumulated),
     lineHeightPx,
     ascent,
   }
@@ -214,4 +227,33 @@ export function intrinsicTextSize(
     width: Math.max(1, Math.ceil(layout.width)),
     height: Math.max(1, Math.ceil(layout.height)),
   }
+}
+
+
+/**
+ * Where the misspelled words sit on a laid-out line.
+ *
+ * Offsets are measured by re-measuring each prefix, which is the only way to
+ * place an underline under a word inside a <tspan>: SVG gives no per-character
+ * geometry until it has laid the text out, and by then the answer is needed.
+ *
+ * Returns nothing at all when spell check is off or its dictionaries have not
+ * arrived, so the caller pays nothing for a feature that is not running.
+ */
+export function misspelledRuns(
+  line: string,
+  style: TextStyle,
+  check: (word: string) => boolean,
+): Array<{ x: number; width: number }> {
+  if (!line) return []
+  const runs: Array<{ x: number; width: number }> = []
+  // Split keeping the separators, so prefix widths stay exact.
+  const parts = line.split(/(\s+)/)
+  let offset = 0
+  for (const part of parts) {
+    const width = measureText(part, style)
+    if (part.trim() && check(part)) runs.push({ x: offset, width })
+    offset += width
+  }
+  return runs
 }

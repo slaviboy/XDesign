@@ -12,6 +12,7 @@
   "menu.save": "Guardar",
   "menu.saveAs": "Guardar como…",
   "menu.import": "Importar…",
+  "menu.importText": "Importar texto…",
   "menu.export": "Exportar…",
   "menu.undo": "Deshacer",
   "menu.redo": "Rehacer",
@@ -154,5 +155,14 @@
   "action.delete": "Eliminar",
   "section.layers": "Capas",
   "note.canvasGrid": "Una ayuda de dibujo para todo el lienzo. La cuadrícula cuadrada o de diseño propia de una mesa de trabajo se define en la mesa de trabajo.",
-  "document.counts": "{objects} objetos · {images} imágenes"
+  "document.counts": "{objects} objetos · {images} imágenes",
+  "label.textResize": "Tamaño del texto",
+  "label.autoWidth": "Anchura automática",
+  "label.autoHeight": "Altura automática",
+  "label.fixedSize": "Tamaño fijo",
+  "label.paragraphSpacing": "Espaciado de párrafo",
+  "label.textTransform": "Transformación de texto",
+  "label.transformNone": "Ninguna",
+  "label.importText": "Importar texto de un archivo…",
+  "label.spellCheck": "Revisar ortografía"
 }

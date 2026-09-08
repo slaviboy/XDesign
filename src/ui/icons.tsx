@@ -487,6 +487,30 @@ export const JoinBevelIcon = (p: IconProps) => (
   </Icon>
 )
 
+/*
+ * The three text resize options. Each draws a box with the axes it controls
+ * marked by arrows: both for Auto Width (it grows sideways), the vertical one
+ * for Auto Height, neither for Fixed Size.
+ */
+export const AutoWidthIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="5" width="10" height="6" rx="1" />
+    <path d="M1 8h1.5M13.5 8H15" />
+  </Icon>
+)
+export const AutoHeightIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="5" y="3" width="6" height="10" rx="1" />
+    <path d="M8 1v1.5M8 13.5V15" />
+  </Icon>
+)
+export const FixedSizeIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3.5" y="3.5" width="9" height="9" rx="1" />
+    <path d="M6 6h4M6 8.5h4M6 11h2" strokeWidth={1} opacity={0.55} />
+  </Icon>
+)
+
 /** A tray with an arrow going into it: the universal "drop a file here". */
 export const ImportIcon = (p: IconProps) => (
   <Icon {...p}>

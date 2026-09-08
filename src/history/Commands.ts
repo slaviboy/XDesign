@@ -48,6 +48,7 @@ import {
   worldMatrix,
 } from '../document/SceneGraph'
 import { outlineStroke } from '../geometry/StrokeOutline'
+import { intrinsicTextSize } from '../text/TextLayout'
 import { rgbaEquals } from '../document/color'
 import { createGuideId, createSwatchId } from '../document/ids'
 import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
@@ -87,6 +88,7 @@ import {
   isShape,
   type BoxCorner,
   type RGBA,
+  type TextNode,
 } from '../document/types'
 
 // ---------------------------------------------------------------------------
@@ -890,26 +892,108 @@ export function moveSwatch(id: string, toIndex: number): boolean {
 // Text
 // ---------------------------------------------------------------------------
 
+/**
+ * Keep a text box's size in step with its content and its resize option.
+ *
+ * Adobe's three options differ exactly here. Auto Width takes BOTH dimensions
+ * from the text and never wraps. Auto Height keeps the width the box was given
+ * and derives only its height from the wrap — "the area text adjusts its height
+ * automatically to fit the content". Fixed Size derives nothing: the box is the
+ * user's, and text that does not fit is clipped until they say otherwise.
+ *
+ * Mutates a draft node inside the caller's transaction rather than opening one
+ * of its own, so an edit and the resize it forces are a single undo entry.
+ * Returns whether anything changed.
+ */
+function refitTextNode(node: TextNode): boolean {
+  const sizing = node.textStyle.sizing
+  if (sizing === 'fixed') return false
+
+  const size =
+    sizing === 'auto-width'
+      ? intrinsicTextSize(node.text, node.textStyle)
+      : { width: node.transform.width, height: intrinsicTextSize(node.text, node.textStyle, node.transform.width).height }
+
+  if (
+    Math.abs(size.width - node.transform.width) < 0.5 &&
+    Math.abs(size.height - node.transform.height) < 0.5
+  ) {
+    return false
+  }
+  node.transform = { ...node.transform, width: size.width, height: size.height }
+  return true
+}
+
 export function setText(id: NodeId, text: string): boolean {
   return transaction(
     'Edit text',
     (draft) => {
       const node = draft.nodes[id]
       if (!node || node.type !== 'text') return false
+      if (node.text === text) return false
       node.text = text
       if (!node.name || node.name === 'Text' || node.name.startsWith(node.text.slice(0, 8))) {
         node.name = text.split('\n')[0]!.slice(0, 40) || 'Text'
       }
+      // In the same transaction as the edit: typing that makes the box grow is
+      // one undo step, not a text change followed by a resize.
+      refitTextNode(node)
       return undefined
     },
     { coalesceKey: `text:${id}` },
   )
 }
 
+/**
+ * Re-fit text boxes after something outside the text changed the wrap — a
+ * resize handle, or a width typed into the inspector.
+ *
+ * Its own transaction, coalesced so it folds into the change that caused it.
+ */
+export function refitAutoHeight(ids: readonly NodeId[]): void {
+  const doc = getDoc()
+  const targets = ids.filter((id) => doc.nodes[id]?.type === 'text')
+  if (targets.length === 0) return
+
+  transaction(
+    'Fit text',
+    (draft) => {
+      let touched = false
+      for (const id of targets) {
+        const node = draft.nodes[id]
+        if (node?.type === 'text' && refitTextNode(node)) touched = true
+      }
+      return touched ? undefined : false
+    },
+    // Folded into whatever edit caused it, so resizing a text box is one undo
+    // entry rather than a resize followed by a fit.
+    { coalesceKey: 'text-refit' },
+  )
+}
+
+/** Style changes that alter the wrap: size, spacing, family, transform, mode. */
+/**
+ * Grow a Fixed Size box to the height its text needs.
+ *
+ * Adobe: "Double-click the bottom resize handle of the text box to quickly
+ * resize the text area to fit the content." It stays Fixed Size afterwards —
+ * the point is to stop the cropping, not to change the mode out from under you.
+ */
+export function fitTextHeight(id: NodeId): boolean {
+  return transaction('Fit text', (draft) => {
+    const node = draft.nodes[id]
+    if (!node || node.type !== 'text') return false
+    const height = intrinsicTextSize(node.text, node.textStyle, node.transform.width).height
+    if (Math.abs(height - node.transform.height) < 0.5) return false
+    node.transform = { ...node.transform, height }
+    return undefined
+  })
+}
+
 export function setTextStyle(patch: Partial<TextStyle>, coalesceKey?: string): boolean {
   const ids = editableSelection()
   if (ids.length === 0) return false
-  return transaction(
+  const ok = transaction(
     'Text style',
     (draft) => {
       let touched = false
@@ -917,6 +1001,10 @@ export function setTextStyle(patch: Partial<TextStyle>, coalesceKey?: string): b
         const node = draft.nodes[id]
         if (node?.type === 'text') {
           node.textStyle = { ...node.textStyle, ...patch }
+          // Any of these can change the wrap or the intrinsic width — font
+          // size, tracking, family, transformation, and the resize option
+          // itself — so the box is re-fitted here rather than at each caller.
+          refitTextNode(node)
           touched = true
         }
       }
@@ -924,6 +1012,7 @@ export function setTextStyle(patch: Partial<TextStyle>, coalesceKey?: string): b
     },
     { coalesceKey },
   )
+  return ok
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ import { createAssetId } from '../document/ids'
 import { createImage } from '../document/NodeFactory'
 import { addNode } from '../document/DocumentModel'
 import { importSvg } from '../svg/SvgImporter'
+import { importTextFile, isTextFile } from '../app/textImport'
 import { transaction, getDoc } from '../state/DocumentStore'
 import { containerAtPoint } from '../history/Commands'
 import { notify, setSelection } from '../state/EditorStore'
@@ -49,6 +50,8 @@ export function isSupportedFile(file: File): boolean {
   const type = file.type.toLowerCase()
   if (type === 'image/svg+xml') return true
   if (SUPPORTED_IMAGE_TYPES.includes(type)) return true
+  // Adobe's "Import text from text files" also works by dropping one.
+  if (isTextFile(file)) return true
   // Some systems report an empty MIME type; fall back to the extension.
   return /\.(png|jpe?g|gif|webp|bmp|avif|svg|ico)$/i.test(file.name)
 }
@@ -74,9 +77,10 @@ export async function importFiles(files: FileList | File[], at: Vec2): Promise<I
     const point = { x: at.x + offset, y: at.y + offset }
     try {
       const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)
-      const id = isSvg
-        ? await importSvgFile(file, point, outcome)
-        : await importImageFile(file, point)
+      let id: NodeId | null
+      if (isSvg) id = await importSvgFile(file, point, outcome)
+      else if (isTextFile(file)) id = await importTextFile(file, point)
+      else id = await importImageFile(file, point)
       if (id) {
         outcome.createdIds.push(id)
         offset += 20

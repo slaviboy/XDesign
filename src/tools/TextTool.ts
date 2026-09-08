@@ -71,10 +71,10 @@ export const textTool: Tool = {
     const style = { ...DEFAULT_TEXT_STYLE }
     let bounds: Bounds
     if (dragged && box && box.width > 4) {
-      style.sizing = 'fixed'
+      style.sizing = 'auto-height'
       bounds = box
     } else {
-      style.sizing = 'auto'
+      style.sizing = 'auto-width'
       const size = intrinsicTextSize('Text', style)
       bounds = { x: origin.x, y: origin.y, width: size.width, height: size.height }
     }

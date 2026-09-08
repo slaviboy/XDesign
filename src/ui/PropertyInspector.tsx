@@ -18,6 +18,7 @@ import {
   flipSelection,
   setCornerRadius,
   moveGuide,
+  refitAutoHeight,
   removeGuide,
   setArtboardGrid,
   setBlur,
@@ -37,6 +38,7 @@ import {
   setCornerRadiusAt,
 } from '../history/Commands'
 import { setRepeatGridParams } from '../history/RepeatGridCommands'
+import { importTextIntoSelection } from '../app/textImport'
 import {
   geometryBounds, localBox, localGeometryBounds, nodeLocalMatrix, worldMatrix,
 } from '../document/SceneGraph'
@@ -57,7 +59,7 @@ import {
   setEditor,
 } from '../state/EditorStore'
 import { liveGuide } from '../tools/GuideDrag'
-import { t } from '../i18n'
+import { t, type MessageKey } from '../i18n'
 import { useLanguage } from '../state/hooks-i18n'
 import { useDocument, useEditorStore, useLiveTransformTick, useSelectedNodes } from '../state/hooks'
 import { IconSelect, NumberField, Section, Select, TextField, common, IconButton } from './primitives'
@@ -66,7 +68,8 @@ import { useEyedropper } from './eyedropper'
 import {
   AlignBottomIcon, AlignCenterHIcon, AlignCenterVIcon, AlignLeftIcon, AlignRightIcon,
   AlignTopIcon, DistributeHIcon, DistributeVIcon, FlipHIcon, FlipVIcon,
-  CornersIndependentIcon, CornersUniformIcon, EyedropperIcon,
+  AutoHeightIcon, AutoWidthIcon, CornersIndependentIcon, CornersUniformIcon,
+  EyedropperIcon, FixedSizeIcon, ImportIcon,
   LinkBracket, MatchHeightIcon, MatchSizeIcon, MatchWidthIcon,
   RotateIcon, TextAlignCenterIcon, TextAlignLeftIcon, TextAlignRightIcon,
   CapButtIcon, CapRoundIcon, CapSquareIcon,
@@ -97,6 +100,8 @@ import {
   type RGBA,
   type ShadowEffect,
   type Style,
+  type TextSizing,
+  type TextTransform,
 } from '../document/types'
 
 export function PropertyInspector() {
@@ -326,6 +331,8 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
       const scale = Math.abs(key === 'width' ? node.transform.scaleX : node.transform.scaleY) || 1
       setNodeTransform(node.id, { [key]: Math.max(0.5, value / scale) }, `${key}:${node.id}`)
     }
+    // A narrower Auto Height box wraps differently and is therefore taller.
+    if (key === 'width') refitAutoHeight(nodes.map((n) => n.id))
   }
 
   // The ratio is captured at the MOMENT the lock is engaged (or the selection
@@ -1418,6 +1425,17 @@ function ShapeSection({ nodes }: { nodes: DesignNode[] }) {
 // Text
 // ---------------------------------------------------------------------------
 
+/** Adobe's three, in the order the Property Inspector shows them. */
+const TEXT_SIZING_OPTIONS: Array<{
+  value: TextSizing
+  key: MessageKey
+  icon: ReactNode
+}> = [
+  { value: 'auto-width', key: 'label.autoWidth', icon: <AutoWidthIcon /> },
+  { value: 'auto-height', key: 'label.autoHeight', icon: <AutoHeightIcon /> },
+  { value: 'fixed', key: 'label.fixedSize', icon: <FixedSizeIcon /> },
+]
+
 function TextSection({ nodes }: { nodes: DesignNode[] }) {
   const texts = nodes.filter((n) => n.type === 'text')
   if (texts.length === 0) return null
@@ -1429,7 +1447,9 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
   const lineHeight = common(texts, (n) => (n.type === 'text' ? n.textStyle.lineHeight : 1.4))
   const tracking = common(texts, (n) => (n.type === 'text' ? n.textStyle.letterSpacing : 0))
   const italic = common(texts, (n) => (n.type === 'text' ? n.textStyle.fontStyle === 'italic' : false))
-  const sizing = common(texts, (n) => (n.type === 'text' ? n.textStyle.sizing : 'auto'))
+  const sizing = common(texts, (n) => (n.type === 'text' ? n.textStyle.sizing : 'auto-width'))
+  const paragraphSpacing = common(texts, (n) => (n.type === 'text' ? n.textStyle.paragraphSpacing : 0))
+  const transform = common(texts, (n) => (n.type === 'text' ? n.textStyle.transform : 'none'))
 
   const groups = fontsByCategory()
 
@@ -1503,14 +1523,60 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
           <IconButton icon={<TextAlignCenterIcon />} label="Align center" active={align === 'center'} onClick={() => setTextStyle({ align: 'center' })} />
           <IconButton icon={<TextAlignRightIcon />} label="Align right" active={align === 'right'} onClick={() => setTextStyle({ align: 'right' })} />
         </div>
-        <Select
-          value={sizing ?? 'auto'}
-          options={[
-            { value: 'auto', label: 'Auto width' },
-            { value: 'fixed', label: 'Fixed width' },
-          ]}
-          onChange={(v) => setTextStyle({ sizing: v as 'auto' | 'fixed' })}
+      </div>
+
+      {/* Adobe's three resize options, as a segmented control: they are three
+          states of one setting, and a dropdown hides two of them behind a click
+          when all three fit. */}
+      <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
+        <div className="corner-mode-toggle" role="group" aria-label={t('label.textResize')}>
+          {TEXT_SIZING_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`icon-button${sizing === option.value ? ' active' : ''}`}
+              aria-label={t(option.key)}
+              aria-pressed={sizing === option.value}
+              data-testid={`sizing-${option.value}`}
+              title={t(option.key)}
+              onClick={() => setTextStyle({ sizing: option.value })}
+            >
+              {option.icon}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="field-row cols-3">
+        <NumberField
+          label="¶"
+          title={t('label.paragraphSpacing')}
+          value={paragraphSpacing}
+          min={0}
+          onChange={(v, committing) =>
+            setTextStyle({ paragraphSpacing: v }, committing ? undefined : 'para')
+          }
         />
+        <Select
+          value={transform ?? 'none'}
+          options={[
+            { value: 'none', label: t('label.transformNone') },
+            { value: 'uppercase', label: 'AB' },
+            { value: 'lowercase', label: 'ab' },
+            { value: 'titlecase', label: 'Ab' },
+          ]}
+          onChange={(v) => setTextStyle({ transform: v as TextTransform })}
+          title={t('label.textTransform')}
+        />
+        <button
+          type="button"
+          className="icon-button"
+          title={t('label.importText')}
+          aria-label={t('label.importText')}
+          onClick={() => void importTextIntoSelection()}
+        >
+          <ImportIcon />
+        </button>
       </div>
     </Section>
   )

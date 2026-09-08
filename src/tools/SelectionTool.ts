@@ -337,7 +337,18 @@ export const selectionTool: Tool = {
     if (state.phase === 'idle') {
       // Hover feedback only.
       const pick = resolvePick(e.doc, ctx.tolerance())
-      if (pick !== editorStore.getState().hoverId) setEditor({ hoverId: pick })
+      const editorNow = editorStore.getState()
+      if (pick !== editorNow.hoverId) setEditor({ hoverId: pick })
+
+      // Adobe's measure gesture: with something selected, holding Alt and
+      // hovering another object reports the gap between them. Only ever a
+      // different object — the distance from a thing to itself is zero, and
+      // drawing that is noise.
+      const measuring =
+        e.altKey && editorNow.selection.length > 0 && pick && !editorNow.selection.includes(pick)
+          ? pick
+          : null
+      if (measuring !== editorNow.measureTo) setEditor({ measureTo: measuring })
       return
     }
 

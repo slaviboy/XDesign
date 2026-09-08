@@ -9,9 +9,23 @@
 
 import { useEffect, useReducer } from 'react'
 import { subscribeLanguage } from '../i18n'
+import { subscribeSpellCheck } from '../text/spellcheck'
 
 export function useLanguage(): number {
   const [tick, bump] = useReducer((n: number) => n + 1, 0)
   useEffect(() => subscribeLanguage(bump), [])
+  return tick
+}
+
+/**
+ * Re-render when a dictionary arrives or spell check is switched.
+ *
+ * Same shape as useLanguage, and separate from it because the two change at
+ * different moments: a dictionary lands asynchronously long after the language
+ * that asked for it was chosen.
+ */
+export function useSpellCheckTick(): number {
+  const [tick, bump] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => subscribeSpellCheck(bump), [])
   return tick
 }

@@ -23,6 +23,10 @@ import {
   worldMatrix,
 } from '../document/SceneGraph'
 import { docToScreen } from './Viewport'
+import { intrinsicTextSize } from '../text/TextLayout'
+import { fitTextHeight } from '../history/Commands'
+import { measureBetween, type AxisDistance } from '../geometry/Distance'
+import { unionAll } from '../geometry/Bounds'
 import { angleBetween, rotationCursor } from './cursors'
 import { getDragMode, getLiveMatrix, getLiveRotation, getLiveSize, isDragging } from '../tools/DragSession'
 import { getEditingSubpaths } from '../tools/PathEditing'
@@ -60,6 +64,9 @@ const HANDLE_SIZE = 7
  */
 const ROTATE_ZONE = 18
 
+/** Matches the platform default; only used for the fit-to-text handle below. */
+const DOUBLE_CLICK_MS = 400
+
 /** Where each handle sits, as a 0..1 fraction of the frame. */
 const HANDLE_POS: Record<ResizeHandle, Vec2> = {
   nw: { x: 0, y: 0 },
@@ -96,6 +103,15 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
   const gradientEditing = useEditorStore((s) => s.gradientEditing)
   const editingContext = useEditorStore((s) => s.editingContext)
   const dragging = useEditorStore((s) => s.isDragging)
+  // A single Fixed Size text box whose content is taller than it is. Adobe marks
+  // the bottom handle red so the cropping is visible rather than silent.
+  const overflowId = useMemo(() => {
+    if (selection.length !== 1) return null
+    const node = doc.nodes[selection[0]!]
+    if (node?.type !== 'text' || node.textStyle.sizing !== 'fixed') return null
+    const needed = intrinsicTextSize(node.text, node.textStyle, node.transform.width).height
+    return needed > node.transform.height + 0.5 ? node.id : null
+  }, [doc, selection])
   const tick = useLiveTransformTick()
 
   const frame = useMemo(
@@ -124,6 +140,7 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
           points={contextOutline.map((p) => `${p.x},${p.y}`).join(' ')}
         />
       )}
+      <MeasureOverlay />
       {hoverOutline && (
         <polygon
           className="hover-outline"
@@ -140,7 +157,12 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
         <PathPointOverlay viewport={viewport} tick={tick} />
       ) : (
         frame && (
-          <TransformFrame frame={frame} dragging={dragging} multiple={selection.length > 1} />
+          <TransformFrame
+        frame={frame}
+        dragging={dragging}
+        multiple={selection.length > 1}
+        overflowId={overflowId}
+      />
         )
       )}
 
@@ -281,15 +303,41 @@ function outlineFor(
 // Frame rendering
 // ---------------------------------------------------------------------------
 
+/**
+ * Double-click the red bottom handle to fit a Fixed Size box to its text.
+ *
+ * Detected here rather than with onDoubleClick because the canvas captures the
+ * pointer on its own <svg> at pointerdown, which retargets the click and
+ * dblclick that follow — a React onDoubleClick on this rect would simply never
+ * fire. The first press still starts an ordinary resize, so the handle keeps
+ * working as a handle; only the second press within the double-click window
+ * fits instead, and stops there so no drag begins behind it.
+ */
+let lastOverflowPress = 0
+
+function onOverflowHandleDown(e: React.PointerEvent, id: NodeId): void {
+  const now = e.timeStamp
+  const isSecond = now - lastOverflowPress < DOUBLE_CLICK_MS
+  lastOverflowPress = isSecond ? 0 : now
+  if (!isSecond) return
+  e.stopPropagation()
+  e.preventDefault()
+  fitTextHeight(id)
+}
+
 function TransformFrame({
   frame,
   dragging,
   multiple,
+  overflowId,
 }: {
   frame: Frame
   dragging: boolean
   multiple: boolean
+  /** A Fixed Size text box whose content does not fit, if that is what is selected. */
+  overflowId: NodeId | null
 }) {
+  const textOverflows = !!overflowId
   const [tl, tr, , bl] = frame.corners as [Vec2, Vec2, Vec2, Vec2]
 
   const at = (f: Vec2): Vec2 => ({
@@ -339,17 +387,24 @@ function TransformFrame({
 
       {RESIZE_HANDLES.map((h) => {
         const p = at(HANDLE_POS[h])
+        // Adobe: when Fixed Size text does not fit, "XD indicates this with a
+        // red bottom resize handle", and double-clicking it fits the box to the
+        // content.
+        const overflowing = h === 's' && textOverflows
         return (
           <rect
             key={h}
             data-handle={h}
-            className="resize-handle"
+            className={`resize-handle${overflowing ? ' overflowing' : ''}`}
             x={p.x - HANDLE_SIZE / 2}
             y={p.y - HANDLE_SIZE / 2}
             width={HANDLE_SIZE}
             height={HANDLE_SIZE}
             pointerEvents="all"
             style={{ cursor: HANDLE_CURSOR[h] }}
+            onPointerDown={
+              overflowing ? (e) => onOverflowHandleDown(e, overflowId!) : undefined
+            }
           />
         )
       })}
@@ -381,6 +436,95 @@ function TransformFrame({
 
 function signed(n: number): string {
   return n > 0 ? `+${n}` : String(n)
+}
+
+/**
+ * How far the selection is from whatever is hovered, while Alt is held.
+ *
+ * A dashed line per axis with the gap on it, which is Adobe's measure gesture.
+ * Only axes on which the two boxes are actually SEPARATED get a line: two boxes
+ * that overlap horizontally have no horizontal distance, and drawing one would
+ * be inventing a number.
+ *
+ * The hovered object also gets an outline, because a measurement is only
+ * meaningful once you can see which two things it is between.
+ */
+function MeasureOverlay() {
+  const doc = useDocument()
+  const viewport = useEditorStore((s) => s.viewport)
+  const selection = useEditorStore((s) => s.selection)
+  const measureTo = useEditorStore((s) => s.measureTo)
+  if (!measureTo || selection.length === 0) return null
+
+  const target = doc.nodes[measureTo]
+  if (!target) return null
+  const cache = createMatrixCache()
+  const from = unionAll(selection.map((id) => geometryBounds(doc, id, cache)))
+  const to = geometryBounds(doc, measureTo, cache)
+  if (from.width === 0 && from.height === 0) return null
+
+  const gaps = measureBetween(from, to)
+  const outline = outlineFor(doc, measureTo, viewport)
+
+  return (
+    <g className="measure-overlay" pointerEvents="none">
+      {outline && (
+        <polygon className="measure-target" points={outline.map((p) => `${p.x},${p.y}`).join(' ')} />
+      )}
+      {gaps.horizontal && <MeasureLine axis="x" gap={gaps.horizontal} viewport={viewport} />}
+      {gaps.vertical && <MeasureLine axis="y" gap={gaps.vertical} viewport={viewport} />}
+    </g>
+  )
+}
+
+function MeasureLine({
+  axis,
+  gap,
+  viewport,
+}: {
+  axis: 'x' | 'y'
+  gap: AxisDistance
+  viewport: Viewport
+}) {
+  const a = docToScreen(viewport, axis === 'x' ? { x: gap.from, y: gap.at } : { x: gap.at, y: gap.from })
+  const b = docToScreen(viewport, axis === 'x' ? { x: gap.to, y: gap.at } : { x: gap.at, y: gap.to })
+  const label = String(Math.round(gap.distance))
+
+  return (
+    <g data-measure={axis}>
+      <line className="measure-line" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+      {/* End caps, so a short gap still reads as a measurement rather than as
+          a stray dash. */}
+      <line
+        className="measure-cap"
+        x1={axis === 'x' ? a.x : a.x - 4}
+        y1={axis === 'x' ? a.y - 4 : a.y}
+        x2={axis === 'x' ? a.x : a.x + 4}
+        y2={axis === 'x' ? a.y + 4 : a.y}
+      />
+      <line
+        className="measure-cap"
+        x1={axis === 'x' ? b.x : b.x - 4}
+        y1={axis === 'x' ? b.y - 4 : b.y}
+        x2={axis === 'x' ? b.x : b.x + 4}
+        y2={axis === 'x' ? b.y + 4 : b.y}
+      />
+      <MeasureBadge x={(a.x + b.x) / 2} y={(a.y + b.y) / 2} text={label} />
+    </g>
+  )
+}
+
+/** The number, on a chip so it stays legible over artwork of any colour. */
+function MeasureBadge({ x, y, text }: { x: number; y: number; text: string }) {
+  const width = text.length * 6.6 + 12
+  return (
+    <g className="measure-badge" transform={`translate(${x - width / 2} ${y - 9})`}>
+      <rect width={width} height={18} rx={3} />
+      <text x={width / 2} y={13} textAnchor="middle">
+        {text}
+      </text>
+    </g>
+  )
 }
 
 function SizeBadge({ x, y, text }: { x: number; y: number; text: string }) {

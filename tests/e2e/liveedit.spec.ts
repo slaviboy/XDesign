@@ -340,8 +340,9 @@ test('a fixed-width text box rewraps while it is being resized', async ({ page }
   await page.keyboard.type('The quick brown fox jumps over the lazy dog again and again')
   await page.keyboard.press('Escape')
   await selectTool(page, 'select')
-  await page.locator('.section', { hasText: 'TEXT' }).locator('select').last()
-    .selectOption({ label: 'Fixed width' })
+  // Auto Height is the successor to the old "Fixed width" mode: the box owns
+  // its width and the text wraps inside it.
+  await page.locator('[data-testid="sizing-auto-height"]').click()
   await setField(page, 'W', 260)
 
   const lines = async () => String(await page.locator('.document-layer text tspan').count())

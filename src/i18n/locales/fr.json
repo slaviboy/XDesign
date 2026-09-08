@@ -12,6 +12,7 @@
   "menu.save": "Enregistrer",
   "menu.saveAs": "Enregistrer sous…",
   "menu.import": "Importer…",
+  "menu.importText": "Importer du texte…",
   "menu.export": "Exporter…",
   "menu.undo": "Annuler",
   "menu.redo": "Rétablir",
@@ -154,5 +155,14 @@
   "action.delete": "Supprimer",
   "section.layers": "Calques",
   "note.canvasGrid": "Une aide au dessin sur l'ensemble du canevas. La grille carrée ou de mise en page propre à un plan de travail se règle sur le plan de travail.",
-  "document.counts": "{objects} objets · {images} images"
+  "document.counts": "{objects} objets · {images} images",
+  "label.textResize": "Redimensionnement du texte",
+  "label.autoWidth": "Largeur automatique",
+  "label.autoHeight": "Hauteur automatique",
+  "label.fixedSize": "Taille fixe",
+  "label.paragraphSpacing": "Espacement des paragraphes",
+  "label.textTransform": "Transformation du texte",
+  "label.transformNone": "Aucune",
+  "label.importText": "Importer du texte depuis un fichier…",
+  "label.spellCheck": "Vérifier l'orthographe"
 }

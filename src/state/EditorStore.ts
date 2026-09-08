@@ -106,6 +106,8 @@ export interface EditorState {
    * clicks select its direct children rather than resolving to the outermost group.
    */
   editingContext: NodeId | null
+  /** The node the selection is being measured against, while Alt is held. */
+  measureTo: NodeId | null
   /** How much of an object a marquee must cover to select it. */
   marqueeMode: MarqueeMode
   /**
@@ -188,6 +190,7 @@ export const editorStore = createStore<EditorState>()(
     selection: [],
     hoverId: null,
     editingContext: null,
+    measureTo: null,
     marqueeMode: readStoredMarqueeMode(),
     selectedGuide: null,
     editingTextId: null,

@@ -297,6 +297,9 @@ export function installKeyboard(ctx: ToolContext, handlers: KeyboardHandlers): (
       spaceHeld = false
       popTemporaryTool()
     }
+    // The measure overlay is held open by a key, and a key coming up produces
+    // no pointer event — nothing else would ever take it down.
+    if (!e.altKey && editorStore.getState().measureTo) setEditor({ measureTo: null })
   }
 
   const onBlur = () => {
@@ -305,6 +308,7 @@ export function installKeyboard(ctx: ToolContext, handlers: KeyboardHandlers): (
       spaceHeld = false
       popTemporaryTool()
     }
+    if (editorStore.getState().measureTo) setEditor({ measureTo: null })
   }
 
   window.addEventListener('keydown', onKeyDown)

@@ -46,6 +46,38 @@ Double-clicking a shape with the arrow does the same thing, and lights up the Di
 button while it is doing it — the rail names the mode the canvas is actually in, and the two
 pointers hand the points back and forth without dropping them.
 
+**Text** — click for a box that grows with what you type, or drag one out to pour text into.
+Adobe's three resize options are a segmented control in the Text section: **Auto Width** takes
+both dimensions from the text and never wraps, **Auto Height** keeps the width you gave it and
+grows downwards as the text wraps, and **Fixed Size** keeps both and clips what does not fit.
+The mode is an invariant rather than a one-off conversion — typing, a font size, tracking, a
+transformation or a width typed into the inspector all re-fit the box the way its mode says,
+inside the same undo step as the edit that caused it. When Fixed Size text overflows, the
+bottom resize handle turns red; double-click it and the box grows to hold everything, staying
+Fixed Size. Alongside those: paragraph spacing, line height, tracking, alignment, and the four
+**text transformations** (None, UPPERCASE, lowercase, Title Case). A transformation changes what
+is drawn and never what is stored, so switching back to None gives you exactly what you typed,
+and re-opening the editor shows the original rather than the rendering.
+
+**Import text from a file** — File ▸ Import Text…, the button on the Text panel, or dropping a
+`.txt`, `.md`, `.csv` or any other text file straight onto the canvas. With a text object
+selected the file fills it; with nothing selected it becomes a new Auto Height box named after
+the file, at the point you dropped it.
+
+**Spell check** — off by default, switched on in Preferences, and it checks two languages at
+once: English plus whichever language the interface is set to, which is what a designer working
+in a second language actually needs. Misspelled words get a red wave under them, drawn from the
+same layout the glyphs come from, so the underline sits under the word and not near it. The
+dictionaries ship with the app and are read from disk; nothing is looked up online.
+
+**Measuring distances** — with something selected, hold `⌥`/`Alt` and hover another object. The
+gap between them is drawn as a dashed line per axis with the number on it, in document units.
+Only an axis the two boxes are actually *separated* on gets a line: two objects that overlap
+horizontally have no horizontal distance, and drawing one would be inventing a number. Where
+they share no span at all the two lines run from the selection across and from the target down,
+so they form an L between the pair instead of crossing at one point with the labels on top of
+each other. Release `Alt` and it is gone.
+
 **Guides** — Adobe's model, which is not Photoshop's: there are no rulers down the side of the
 window. Every artboard grows a strip along its top and left border that you pull a guide out of,
 and the guide belongs to that artboard. Dragging one snaps to the artboard's edges and centres,
@@ -156,9 +188,9 @@ objects.
 backgrounds deliberately do NOT follow the theme: they are document data, and the artwork
 has to look the same to everyone who opens the file.
 
-**Import** — SVG and raster images (PNG, JPEG, GIF, WebP, BMP, AVIF) by drag-and-drop,
-paste, or File ▸ Import. Imported SVG becomes real editable nodes: shapes stay shapes,
-gradients stay gradients, groups stay groups. Nothing is ever rasterized on import.
+**Import** — SVG, raster images (PNG, JPEG, GIF, WebP, BMP, AVIF) and plain text files by
+drag-and-drop, paste, or File ▸ Import. Imported SVG becomes real editable nodes: shapes stay
+shapes, gradients stay gradients, groups stay groups. Nothing is ever rasterized on import.
 
 **Export** — SVG, PNG and JPEG, of a selection, an artboard, the whole document, or every
 layer marked for export, at 0.1×–10× scale.
@@ -585,6 +617,77 @@ English is also the runtime fallback, so a key a translation has not reached yet
 words rather than `menu.file.new` — a half-finished locale degrades to a readable mixture instead
 of to gibberish.
 
+### A text box's resize option is an invariant, not a one-off conversion
+
+Adobe's three options are usually described as things you pick, but they are really three
+different answers to *who owns the box's size*. Auto Width: the text does, both dimensions.
+Auto Height: you own the width, the text owns the height. Fixed Size: you own both, and text
+that does not fit is clipped.
+
+Written that way it is obvious that the rule has to hold after **every** edit, not just at the
+moment you pick it — typing, a font size, tracking, a family, a transformation, a width typed
+into the inspector, a resize handle. It did not, and the failure was visible: the inline editor
+re-fitted the box from the *unwrapped* text on every keystroke, so typing into an Auto Height
+box blew its width out until everything sat on one line. The box the user had just dragged out
+was destroyed by the first character they typed into it.
+
+So there is now one `refitTextNode`, applied inside the transaction that made the change. Two
+consequences fall out of putting it there rather than at the call sites. An edit and the resize
+it forces are a **single undo entry** — before, `setText` and the resize were separate
+transactions under different coalesce keys, so a typing burst recorded two entries per
+character. And `TextEditor` no longer has an opinion about geometry: it calls `setText` and
+stops, which is what a text editor should do.
+
+### Spell check ships five languages, and says so
+
+The word lists come from `all-words-in-all-languages`, which covers far more than five. Three
+were deliberately left out, and the reasons are worth recording because "add the rest later" is
+the wrong conclusion:
+
+- **Bulgarian** — the source list has **2,697 words**. A real vocabulary is hundreds of
+  thousands. A checker built on it would underline most of a correctly spelled sentence, which
+  is worse than no checker at all: it trains you to ignore the marks.
+- **Chinese and Japanese** — no spaces between words. A word list has nothing to match against
+  until the text is segmented, and segmentation is a different piece of software.
+
+The dictionaries that did ship are gzipped and read from disk, never fetched from a service:
+English 1.3 MB (465k words), French 0.8 MB (337k), Spanish 1.4 MB (637k), Portuguese 2.8 MB
+(1.1M), German 4.9 MB (1.7M) — **12 MB of assets**, which is real and is the price of the
+feature working offline. They are loaded only when spell check is switched on, and only the two
+in use.
+
+German is why the lookup is not a `Set`. 1.7 million strings in a JS `Set` costs well over a
+hundred megabytes of heap and a long pause to build. Instead each dictionary stays **one sorted
+string** plus an `Int32Array` of line offsets, and a lookup is a binary search over the offsets
+— no per-word objects at all. The first attempt searched the raw string directly and widened
+each probe to the nearest newline, which is where the bug was: widening could push the probe
+outside the range still being searched, so the search stalled and reported real words as
+misspelled. The offset array removed the class of bug rather than patching that instance.
+
+One more thing the browser did quietly: a dev server sends `Content-Encoding: gzip` for a `.gz`
+file, so by the time the bytes arrive they have already been decompressed, and
+`DecompressionStream('gzip')` throws on them. The loader sniffs the two magic bytes `1f 8b` and
+only decompresses when they are actually there.
+
+The lists are checked in, and `npm run dictionaries` regenerates them from the upstream repo —
+downloading, lower-casing, dropping anything that is not a word, sorting and gzipping. It is the
+one script here that touches the network, and it is a build step: the app never does.
+
+### Measuring is drawn as an L, on purpose
+
+Two boxes that share no span on either axis have no single sensible place to put the two
+measuring lines. Running both through the midpoint of the overlap does not work — there is no
+overlap — and the obvious fallback, the midpoint of each box, puts both lines through the same
+region and stacks the two number chips on top of each other.
+
+So the horizontal line runs across the **selection** and the vertical line runs down the
+**target**. The pair meets at a corner and traces the path the eye already takes between the two
+objects, and neither label is ever underneath the other. It is two lines of code in
+`measureBetween` and it is the difference between a readable measurement and an unreadable one.
+
+An axis the boxes overlap on gets **no** line at all. The gap there is negative, and a negative
+distance drawn between two objects is a picture of nothing.
+
 ### Locking or hiding lets go of what you were holding
 
 A selection frame over an object you can no longer touch is a lie: the handles do nothing, the
@@ -876,7 +979,7 @@ src/
   canvas/      SVG renderer, overlays, viewport, live-transform fast path
   tools/       13 tools + drag session + point editing
   svg/         sanitizer, ID namespacer, importer, exporter
-  text/        font registry, layout, font embedding
+  text/        font registry, layout, spell check, font embedding
   images/      file import
   export/      export pipeline, rasterizer
   persistence/ .xdesign format, IndexedDB, file system, autosave
@@ -892,8 +995,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 291 unit tests (Vitest)
-npm run test:e2e   # 230 end-to-end tests (Playwright, real Chromium)
+npm test           # 309 unit tests (Vitest)
+npm run test:e2e   # 244 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

@@ -12,6 +12,7 @@
   "menu.save": "Speichern",
   "menu.saveAs": "Speichern unter…",
   "menu.import": "Importieren…",
+  "menu.importText": "Text importieren…",
   "menu.export": "Exportieren…",
   "menu.undo": "Rückgängig",
   "menu.redo": "Wiederholen",
@@ -154,5 +155,14 @@
   "action.delete": "Löschen",
   "section.layers": "Ebenen",
   "note.canvasGrid": "Eine Zeichenhilfe für die gesamte Arbeitsfläche. Das eigene quadratische oder Layout-Raster einer Zeichenfläche wird an der Zeichenfläche eingestellt.",
-  "document.counts": "{objects} Objekte · {images} Bilder"
+  "document.counts": "{objects} Objekte · {images} Bilder",
+  "label.textResize": "Textgröße",
+  "label.autoWidth": "Automatische Breite",
+  "label.autoHeight": "Automatische Höhe",
+  "label.fixedSize": "Feste Größe",
+  "label.paragraphSpacing": "Absatzabstand",
+  "label.textTransform": "Textumwandlung",
+  "label.transformNone": "Ohne",
+  "label.importText": "Text aus Datei importieren…",
+  "label.spellCheck": "Rechtschreibung prüfen"
 }

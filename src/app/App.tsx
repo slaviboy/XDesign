@@ -14,6 +14,7 @@ import { TopBar } from '../ui/TopBar'
 import { PropertyInspector } from '../ui/PropertyInspector'
 import { InspectorToolbar } from '../ui/InspectorToolbar'
 import { LayersPanel } from '../ui/LayersPanel'
+import { ensureDictionaries } from '../text/spellcheck'
 import { Notifications } from '../ui/Notifications'
 import { ExportDialog } from '../ui/ExportDialog'
 import {
@@ -149,6 +150,13 @@ export function App() {
     }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [])
+
+  // Fetched after the first paint, never before it: the app is usable without
+  // a dictionary, and 12 MB of word lists must not stand between the user and
+  // their document.
+  useEffect(() => {
+    void ensureDictionaries()
   }, [])
 
   const onFilesDropped = useCallback((files: FileList, at: Vec2) => {

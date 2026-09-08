@@ -1374,3 +1374,32 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   font-size: var(--fs-md);
   color: var(--text-muted);
 }
+
+/* Measuring the gap to a hovered object, while Alt is held. Dashed, because a
+   measurement is an annotation rather than part of the artwork. */
+.measure-line {
+  stroke: var(--snap-guide);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.measure-cap { stroke: var(--snap-guide); stroke-width: 1; }
+.measure-target {
+  fill: none;
+  stroke: var(--snap-guide);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+.measure-badge rect { fill: var(--snap-guide); }
+.measure-badge text { fill: #fff; font-size: 10px; font-family: var(--font-ui); }
+
+/* Spell check: the wave everyone reads as "this word is wrong". */
+.spell-underline {
+  fill: none;
+  stroke: #e5484d;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Fixed Size text that does not fit: Adobe's red bottom handle. */
+.resize-handle.overflowing { fill: #e5484d; stroke: #fff; }

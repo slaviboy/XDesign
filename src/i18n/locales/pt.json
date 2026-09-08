@@ -12,6 +12,7 @@
   "menu.save": "Guardar",
   "menu.saveAs": "Guardar como…",
   "menu.import": "Importar…",
+  "menu.importText": "Importar texto…",
   "menu.export": "Exportar…",
   "menu.undo": "Anular",
   "menu.redo": "Refazer",
@@ -154,5 +155,14 @@
   "action.delete": "Eliminar",
   "section.layers": "Camadas",
   "note.canvasGrid": "Um auxiliar de desenho para toda a tela. A grelha quadrada ou de esquema da própria prancheta define-se na prancheta.",
-  "document.counts": "{objects} objetos · {images} imagens"
+  "document.counts": "{objects} objetos · {images} imagens",
+  "label.textResize": "Redimensionamento do texto",
+  "label.autoWidth": "Largura automática",
+  "label.autoHeight": "Altura automática",
+  "label.fixedSize": "Tamanho fixo",
+  "label.paragraphSpacing": "Espaçamento de parágrafo",
+  "label.textTransform": "Transformação do texto",
+  "label.transformNone": "Nenhuma",
+  "label.importText": "Importar texto de um ficheiro…",
+  "label.spellCheck": "Verificar ortografia"
 }

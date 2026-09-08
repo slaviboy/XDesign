@@ -12,6 +12,7 @@
   "menu.save": "Save",
   "menu.saveAs": "Save As…",
   "menu.import": "Import…",
+  "menu.importText": "Import Text…",
   "menu.export": "Export…",
   "menu.undo": "Undo",
   "menu.redo": "Redo",
@@ -154,5 +155,14 @@
   "action.delete": "Delete",
   "section.layers": "Layers",
   "note.canvasGrid": "A drawing aid across the whole canvas. An artboard's own Square or Layout grid is set on the artboard.",
-  "document.counts": "{objects} objects · {images} images"
+  "document.counts": "{objects} objects · {images} images",
+  "label.textResize": "Text resize",
+  "label.autoWidth": "Auto Width",
+  "label.autoHeight": "Auto Height",
+  "label.fixedSize": "Fixed Size",
+  "label.paragraphSpacing": "Paragraph spacing",
+  "label.textTransform": "Text transformation",
+  "label.transformNone": "None",
+  "label.importText": "Import text from a file…",
+  "label.spellCheck": "Check spelling"
 }

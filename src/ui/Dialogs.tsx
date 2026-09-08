@@ -13,6 +13,7 @@ import { getStorageEstimate, clearRecent } from '../persistence/IndexedDbStore'
 import { supportsFileSystemAccess } from '../persistence/FileSystem'
 import { ALT_LABEL, MOD_LABEL, shortcutGroups } from '../shortcuts/bindings'
 import { LANGUAGES, getLanguage, setLanguage, t, type LanguageCode } from '../i18n'
+import { canSpellCheck, isSpellCheckEnabled, setSpellCheckEnabled } from '../text/spellcheck'
 import { useLanguage } from '../state/hooks-i18n'
 import { InfoIcon } from './icons'
 import { NumberField, Select, TextField } from './primitives'
@@ -200,6 +201,7 @@ export function PreferencesDialog() {
   // in the panel you made it in.
   void useLanguage()
   const language = getLanguage()
+  const [spellCheck, setSpellCheck] = useState(() => isSpellCheckEnabled())
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
 
   useEffect(() => {
@@ -226,6 +228,24 @@ export function PreferencesDialog() {
             title={t('label.language')}
           />
         </div>
+      </PreferenceRow>
+
+      <PreferenceRow
+        name="spellcheck"
+        info="Underlines words that are in neither English nor the interface language. The dictionaries ship with the app and work offline. Bulgarian, Chinese and Japanese are not offered: the Bulgarian word list has 2,697 words against a real vocabulary of hundreds of thousands, and Chinese and Japanese put no spaces between words, so there is nothing for a word list to check."
+      >
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={spellCheck}
+            disabled={!canSpellCheck(language)}
+            onChange={(e) => {
+              setSpellCheckEnabled(e.target.checked)
+              setSpellCheck(e.target.checked)
+            }}
+          />
+          {t('label.spellCheck')}
+        </label>
       </PreferenceRow>
 
       <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>{t('prefs.canvas')}</h4>

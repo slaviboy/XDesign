@@ -14,8 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { multiply, type Mat2D } from '../geometry/Matrix'
 import { worldMatrix } from '../document/SceneGraph'
 import { viewportMatrix } from './Viewport'
-import { setText, setNodeTransform } from '../history/Commands'
-import { intrinsicTextSize } from '../text/TextLayout'
+import { setText } from '../history/Commands'
 import { fontStack } from '../text/FontRegistry'
 import { toHex } from '../document/color'
 import { setEditor } from '../state/EditorStore'
@@ -43,23 +42,17 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
     el.select()
   }, [nodeId])
 
+  // setText re-fits the box itself, per its resize option — an Auto Width box
+  // widens as you type, an Auto Height one grows downwards and keeps its width,
+  // a Fixed one does neither. Doing it there rather than here keeps a typing
+  // burst to one undo entry and stops this component from having an opinion
+  // about geometry.
   const commit = useCallback(
     (next: string) => {
       setValue(next)
       setText(nodeId, next)
-      const n = doc.nodes[nodeId]
-      if (n?.type === 'text' && n.textStyle.sizing === 'auto') {
-        // Auto-sizing boxes grow with their content as you type.
-        const size = intrinsicTextSize(next, n.textStyle)
-        if (
-          Math.abs(size.width - n.transform.width) > 0.5 ||
-          Math.abs(size.height - n.transform.height) > 0.5
-        ) {
-          setNodeTransform(nodeId, { width: size.width, height: size.height }, `text-size:${nodeId}`)
-        }
-      }
     },
-    [doc, nodeId],
+    [nodeId],
   )
 
   const onKeyDown = useCallback(

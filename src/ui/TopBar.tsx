@@ -14,6 +14,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import {
   importFilesFlow, newDocument, openDocumentFlow, saveDocumentFlow,
 } from '../app/fileOperations'
+import { importTextIntoSelection } from '../app/textImport'
 import { redo, undo } from '../state/DocumentStore'
 import {
   alignSelection, clearGuides, copyGuides, deleteSelection, distributeSelection,
@@ -79,6 +80,10 @@ export const TopBar = memo(function TopBar() {
       { label: t('menu.saveAs'), shortcut: `⇧${MOD}S`, onSelect: () => void saveDocumentFlow(true) },
       { kind: 'separator' },
       { label: t('menu.import'), shortcut: `⇧${MOD}I`, onSelect: () => void importFilesFlow() },
+      // Adobe's "Import text from text files". It is here as well as on the
+      // Text panel because the panel only exists once a text object is
+      // selected, and importing a file is how you make the first one.
+      { label: t('menu.importText'), onSelect: () => void importTextIntoSelection() },
       { label: t('menu.export'), shortcut: `${MOD}E`, onSelect: () => openDialog('export') },
       { kind: 'separator' },
       { label: t('menu.undo'), shortcut: `${MOD}Z`, disabled: !history.canUndo, onSelect: () => undo() },

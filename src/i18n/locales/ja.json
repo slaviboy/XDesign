@@ -12,6 +12,7 @@
   "menu.save": "保存",
   "menu.saveAs": "別名で保存…",
   "menu.import": "読み込み…",
+  "menu.importText": "テキストを読み込み…",
   "menu.export": "書き出し…",
   "menu.undo": "取り消し",
   "menu.redo": "やり直し",
@@ -154,5 +155,14 @@
   "action.delete": "削除",
   "section.layers": "レイヤー",
   "note.canvasGrid": "カンバス全体の描画補助です。アートボード固有の方眼グリッドやレイアウトグリッドはアートボード側で設定します。",
-  "document.counts": "{objects} 個のオブジェクト · {images} 個の画像"
+  "document.counts": "{objects} 個のオブジェクト · {images} 個の画像",
+  "label.textResize": "テキストのサイズ変更",
+  "label.autoWidth": "幅の自動調整",
+  "label.autoHeight": "高さの自動調整",
+  "label.fixedSize": "固定サイズ",
+  "label.paragraphSpacing": "段落間隔",
+  "label.textTransform": "テキストの変換",
+  "label.transformNone": "なし",
+  "label.importText": "ファイルからテキストを読み込み…",
+  "label.spellCheck": "スペルチェック"
 }

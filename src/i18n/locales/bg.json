@@ -12,6 +12,7 @@
   "menu.save": "Запазване",
   "menu.saveAs": "Запазване като…",
   "menu.import": "Импортиране…",
+  "menu.importText": "Импортиране на текст…",
   "menu.export": "Експортиране…",
   "menu.undo": "Отмяна",
   "menu.redo": "Повтаряне",
@@ -154,5 +155,14 @@
   "action.delete": "Изтриване",
   "section.layers": "Слоеве",
   "note.canvasGrid": "Помощно средство за рисуване върху цялото платно. Собствената квадратна мрежа или мрежа за оформление на работната площ се задава от работната площ.",
-  "document.counts": "{objects} обекта · {images} изображения"
+  "document.counts": "{objects} обекта · {images} изображения",
+  "label.textResize": "Оразмеряване на текста",
+  "label.autoWidth": "Автоматична ширина",
+  "label.autoHeight": "Автоматична височина",
+  "label.fixedSize": "Фиксиран размер",
+  "label.paragraphSpacing": "Разстояние между абзаците",
+  "label.textTransform": "Преобразуване на текста",
+  "label.transformNone": "Без",
+  "label.importText": "Импортиране на текст от файл…",
+  "label.spellCheck": "Проверка на правописа"
 }

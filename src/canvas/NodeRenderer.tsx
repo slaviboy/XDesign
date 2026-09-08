@@ -68,7 +68,9 @@ import type {
   SvgNode,
   TextNode,
 } from '../document/types'
-import { layoutText, lineOffsetX, cssFont } from '../text/TextLayout'
+import { layoutText, lineOffsetX, misspelledRuns, cssFont } from '../text/TextLayout'
+import { isMisspelled, isReady, isSpellCheckEnabled } from '../text/spellcheck'
+import { useSpellCheckTick } from '../state/hooks-i18n'
 import { fontStack } from '../text/FontRegistry'
 
 /**
@@ -312,24 +314,44 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
     [node.id, node.transform.width, liveTick],
   )
 
+  // Both modes that own their width wrap to it; Auto Width never does.
   const layout = useMemo(
-    () => layoutText(node.text, node.textStyle, node.textStyle.sizing === 'fixed' ? width : undefined),
+    () =>
+      layoutText(
+        node.text,
+        node.textStyle,
+        node.textStyle.sizing === 'auto-width' ? undefined : width,
+      ),
     [node.text, node.textStyle, width],
   )
 
-  const boxWidth = node.textStyle.sizing === 'fixed' ? width : layout.width
+  const boxWidth = node.textStyle.sizing === 'auto-width' ? layout.width : width
   const decoration = [
     node.textStyle.underline ? 'underline' : '',
     node.textStyle.strikethrough ? 'line-through' : '',
   ].filter(Boolean).join(' ')
+
+  // Adobe: Fixed Size "lets you wrap the text to fit inside the text box and
+  // crop automatically when it exceeds the height".
+  const clipped = node.textStyle.sizing === 'fixed'
+  const clipId = `text-clip-${node.id}`
 
   return (
     <>
       <defs>
         <GradientDef paint={node.style.fill} id={gradientId(node.id, 'fill')} />
         <GradientDef paint={node.style.stroke.paint} id={gradientId(node.id, 'stroke')} />
+        {clipped && (
+          <clipPath id={clipId}>
+            <rect width={Math.max(0, width)} height={Math.max(0, node.transform.height)} />
+          </clipPath>
+        )}
       </defs>
+      {/* Under the glyphs, so a squiggle never sits on top of the letters it
+          is marking. */}
+      <SpellUnderlines node={node} layout={layout} boxWidth={boxWidth} />
       <text
+        clipPath={clipped ? `url(#${clipId})` : undefined}
         fontFamily={fontStack(node.textStyle.fontFamily)}
         fontSize={node.textStyle.fontSize}
         fontWeight={node.textStyle.fontWeight}
@@ -355,6 +377,63 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
     </>
   )
 }
+
+/**
+ * Red waves under whatever the dictionaries do not recognise.
+ *
+ * Drawn rather than delegated to the browser: a <textarea>'s native check uses
+ * the browser's own languages, and the whole point here is to check against
+ * English plus the interface language, from dictionaries that ship with the app
+ * and work offline.
+ */
+function SpellUnderlines({
+  node,
+  layout,
+  boxWidth,
+}: {
+  node: TextNode
+  layout: ReturnType<typeof layoutText>
+  boxWidth: number
+}): ReactNode {
+  // Re-renders when a dictionary finishes loading, which is the only moment the
+  // answer changes without the text changing.
+  useSpellCheckTick()
+  const enabled = isSpellCheckEnabled() && isReady()
+
+  const runs = useMemo(() => {
+    if (!enabled) return []
+    return layout.lines.flatMap((line) => {
+      const x0 = lineOffsetX(line.width, boxWidth, node.textStyle.align)
+      return misspelledRuns(line.text, node.textStyle, isMisspelled).map((run) => ({
+        x: x0 + run.x,
+        width: run.width,
+        // Just below the baseline, clear of the descenders.
+        y: line.baseline + node.textStyle.fontSize * 0.16,
+      }))
+    })
+  }, [enabled, layout, boxWidth, node.textStyle])
+
+  if (runs.length === 0) return null
+  return (
+    <g className="spell-underlines" pointerEvents="none">
+      {runs.map((run, i) => (
+        <path key={i} className="spell-underline" d={wavePath(run.x, run.y, run.width)} />
+      ))}
+    </g>
+  )
+}
+
+/** A zig-zag rather than a dashed line: it is the shape everyone reads as "wrong". */
+function wavePath(x: number, y: number, width: number): string {
+  const step = 2
+  let d = `M${round2(x)} ${round2(y)}`
+  for (let i = 0; i < Math.floor(width / step); i++) {
+    d += `l${step} ${i % 2 === 0 ? 2 : -2}`
+  }
+  return d
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100
 
 function ImageBody({
   node,
