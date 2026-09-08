@@ -665,6 +665,27 @@ not: by then the size being compared already carries the height this code derive
 side-handle drag would read as a height change and end in Fixed Size. Deciding once is also what
 makes the preview and the result the same answer rather than two that are expected to agree.
 
+### The rotation cursor is built, not traced
+
+CSS has no rotation cursor and cannot transform the one you supply, so a cursor that points at
+its own corner means **one pre-rendered image per angle** — sixteen of them, 22.5 degrees apart,
+built at module load as `data:` URLs so they need no network and cannot 404 offline.
+
+The glyph is a double-headed curved arrow, and it is generated from a handful of measurements —
+arc radius, sweep, band thickness, head length and width — rather than written out as a `d`
+string someone traced. Two things fall out of that. The ends cannot drift apart, because both
+heads come from the same construction reflected. And the whole shape is fitted to a **circle**
+around the cursor's centre rather than to its 24x24 box: a box fit looks correct until the
+diagonal orientations clip, and the diagonals are the four corners this cursor exists for.
+
+It is turned by the outward direction from the selection's centre to the corner under the
+pointer, plus a quarter turn — the arrow is built bulging upward, and up is -90 degrees on
+screen. Because that direction comes from the on-screen frame, it already accounts for the
+object's own rotation and the viewport: turn a rectangle 30 degrees and every corner's cursor
+turns with it. Its test measures each corner's direction from the frame and checks the cursor
+matches, on a rectangle that is deliberately **not square** — one aimed at a fixed 45 degrees
+would pass on a square and fail here.
+
 ### The font arrives after the layout that measured it
 
 A font face is fetched the first time something asks to draw it — which is *after* the layout
@@ -1091,7 +1112,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 309 unit tests (Vitest)
-npm run test:e2e   # 258 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 260 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

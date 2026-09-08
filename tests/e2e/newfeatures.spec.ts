@@ -166,6 +166,119 @@ test('corners carry a rotation cursor, including for a multi-selection', async (
   await expect(page.locator('[data-handle="rotate"]')).toHaveCount(4)
 })
 
+/** The SVG inside a `url("data:image/svg+xml,...")` cursor. */
+function cursorSvg(cursor: string): string {
+  const start = cursor.indexOf(',') + 1
+  return decodeURIComponent(cursor.slice(start, cursor.indexOf('")', start)))
+}
+
+test('the rotation cursor is a double arrow turned toward its own corner', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 250, y: 200 }, { x: 430, y: 320 })
+  await selectTool(page, 'select')
+
+  const zones = page.locator('[data-handle="rotate"]')
+  const cursors = await zones.evaluateAll((els) => els.map((e) => (e as SVGElement).style.cursor))
+  const svgs = cursors.map(cursorSvg)
+
+  // A double-headed arrow: one closed outline, drawn twice — a white underlay
+  // and the dark shape over it, which is what keeps it legible on any artwork.
+  for (const svg of svgs) {
+    const paths = svg.match(/<path[^>]*>/g) ?? []
+    expect(paths).toHaveLength(2)
+    expect(svg).toContain('stroke="#fff"')
+    expect(svg).toContain('fill="#1a1a1a"')
+    // Two arcs — the outer and inner edges of the band — and two arrowheads:
+    // three straight edges each, plus the one that returns from the first head
+    // onto the inner edge. The second head is closed by the Z instead.
+    const d = /d="([^"]+)"/.exec(svg)![1]!
+    expect((d.match(/A/g) ?? []).length).toBe(2)
+    expect((d.match(/L/g) ?? []).length).toBe(7)
+    expect(d.endsWith('Z')).toBe(true)
+  }
+
+  // Each corner gets its own orientation, aimed out along that corner's own
+  // diagonal — the arc bulging away from the object, which is what reads as
+  // turning around it rather than sliding along an edge. The rectangle is
+  // deliberately not square, so a cursor hard-coded to the diagonals would fail
+  // here.
+  const frame = (await page.locator('.selection-frame').boundingBox())!
+  const centre = { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 }
+  const boxes = await Promise.all(
+    (await zones.all()).map(async (z) => (await z.boundingBox())!),
+  )
+
+  const angles = svgs.map((svg) => Number(/rotate\((-?[\d.]+)/.exec(svg)![1]))
+  boxes.forEach((box, i) => {
+    const outward =
+      (Math.atan2(box.y + box.height / 2 - centre.y, box.x + box.width / 2 - centre.x) * 180) /
+      Math.PI
+    // The glyph is built bulging upward, so facing it outward is a further
+    // quarter turn. Sixteen pre-rendered orientations means up to 11.25 degrees
+    // of rounding.
+    const off = Math.abs(((angles[i]! - (outward + 90) + 540) % 360) - 180)
+    expect(off, `corner ${i}`).toBeLessThan(15)
+  })
+  expect(new Set(angles).size).toBe(4)
+
+  // And it follows the object: turning the rectangle turns every cursor with
+  // it, because the angle comes from the on-screen frame rather than the corner
+  // it started at.
+  await setField(page, '∠', 30)
+  const turned = (await zones.evaluateAll((els) => els.map((e) => (e as SVGElement).style.cursor)))
+    .map((c) => Number(/rotate\((-?[\d.]+)/.exec(cursorSvg(c))![1]))
+  expect(turned.some((a, i) => a !== angles[i])).toBe(true)
+})
+
+test('the rotation cursor cannot clip, at any angle it is drawn', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 250, y: 200 }, { x: 430, y: 320 })
+  await selectTool(page, 'select')
+
+  const svg = cursorSvg(
+    await page.locator('[data-handle="rotate"]').first().evaluate((e) => (e as SVGElement).style.cursor),
+  )
+  const d = /d="([^"]+)"/.exec(svg)![1]!
+
+  // A cursor image is a fixed 24x24 box that CSS cannot transform, so every one
+  // of the sixteen pre-rendered orientations has to fit inside it on its own.
+  // Measured with the browser's own path maths rather than by reading numbers
+  // out of the `d`, because the extreme point of an arc is not one of its
+  // endpoints.
+  const worst = await page.evaluate((path) => {
+    const ns = 'http://www.w3.org/2000/svg'
+    const svgEl = document.createElementNS(ns, 'svg')
+    svgEl.setAttribute('width', '24')
+    svgEl.setAttribute('height', '24')
+    document.body.append(svgEl)
+    let out = { min: 99, max: -99 }
+    for (let i = 0; i < 16; i++) {
+      const g = document.createElementNS(ns, 'g')
+      g.setAttribute('transform', `rotate(${i * 22.5} 12 12)`)
+      const p = document.createElementNS(ns, 'path')
+      p.setAttribute('d', path)
+      g.append(p)
+      svgEl.append(g)
+      const b = g.getBBox()
+      out = {
+        min: Math.min(out.min, b.x, b.y),
+        max: Math.max(out.max, b.x + b.width, b.y + b.height),
+      }
+      g.remove()
+    }
+    svgEl.remove()
+    return out
+  }, d)
+
+  // 1.5 of margin on each side: the white underlay is a 3-wide stroke, drawn
+  // half outside the shape.
+  expect(worst.min).toBeGreaterThanOrEqual(1.5)
+  expect(worst.max).toBeLessThanOrEqual(22.5)
+  // And it actually uses the space it is given — a glyph shrunk to be safe
+  // would pass the test above and be unreadable at 24 pixels.
+  expect(worst.max - worst.min).toBeGreaterThan(15)
+})
+
 test('dragging a corner zone rotates the object', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'rect', { x: 250, y: 200 }, { x: 420, y: 320 })
