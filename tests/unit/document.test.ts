@@ -21,9 +21,9 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { serializeDocument, deserializeDocument, DocumentFormatError, dataUrlToBytes, bytesToDataUrl } from '@/persistence/FileFormat'
-import { createDocument, createRect, createEllipse, createPolygon, createImage, createText, createLinearGradient, createStop } from '@/document/NodeFactory'
+import { createDocument, createRect, createEllipse, createPolygon, createImage, createText, createLinearGradient, createStop, createGroup } from '@/document/NodeFactory'
 import {
-  addNode, bringForward, bringToFront, duplicateNodes, groupNodes, removeNode,
+  addNode, bringForward, bringToFront, cloneSubtree, duplicateNodes, groupNodes, removeNode,
   sendBackward, sendToBack, alignNodes, distributeNodes, reparentNode,
 } from '@/document/DocumentModel'
 import { geometryBounds, isEffectivelyLocked, isEffectivelyVisible, hitTest, nodesInBounds, descendantIds, artboardOf } from '@/document/SceneGraph'
@@ -375,5 +375,29 @@ describe('node factory', () => {
     expect(text.text).toBe('Hello')
     expect(text.textStyle.fontSize).toBeGreaterThan(0)
     expect(text.style.fill.type).toBe('solid')
+  })
+})
+
+describe('cloning a mask group', () => {
+  it('re-points maskId at the copy, not the original', () => {
+    const doc = createDocument('Clone', false)
+    const shape = createRect({ x: 0, y: 0, width: 10, height: 10 })
+    const mask = createRect({ x: 0, y: 0, width: 8, height: 8 })
+    const group = createGroup([shape.id, mask.id], { x: 0, y: 0, width: 10, height: 10 })
+    group.maskId = mask.id
+    for (const n of [shape, mask]) n.parentId = group.id
+    group.parentId = doc.rootId
+    doc.nodes[shape.id] = shape
+    doc.nodes[mask.id] = mask
+    doc.nodes[group.id] = group
+    ;(doc.nodes[doc.rootId] as { children: string[] }).children.push(group.id)
+
+    const copyId = cloneSubtree(doc, group.id)!
+    const copy = doc.nodes[copyId] as typeof group
+
+    expect(copy.maskId).toBeTruthy()
+    // Sharing the original's mask meant deleting one group broke the other.
+    expect(copy.maskId).not.toBe(mask.id)
+    expect(copy.children).toContain(copy.maskId)
   })
 })

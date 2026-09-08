@@ -186,3 +186,145 @@ describe('importSvg', () => {
     expect(types).toContain('ellipse')
   })
 })
+
+/**
+ * Clipping.
+ *
+ * The reference SVG this was built against wraps every one of its ~700 elements
+ * in a single `<g clip-path="url(#…)">`. That one attribute used to collapse the
+ * whole file into one opaque preserved-markup node — no groups, no layers,
+ * nothing editable. These tests are the guard on that.
+ */
+describe('clip paths become real, editable structure', () => {
+  const CLIPPED = wrap(
+    `<defs><clipPath id="c"><rect width="200" height="120"/></clipPath></defs>
+     <g id="Root" data-name="Root Layer" clip-path="url(#c)">
+       <rect id="a" data-name="Box A" width="40" height="40" fill="#ff0000"/>
+       <g id="inner" data-name="Inner"><circle cx="100" cy="60" r="20" fill="#00ff00"/></g>
+     </g>`,
+  )
+
+  it('keeps the clipped group as a group instead of one opaque blob', () => {
+    const r = importSvg(CLIPPED)
+    const types = Object.values(r.nodes).map((n) => n.type)
+    expect(types).not.toContain('svg')
+    expect(types).toContain('group')
+    expect(types).toContain('rect')
+    expect(types).toContain('ellipse')
+  })
+
+  it('preserves the nesting rather than flattening it', () => {
+    const r = importSvg(CLIPPED)
+    const inner = Object.values(r.nodes).find((n) => n.name === 'Inner')
+    expect(inner?.type).toBe('group')
+    const circle = Object.values(r.nodes).find((n) => n.type === 'ellipse')
+    expect(circle?.parentId).toBe(inner?.id)
+  })
+
+  it('attaches the clip outline as the group mask', () => {
+    const r = importSvg(CLIPPED)
+    const root = Object.values(r.nodes).find((n) => n.name === 'Root Layer')
+    expect(root?.type).toBe('group')
+    const maskId = root && 'maskId' in root ? root.maskId : undefined
+    expect(maskId).toBeTruthy()
+    // The clip rect is a real node, and it is the last child so it is on top.
+    expect(r.nodes[maskId!]?.type).toBe('rect')
+    expect((root as { children: string[] }).children.at(-1)).toBe(maskId)
+  })
+
+  it('takes layer names from data-name, not the mangled id', () => {
+    const r = importSvg(CLIPPED)
+    const names = Object.values(r.nodes).map((n) => n.name)
+    expect(names).toContain('Root Layer')
+    expect(names).toContain('Box A')
+  })
+
+  it('clips a bare shape by wrapping it, rather than dropping the clip', () => {
+    const r = importSvg(
+      wrap(`<defs><clipPath id="c"><rect width="20" height="20"/></clipPath></defs>
+            <rect id="r" width="80" height="80" fill="#000" clip-path="url(#c)"/>`),
+    )
+    const group = Object.values(r.nodes).find((n) => n.type === 'group')
+    expect(group).toBeTruthy()
+    expect(group && 'maskId' in group ? group.maskId : null).toBeTruthy()
+    expect(Object.values(r.nodes).filter((n) => n.type === 'rect')).toHaveLength(2)
+  })
+
+  it('unions a multi-shape clip into one grouped outline', () => {
+    const r = importSvg(
+      wrap(`<defs><clipPath id="c"><rect width="20" height="20"/><rect x="40" width="20" height="20"/></clipPath></defs>
+            <g clip-path="url(#c)"><rect width="80" height="80"/></g>`),
+    )
+    const clipGroup = Object.values(r.nodes).find((n) => n.name === 'Clip')
+    expect(clipGroup?.type).toBe('group')
+    expect((clipGroup as { children: string[] }).children).toHaveLength(2)
+  })
+
+  it('records a <mask> as a luminance mask, not a hard clip', () => {
+    const r = importSvg(
+      wrap(`<defs><mask id="m"><rect width="50" height="50" fill="#fff"/></mask></defs>
+            <g mask="url(#m)"><rect width="80" height="80"/></g>`),
+    )
+    const masked = Object.values(r.nodes).find((n) => n.type === 'group' && 'maskId' in n && n.maskId)
+    expect(masked && 'maskMode' in masked ? masked.maskMode : null).toBe('luminance')
+  })
+
+  it('keeps the artwork when a clip reference is dangling, and says so', () => {
+    const r = importSvg(wrap(`<g clip-path="url(#nope)"><rect width="80" height="80"/></g>`))
+    expect(Object.values(r.nodes).some((n) => n.type === 'rect')).toBe(true)
+    expect(r.warnings.join(' ')).toMatch(/does not define/)
+  })
+
+  it('collects identified defs so a url(#…) paint can still resolve', () => {
+    const r = importSvg(
+      wrap(`<defs><pattern id="p" width="4" height="4"><rect width="2" height="2"/></pattern></defs>
+            <rect width="40" height="40" fill="url(#p)"/>`),
+    )
+    expect(Object.keys(r.svgDefs).length).toBeGreaterThan(0)
+    const rect = Object.values(r.nodes).find((n) => n.type === 'rect')
+    expect(rect && 'style' in rect ? rect.style.fill.type : null).toBe('ref')
+  })
+})
+
+/**
+ * Number-list parsing.
+ *
+ * Both of these corrupted artwork silently: splitting an SVG number list on
+ * whitespace mis-reads a leading separator (Number('') is a finite 0) and
+ * mis-reads the minus sign, which SVG allows as its own separator.
+ */
+describe('SVG number lists are scanned, not split', () => {
+  it('survives a leading space in viewBox instead of scaling by the width', () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"
+      viewBox=" 0 0 200 120"><rect width="100" height="60" fill="#000"/></svg>`
+    const r = importSvg(svg)
+    expect(r.size).toEqual({ width: 200, height: 120 })
+    // A viewBox read as width 0 made the root matrix scale by ~200x.
+    const rect = Object.values(r.nodes).find((n) => n.type === 'rect')!
+    expect(rect.transform.width).toBeCloseTo(100, 3)
+  })
+
+  it('reads sign-packed polygon points as separate numbers', () => {
+    // "30-5" is (30, -5): SVG allows the minus sign as its own separator, and
+    // splitting on whitespace turned it into a NaN that was filtered away,
+    // silently dropping the middle point — and with it the whole polygon.
+    const r = importSvg(wrap(`<polygon points="10,20 30-5 40,50"/>`))
+    const path = Object.values(r.nodes).find((n) => n.type === 'path')
+    const d = path && 'd' in path ? path.d : ''
+    // Three points survive; svgpath compacts consecutive L commands, so count
+    // coordinates rather than command letters.
+    expect(d.match(/-?[\d.]+/g)).toHaveLength(6)
+    // Rebased onto its own bounding box: (10,20) (30,-5) (40,50) -> origin (10,-5).
+    expect(d).toBe('M0 25L20 0 30 55Z')
+  })
+})
+
+describe('nothing is dropped without saying so', () => {
+  it('names the construct it preserved rather than a vague catch-all', () => {
+    const r = importSvg(
+      wrap(`<use href="#nothing" x="0" y="0" width="10" height="10"/><rect width="10" height="10"/>`),
+    )
+    // Either it was preserved or it could not be measured — either way it is named.
+    expect(r.warnings.join(' ')).toMatch(/<use>/)
+  })
+})

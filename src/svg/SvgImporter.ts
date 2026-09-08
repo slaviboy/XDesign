@@ -37,6 +37,7 @@
 
 import {
   compose,
+  IDENTITY,
   multiply,
   parseSvgTransform,
   translation,
@@ -79,6 +80,12 @@ export interface SvgImportResult {
   warnings: string[]
   /** Intrinsic size from width/height or viewBox. */
   size: { width: number; height: number }
+  /**
+   * Paint servers the imported nodes reference by `url(#id)`, keyed by id, for
+   * the document to hold and emit once. A shape carrying a RefPaint has nowhere
+   * of its own to put the definition it points at.
+   */
+  svgDefs: Record<string, string>
 }
 
 /** Elements we map to first-class nodes. Everything else is preserved verbatim. */
@@ -141,6 +148,14 @@ interface ImportContext {
   gradients: Map<string, Paint>
   /** Serialized <defs> content needed by preservation nodes. */
   defsMarkup: string
+  /** Every identified <defs> entry, by id — the lookup, not the output. */
+  defsById: Map<string, string>
+  /** Only the entries something still references raw; the document emits these. */
+  svgDefs: Record<string, string>
+  /** <clipPath> and <mask> elements by id, so a reference can be materialized. */
+  clipDefs: Map<string, { el: Element; mode: 'clip' | 'luminance' }>
+  /** Ids currently being materialized, so a self-referencing clip cannot loop. */
+  resolving: Set<string>
   measure: (el: Element) => { x: number; y: number; width: number; height: number } | null
 }
 
@@ -155,6 +170,7 @@ export function importSvg(source: string, name = 'SVG'): SvgImportResult {
     assets: [],
     warnings: [],
     size: { width: 0, height: 0 },
+    svgDefs: {},
   }
 
   // Namespacing runs BEFORE sanitization: DOMPurify deletes ids that collide
@@ -178,6 +194,10 @@ export function importSvg(source: string, name = 'SVG'): SvgImportResult {
       warnings,
       gradients: collectGradients(root),
       defsMarkup: collectDefsMarkup(root),
+      defsById: collectSvgDefs(root),
+      svgDefs: {},
+      clipDefs: collectClipDefs(root),
+      resolving: new Set<string>(),
       measure,
     }
 
@@ -208,7 +228,10 @@ export function importSvg(source: string, name = 'SVG'): SvgImportResult {
     let rootId: NodeId
     if (children.length === 1) {
       rootId = children[0]!
-      ctx.nodes[rootId]!.name = name
+      // Only name it after the file when the artwork did not name itself; the
+      // file's own layer name is the more useful of the two.
+      const own = ctx.nodes[rootId]!.name
+      if (!own || own === 'Group' || own === 'SVG') ctx.nodes[rootId]!.name = name
     } else {
       const group = createGroup(children, { x: 0, y: 0, width: size.width, height: size.height })
       group.name = name
@@ -223,6 +246,7 @@ export function importSvg(source: string, name = 'SVG'): SvgImportResult {
       assets: ctx.assets,
       warnings: [...warnings],
       size,
+      svgDefs: ctx.svgDefs,
     }
   })
 }
@@ -290,6 +314,27 @@ function walkElement(
     return createPreservationNode(el, ctx, matrix, tag)
   }
 
+  const clip = clipSpecOf(el, ctx)
+
+  // A group carries its own matrix and its children are already in its local
+  // space, so a clip can simply join them. A shape has no children, so it gets
+  // a wrapper group to share a space with the clip outline — which means the
+  // shape itself must be built at identity rather than at `matrix`.
+  const isGroup = tag === 'g' || tag === 'svg'
+  const contentMatrix = clip && !isGroup ? IDENTITY : matrix
+  const id = importByTag(tag, el, ctx, style, contentMatrix)
+  if (!id) return null
+  if (!clip) return id
+  return applyClip(id, clip, ctx, isGroup ? null : matrix)
+}
+
+function importByTag(
+  tag: string,
+  el: Element,
+  ctx: ImportContext,
+  style: InheritedStyle,
+  matrix: Mat2D,
+): NodeId | null {
   switch (tag) {
     case 'g':
     case 'svg':
@@ -321,11 +366,13 @@ function importGroup(
   style: InheritedStyle,
   matrix: Mat2D,
 ): NodeId | null {
-  // A group referencing a clip or mask cannot be represented natively without
-  // losing the clip, so the whole subtree is preserved instead.
-  if (el.getAttribute('clip-path') || el.getAttribute('mask') || el.getAttribute('filter')) {
+  // A filter has no first-class model, so a filtered subtree is still preserved
+  // verbatim — as vector, and now saying so specifically. Clips and masks are
+  // materialized instead (see applyClip), because collapsing a whole subtree for
+  // one clip-path is what turned an entire artboard into a single opaque object.
+  if (el.getAttribute('filter')) {
     ctx.warnings.add(
-      'Some SVG features could not be fully edited, but the original vector content was preserved.',
+      'An SVG filter has no editable equivalent, so that group was kept as preserved vector artwork.',
     )
     return createPreservationNode(el, ctx, matrix, el.tagName.toLowerCase())
   }
@@ -338,7 +385,7 @@ function importGroup(
   if (children.length === 0) return null
 
   const group = createGroup(children, { x: 0, y: 0, width: 1, height: 1 })
-  group.name = el.getAttribute('id')?.replace(/^svg[a-z0-9]+-/, '') || 'Group'
+  group.name = elementName(el, 'Group')
   group.transform = transformFromMatrix(matrix, 1, 1, 0, 0)
   group.style.opacity = style.opacity
 
@@ -348,6 +395,160 @@ function importGroup(
   // Size the group to its content so the selection frame is meaningful.
   sizeGroupToChildren(group.id, ctx)
   return group.id
+}
+
+// ---------------------------------------------------------------------------
+// Clipping and masking
+// ---------------------------------------------------------------------------
+
+interface ClipSpec {
+  el: Element
+  mode: 'clip' | 'luminance'
+  id: string
+}
+
+/** The <clipPath> or <mask> an element references, if any. */
+function clipSpecOf(el: Element, ctx: ImportContext): ClipSpec | null {
+  for (const attr of ['clip-path', 'mask'] as const) {
+    const raw = el.getAttribute(attr)
+    if (!raw) continue
+    const id = /url\(\s*['"]?#([^)'"\s]+)['"]?\s*\)/.exec(raw)?.[1]
+    if (!id) continue
+    const def = ctx.clipDefs.get(id)
+    if (!def) {
+      ctx.warnings.add(`A clip or mask referenced "${id}", which the file does not define.`)
+      continue
+    }
+    if (ctx.resolving.has(id)) {
+      ctx.warnings.add('A clip path referenced itself and was skipped to avoid a loop.')
+      continue
+    }
+    return { el: def.el, mode: def.mode, id }
+  }
+  return null
+}
+
+/**
+ * Attach a materialized clip to an already-imported node.
+ *
+ * The clip outline becomes real nodes in the same local space as the content it
+ * clips, held as the group's `maskId` child — the model already means exactly
+ * this, and gets correct bounds, hit-testing and an Ungroup Mask command for
+ * free. SVG puts a clipPath's contents in the referencing element's own user
+ * space, which is why the content is built at identity and `wrapMatrix` (for a
+ * shape, which needs a wrapper group) carries the element's matrix.
+ *
+ * @param wrapMatrix matrix for a new wrapper group, or null when `id` is
+ *                   already a group that can host the clip itself.
+ */
+function applyClip(
+  id: NodeId,
+  clip: ClipSpec,
+  ctx: ImportContext,
+  wrapMatrix: Mat2D | null,
+): NodeId {
+  const clipId = materializeClip(clip, ctx)
+  // A clip that resolves to nothing clips everything away in SVG, but silently
+  // erasing the artwork is the worse failure — keep it and say so.
+  if (!clipId) {
+    ctx.warnings.add('A clip path had no shapes in it and was ignored.')
+    return id
+  }
+
+  let host = ctx.nodes[id]
+  let hostId = id
+  if (wrapMatrix || !host || host.type !== 'group') {
+    const wrapper = createGroup([id], { x: 0, y: 0, width: 1, height: 1 })
+    wrapper.name = host?.name ?? 'Group'
+    wrapper.transform = transformFromMatrix(wrapMatrix ?? IDENTITY, 1, 1, 0, 0)
+    if (host) host.parentId = wrapper.id
+    ctx.nodes[wrapper.id] = wrapper
+    host = wrapper
+    hostId = wrapper.id
+  }
+  if (host.type !== 'group') return id
+
+  host.children.push(clipId)
+  ctx.nodes[clipId]!.parentId = hostId
+  host.maskId = clipId
+  if (clip.mode !== 'clip') host.maskMode = clip.mode
+  sizeGroupToChildren(hostId, ctx)
+  return hostId
+}
+
+/** Turn a <clipPath>/<mask> definition into real nodes; returns the outline node. */
+function materializeClip(clip: ClipSpec, ctx: ImportContext): NodeId | null {
+  ctx.resolving.add(clip.id)
+  try {
+    const parts: NodeId[] = []
+    for (const child of Array.from(clip.el.children)) {
+      const childId = walkElement(child, ctx, ROOT_INHERITED, IDENTITY)
+      if (childId) parts.push(childId)
+    }
+    if (parts.length === 0) return null
+    if (parts.length === 1) return parts[0]!
+
+    // Several shapes clip as their union, so they are grouped and the renderer
+    // emits every descendant outline into the one clipPath.
+    const group = createGroup(parts, { x: 0, y: 0, width: 1, height: 1 })
+    group.name = 'Clip'
+    for (const c of parts) ctx.nodes[c]!.parentId = group.id
+    ctx.nodes[group.id] = group
+    sizeGroupToChildren(group.id, ctx)
+    return group.id
+  } finally {
+    ctx.resolving.delete(clip.id)
+  }
+}
+
+/** Every <clipPath> and <mask> in the file, by id. */
+function collectClipDefs(root: Element): Map<string, { el: Element; mode: 'clip' | 'luminance' }> {
+  const out = new Map<string, { el: Element; mode: 'clip' | 'luminance' }>()
+  for (const el of Array.from(root.querySelectorAll('clipPath, mask'))) {
+    const id = el.getAttribute('id')
+    if (!id) continue
+    const isMask = el.tagName.toLowerCase() === 'mask'
+    // mask-type / style:mask-type picks alpha over the luminance default.
+    const alpha =
+      isMask &&
+      (el.getAttribute('mask-type') === 'alpha' ||
+        /mask-type\s*:\s*alpha/i.test(el.getAttribute('style') ?? ''))
+    out.set(id, { el, mode: isMask && !alpha ? 'luminance' : 'clip' })
+  }
+  return out
+}
+
+/** Every identified <defs> entry, by id. The lookup for requireDef. */
+function collectSvgDefs(root: Element): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const defs of Array.from(root.querySelectorAll('defs'))) {
+    for (const child of Array.from(defs.children)) {
+      const id = child.getAttribute('id')
+      if (id) out.set(id, child.outerHTML)
+    }
+  }
+  return out
+}
+
+/**
+ * Keep a <defs> entry because something still points at it raw.
+ *
+ * Only definitions the model could NOT absorb end up here. A gradient that
+ * became a first-class gradient paint is deliberately left behind: the node
+ * emits its own, and carrying the source copy too would put two definitions of
+ * the same artwork in every document and every export.
+ *
+ * Whatever the entry itself references comes along, so a pattern that paints
+ * with a gradient does not arrive half-defined.
+ */
+function requireDef(id: string, ctx: ImportContext, depth = 0): void {
+  if (depth > 4 || ctx.svgDefs[id]) return
+  const markup = ctx.defsById.get(id)
+  if (!markup) return
+  ctx.svgDefs[id] = markup
+  for (const m of markup.matchAll(/url\(\s*['"]?#([^)'"\s]+)['"]?\s*\)/g)) {
+    requireDef(m[1]!, ctx, depth + 1)
+  }
 }
 
 function sizeGroupToChildren(groupId: NodeId, ctx: ImportContext): void {
@@ -423,8 +624,9 @@ function importPolyish(
   matrix: Mat2D,
   closed: boolean,
 ): NodeId | null {
-  const raw = el.getAttribute('points') ?? ''
-  const nums = raw.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n))
+  // Sign-packed coordinates ("30-5" is two numbers) and a leading separator both
+  // used to corrupt this list quietly — the whole polygon was dropped.
+  const nums = scanNumbers(el.getAttribute('points'))
   if (nums.length < 4) return null
   const parts: string[] = [`M${nums[0]} ${nums[1]}`]
   for (let i = 2; i + 1 < nums.length; i += 2) parts.push(`L${nums[i]} ${nums[i + 1]}`)
@@ -553,14 +755,23 @@ function createPreservationNode(
   tag: string,
 ): NodeId | null {
   const box = ctx.measure(el)
-  if (!box || box.width <= 0 || box.height <= 0) return null
+  if (!box || box.width <= 0 || box.height <= 0) {
+    // Nothing can be built from an unmeasurable element, but it must not simply
+    // disappear: silence here is exactly the "content was lost and nobody said
+    // so" failure this whole effort exists to remove.
+    ctx.warnings.add(`A <${tag}> element could not be measured and was skipped.`)
+    return null
+  }
 
   ctx.warnings.add(
-    'Some SVG features could not be fully edited, but the original vector content was preserved.',
+    `<${tag}> has no editable equivalent, so it was kept as preserved vector artwork.`,
   )
 
   const markup = el.outerHTML || ''
-  if (!markup) return null
+  if (!markup) {
+    ctx.warnings.add(`A <${tag}> element was empty and was skipped.`)
+    return null
+  }
 
   const node = createSvgNode(
     markup,
@@ -685,7 +896,9 @@ function paintFrom(value: string | null, ctx: ImportContext, el: Element): Paint
     const gradient = ctx.gradients.get(id)
     if (gradient) return structuredClone(gradient)
     // A paint server we do not model (a pattern). Keep the reference alive so
-    // it still renders, rather than replacing it with a flat colour.
+    // it still renders, rather than replacing it with a flat colour — and keep
+    // the definition it points at, or the reference would dangle.
+    requireDef(id, ctx)
     ctx.warnings.add('A pattern or unsupported paint was preserved but cannot be edited.')
     return { type: 'ref', ref: value }
   }
@@ -818,10 +1031,27 @@ function collectDefsMarkup(root: Element): string {
     .join('')
 }
 
+/**
+ * Every number in an SVG number list.
+ *
+ * Splitting on /[\s,]+/ is wrong twice over, and silently. A leading space
+ * yields an empty first field, and `Number('') === 0` is finite, so
+ * viewBox=" 0 0 1870 1112" parsed as width 0 and the root matrix scaled the
+ * artwork by a factor of its own width. And SVG allows the minus sign as its
+ * own separator, so "30-5" is two numbers, not the NaN that a split produces.
+ */
+function scanNumbers(text: string | null): number[] {
+  if (!text) return []
+  const out: number[] = []
+  for (const m of text.matchAll(/[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g)) {
+    const n = Number.parseFloat(m[0])
+    if (Number.isFinite(n)) out.push(n)
+  }
+  return out
+}
+
 function parseViewBox(root: Element): { x: number; y: number; width: number; height: number } | null {
-  const vb = root.getAttribute('viewBox')
-  if (!vb) return null
-  const parts = vb.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n))
+  const parts = scanNumbers(root.getAttribute('viewBox'))
   if (parts.length < 4) return null
   return { x: parts[0]!, y: parts[1]!, width: parts[2]!, height: parts[3]! }
 }
@@ -879,11 +1109,20 @@ function clamp01(n: number): number {
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1
 }
 
+/**
+ * The name to show in the Layers panel.
+ *
+ * `data-name` first: Illustrator, XD and Figma all put the layer name the user
+ * actually chose there, and put a mangled unique token in `id` ("Rectangle 30"
+ * vs "Rectangle_30"). This app's own exporter writes both the same way round,
+ * so a document survives its own export.
+ */
 function elementName(el: Element, fallback: string): string {
+  const label = el.getAttribute('data-name') ?? el.getAttribute('aria-label')
+  if (label?.trim()) return label.trim()
   const id = el.getAttribute('id')
   if (id) return id.replace(/^svg[a-z0-9]{6,}-/, '')
-  const label = el.getAttribute('aria-label') ?? el.getAttribute('data-name')
-  return label || fallback
+  return fallback
 }
 
 export function cloneStyleForImport(style: Partial<Style>): Style {

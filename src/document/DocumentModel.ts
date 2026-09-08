@@ -395,14 +395,28 @@ export function cloneSubtree(
 
   if (isContainer(copy)) {
     const newChildren: NodeId[] = []
-    for (const child of (node as ContainerNode).children) {
+    // Old id -> new id, so a reference into the subtree can be re-pointed at
+    // the copy rather than left aimed at the original.
+    const remapped = new Map<NodeId, NodeId>()
+    const originals = (node as ContainerNode).children
+    for (const child of originals) {
       const cloned = cloneSubtree(doc, child, into)
       if (cloned) {
         into[cloned]!.parentId = copy.id
+        remapped.set(child, cloned)
         newChildren.push(cloned)
       }
     }
     copy.children = newChildren
+
+    // A mask group names one of its own children. Without this the copy points
+    // at the ORIGINAL's mask, so duplicating a masked or clipped group gave two
+    // groups sharing one mask — and deleting the first broke the second.
+    if (copy.type === 'group' && copy.maskId) {
+      const next = remapped.get(copy.maskId)
+      if (next) copy.maskId = next
+      else delete copy.maskId
+    }
   }
   into[copy.id] = copy
   return copy.id

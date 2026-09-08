@@ -184,6 +184,30 @@ export function nodePathData(node: DesignNode): string | null {
   }
 }
 
+/**
+ * Every outline a mask contributes, in the masked group's coordinate space.
+ *
+ * A mask that is itself a group clips as the UNION of everything inside it —
+ * SVG's <clipPath> may hold several shapes. Asking `nodePathData` for a group
+ * returns its bounding box, so a two-shape clip would silently become a
+ * rectangle covering both; this walks to the leaves instead.
+ */
+export function maskOutlines(
+  doc: DesignDocument,
+  maskId: NodeId,
+  base: Mat2D = IDENTITY,
+): Array<{ d: string; m: Mat2D }> {
+  const node = doc.nodes[maskId]
+  if (!node || !node.visible) return []
+  const m = multiply(base, localMatrix(node.transform))
+
+  if (isContainer(node)) {
+    return node.children.flatMap((child) => maskOutlines(doc, child, m))
+  }
+  const d = nodePathData(node)
+  return d ? [{ d, m }] : []
+}
+
 /** The node's own box in local space. */
 export function localBox(node: DesignNode): Bounds {
   return { x: 0, y: 0, width: node.transform.width, height: node.transform.height }

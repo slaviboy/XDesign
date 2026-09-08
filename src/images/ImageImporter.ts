@@ -167,7 +167,7 @@ async function importSvgFile(file: File, at: Vec2, outcome: ImportOutcome): Prom
   const h = root.transform.height || result.size.height || 100
   root.transform = { ...root.transform, x: at.x - w / 2, y: at.y - h / 2 }
 
-  return insertImported(root, result.nodes, result.assets, at)
+  return insertImported(root, result.nodes, result.assets, at, result.svgDefs)
 }
 
 // ---------------------------------------------------------------------------
@@ -183,11 +183,18 @@ function insertImported(
   nodes: Record<NodeId, DesignNode>,
   assets: readonly ImageAsset[],
   at: Vec2,
+  svgDefs?: Record<string, string>,
 ): NodeId {
   const parentId = containerAtPoint(getDoc(), at)
 
   transaction(`Import ${root.name}`, (draft) => {
     for (const asset of assets) draft.assets[asset.id] = asset
+
+    // Paint servers the imported shapes reference by url(#id). Ids are already
+    // namespaced per import, so merging can never clobber an earlier one.
+    if (svgDefs && Object.keys(svgDefs).length) {
+      draft.svgDefs = { ...draft.svgDefs, ...svgDefs }
+    }
 
     // Insert descendants first so parents can reference them.
     for (const node of Object.values(nodes)) {

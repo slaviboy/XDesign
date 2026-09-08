@@ -40,7 +40,7 @@ import {
   polygonStarPath,
   rectPath,
 } from '../geometry/ShapeGeometry'
-import { localMatrix } from '../document/SceneGraph'
+import { localMatrix, maskOutlines } from '../document/SceneGraph'
 import { useDocumentStore, useEditorStore, useLiveTransformTick, useNode } from '../state/hooks'
 import { liveTransform } from './LiveTransform'
 import { gridStepForZoom } from './gridMath'
@@ -673,6 +673,7 @@ function Backdrop({
  */
 function GroupBody({ node, copy }: { node: GroupNode; copy: CopyMode }): ReactNode {
   const mask = useNode(node.maskId ?? '')
+  const doc = useDocumentStore((s) => s.doc)
   const clipId = `mask-clip-${node.id}`
   const masked = isMaskGroup(node) && !!mask
 
@@ -685,18 +686,46 @@ function GroupBody({ node, copy }: { node: GroupNode; copy: CopyMode }): ReactNo
 
   if (!masked) return content
 
+  // An imported <mask> modulates by luminance or alpha rather than clipping to
+  // an outline, so it is emitted as a real <mask> with the mask node drawn into
+  // it. XD's own masks — everything made in the editor — stay hard clips.
+  if (node.maskMode === 'luminance' || node.maskMode === 'alpha') {
+    return (
+      <>
+        <defs>
+          <mask id={clipId} maskUnits="userSpaceOnUse" {...maskTypeAttr(node.maskMode)}>
+            <NodeRenderer id={node.maskId!} copy="mirror" />
+          </mask>
+        </defs>
+        <g mask={`url(#${clipId})`}>{content}</g>
+      </>
+    )
+  }
+
   return (
     <>
       <defs>
         <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
           {/* Transformed by the mask's own matrix, because the clip lives in
-              the GROUP's space while the outline is authored in the mask's. */}
-          <path d={shapePathData(mask)} transform={toSvgMatrix(localMatrix(mask.transform))} />
+              the GROUP's space while the outline is authored in the mask's.
+              A mask that is a GROUP contributes every outline inside it — an
+              imported <clipPath> may hold several shapes, and clipping to their
+              bounding box instead would quietly be the wrong shape. */}
+          {maskOutlines(doc, node.maskId!).map((o, i) => (
+            <path key={i} d={o.d} transform={toSvgMatrix(o.m)} />
+          ))}
         </clipPath>
       </defs>
       <g clipPath={`url(#${clipId})`}>{content}</g>
     </>
   )
+}
+
+/** SVG 2 mask-type; luminance is the default so it is only stated for alpha. */
+function maskTypeAttr(mode: 'luminance' | 'alpha'): { style?: CSSProperties } {
+  return mode === 'alpha'
+    ? { style: { maskType: 'alpha' } as CSSProperties }
+    : {}
 }
 
 /**
@@ -908,13 +937,32 @@ export const DocumentLayer = memo(function DocumentLayer(): ReactNode {
     const root = s.doc.nodes[s.doc.rootId]
     return root && 'children' in root ? root.children : undefined
   })
+  const svgDefs = useDocumentStore((s) => s.doc.svgDefs)
   if (!rootChildren) return null
   return (
     <g className="document-layer">
+      <ImportedDefs defs={svgDefs} />
       <Children ids={rootChildren} />
     </g>
   )
 })
+
+/**
+ * Paint servers carried in from imported SVG, emitted once for the document.
+ *
+ * A shape whose fill is `url(#p)` has nowhere of its own to keep the definition
+ * it points at — and several shapes usually share one. Emitting them per node
+ * would duplicate every id; emitting them here is what makes an imported
+ * pattern or marker resolve on a perfectly ordinary rect node.
+ *
+ * The markup was sanitized on import and is re-sanitized on file load, so what
+ * reaches innerHTML has been through the same gate either way.
+ */
+function ImportedDefs({ defs }: { defs: Record<string, string> | undefined }): ReactNode {
+  const markup = useMemo(() => (defs ? Object.values(defs).join('') : ''), [defs])
+  if (!markup) return null
+  return <defs dangerouslySetInnerHTML={{ __html: markup }} />
+}
 
 export { cssFont }
 export { clipKey, fxKey, geomKey }

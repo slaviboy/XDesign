@@ -89,8 +89,17 @@ const FORBID_ATTR = [
   'requiredExtensions', 'externalResourcesRequired',
 ]
 
-/** Attributes a design tool needs that are not in DOMPurify's SVG profile. */
+/**
+ * Attributes a design tool needs that are not in DOMPurify's SVG profile.
+ *
+ * `data-name` and `aria-label` carry the layer name in every Illustrator, XD and
+ * Figma export, and are what this app's own exporter writes. They are named
+ * individually rather than by turning ALLOW_DATA_ATTR on, so no other data-*
+ * attribute gets in. `class` is needed for the CSS cascade — without it a
+ * <style> block has nothing to match against.
+ */
 const ADD_ATTR = [
+  'data-name', 'aria-label', 'class',
   'd', 'href', 'xlink:href', 'clip-rule', 'mix-blend-mode', 'isolation', 'paint-order',
   'vector-effect', 'shape-rendering', 'style', 'transform-origin', 'stop-color',
   'stop-opacity', 'offset', 'gradientTransform', 'gradientUnits', 'spreadMethod',
@@ -102,8 +111,17 @@ const ADD_ATTR = [
 
 /** Matches a url(...) whose target is not a local #fragment. */
 const REMOTE_URL_REF = /url\(\s*['"]?(?!#)/i
-/** Anything in an inline style that could fetch or execute. */
-const DANGEROUS_STYLE = /url\(|expression\(|@import|behavior\s*:|javascript:/i
+/**
+ * Anything in an inline style that could fetch or execute.
+ *
+ * The url() branch excludes local `url(#id)` deliberately. It used to match any
+ * url( at all, so `style="fill:url(#grad)"` — a perfectly ordinary local paint
+ * reference, and one IdNamespacer goes to the trouble of rewriting — had its
+ * whole style attribute deleted, leaving the shape unfilled with no warning.
+ * A remote url() in any attribute, style included, is still caught by
+ * REMOTE_URL_REF in the hook below.
+ */
+const DANGEROUS_STYLE = /url\(\s*['"]?(?!#)|expression\(|@import|behavior\s*:|javascript:/i
 
 let purifier: ReturnType<typeof createDOMPurify> | null = null
 
@@ -224,6 +242,18 @@ export function sanitizeSvgFragment(markup: string): string {
   const result = sanitizeSvg(`<svg xmlns="http://www.w3.org/2000/svg">${markup}</svg>`)
   if (!result.root) return ''
   return result.root.innerHTML
+}
+
+/**
+ * Whether sanitization can actually run here.
+ *
+ * Callers that re-clean already-stored markup need to tell "this was cleaned to
+ * nothing" apart from "there was no sanitizer" — blanking artwork because the
+ * code happened to run outside a browser would be a data-loss bug wearing a
+ * security hat.
+ */
+export function isSanitizerAvailable(): boolean {
+  return typeof window !== 'undefined' && getPurifier() !== null
 }
 
 /** Quick structural check before we bother parsing. */

@@ -43,6 +43,7 @@ import {
 import { createDocumentRoot } from '../document/NodeFactory'
 import { artboardIds, createMatrixCache, geometryBounds } from '../document/SceneGraph'
 import { clampGrid } from '../history/Commands'
+import { isSanitizerAvailable, sanitizeSvgFragment } from '../svg/SvgSanitizer'
 
 export const FORMAT_NAME = 'OfflineDesignDocument'
 /**
@@ -69,6 +70,8 @@ export interface XDesignFile {
     /** Version 2 and earlier only; guides now live on their artboard. */
     guides?: Guide[]
     swatches?: DesignDocument['swatches']
+    /** Paint servers carried in from imported SVG, by id. */
+    svgDefs?: Record<string, string>
   }
   rootId: NodeId
   /** Convenience index; the authoritative structure is in `layers`. */
@@ -113,6 +116,7 @@ export function serializeDocument(
       modifiedAt: Date.now(),
       settings: doc.settings,
       swatches: doc.swatches,
+      ...(doc.svgDefs && Object.keys(doc.svgDefs).length ? { svgDefs: doc.svgDefs } : {}),
     },
     rootId: doc.rootId,
     artboards: Object.values(doc.nodes)
@@ -199,6 +203,37 @@ function parseJson(text: string): XDesignFile {
  * with a star ratio below 1. This runs on the one path every document takes into
  * memory, so file open and crash recovery are both covered.
  */
+/**
+ * Re-clean SVG that comes off disk.
+ *
+ * The sanitizer's own doc comment says it is "the only way SVG enters the
+ * document", and for import that is true — but a .xdesign file is JSON, and a
+ * hand-edited one could put anything in an svg node's markup, which the renderer
+ * then hands to innerHTML. So everything that will be injected as markup goes
+ * through the same gate on the way in.
+ *
+ * When there is no sanitizer (tests, or any non-browser caller) the stored
+ * markup is passed through unchanged rather than blanked: it was cleaned when it
+ * was imported, and destroying artwork because the code is not running in a
+ * browser would be a worse bug than the one this guards against.
+ */
+function cleanStoredMarkup(markup: string): string {
+  if (typeof markup !== 'string' || !markup) return ''
+  if (!isSanitizerAvailable()) return markup
+  return sanitizeSvgFragment(markup)
+}
+
+function readSvgDefs(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: Record<string, string> = {}
+  for (const [id, markup] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof markup !== 'string') continue
+    const clean = cleanStoredMarkup(markup)
+    if (clean) out[id] = clean
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 export function migrateLegacyNode(node: DesignNode): DesignNode {
   const legacy = node as DesignNode & {
     points?: number
@@ -259,7 +294,12 @@ function buildDocument(
 
   const nodes: Record<NodeId, DesignNode> = {}
   for (const node of payload.layers) {
-    if (node && typeof node.id === 'string') nodes[node.id] = migrateLegacyNode(node)
+    if (!node || typeof node.id !== 'string') continue
+    const migrated = migrateLegacyNode(node)
+    nodes[node.id] =
+      migrated.type === 'svg'
+        ? { ...migrated, markup: cleanStoredMarkup(migrated.markup), defs: cleanStoredMarkup(migrated.defs) }
+        : migrated
   }
 
   let rootId = payload.rootId
@@ -309,6 +349,7 @@ function buildDocument(
       ? payload.document.swatches.filter(isSwatch)
       : [],
     settings: { ...DEFAULT_SETTINGS, ...(payload.document?.settings ?? {}) },
+    svgDefs: readSvgDefs(payload.document?.svgDefs),
     createdAt: payload.document?.createdAt ?? Date.now(),
     modifiedAt: payload.document?.modifiedAt ?? Date.now(),
   }

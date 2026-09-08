@@ -489,6 +489,16 @@ export interface GroupNode extends StyledNode {
    * tree) keeps working on a mask group without a single new branch.
    */
   maskId?: NodeId
+  /**
+   * How `maskId` masks. Absent means 'clip' — a hard-edged outline clip, which
+   * is XD's mask and what every mask group created in the editor is.
+   *
+   * SVG's <mask> is a different operation: the mask's own luminance or alpha
+   * modulates what shows through, so a 50% grey mask half-hides its content.
+   * An imported <mask> keeps that meaning rather than being flattened to a
+   * hard clip, which is why this exists.
+   */
+  maskMode?: 'clip' | 'luminance' | 'alpha'
 }
 
 /** A group whose topmost child clips the rest. */
@@ -822,6 +832,16 @@ export interface DesignDocument {
   assets: Record<AssetId, ImageAsset>
   swatches: Swatch[]
   settings: DocumentSettings
+  /**
+   * Paint servers and other <defs> entries carried in from imported SVG, keyed
+   * by their (already namespaced) id, emitted once for the whole document.
+   *
+   * Document-level rather than per-node because a reference is not owned by the
+   * shape that uses it: several shapes share one gradient or pattern, and a
+   * shape carrying a RefPaint of `url(#p)` has nowhere of its own to put the
+   * definition. Absent on every document saved before this existed.
+   */
+  svgDefs?: Record<string, string>
   createdAt: number
   modifiedAt: number
 }

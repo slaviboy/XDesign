@@ -32,7 +32,7 @@
 import { toSvgMatrix, multiply, type Mat2D } from '../geometry/Matrix'
 import type { Bounds } from '../geometry/Bounds'
 import { polygonStarPath, rectPath } from '../geometry/ShapeGeometry'
-import { localMatrix, nodePathData, worldMatrix } from '../document/SceneGraph'
+import { localMatrix, maskOutlines, nodePathData, worldMatrix } from '../document/SceneGraph'
 import { toHex } from '../document/color'
 import { ANGULAR_TILE, angularWedges, gradientId, isGradient, sortedStops } from '../canvas/paint'
 import { layoutText, lineOffsetX } from '../text/TextLayout'
@@ -137,9 +137,15 @@ export async function exportNodesToSvg(
   const outW = Math.max(1, Math.round(width * opts.scale))
   const outH = Math.max(1, Math.round(height * opts.scale))
 
+  // Paint servers carried in from an import. Only the ones actually referenced
+  // are emitted, so an export of one artboard does not drag in the whole
+  // document's imported defs.
+  const imported = referencedImportedDefs(doc, body + ctx.defs.join(''))
+
   const defsBlock =
-    ctx.defs.length || ctx.fontCss.length
-      ? `<defs>${ctx.fontCss.length ? `<style>${ctx.fontCss.join('')}</style>` : ''}${ctx.defs.join('')}</defs>`
+    ctx.defs.length || ctx.fontCss.length || imported
+      ? `<defs>${ctx.fontCss.length ? `<style>${ctx.fontCss.join('')}</style>` : ''}` +
+        `${imported}${ctx.defs.join('')}</defs>`
       : ''
 
   const bg =
@@ -306,15 +312,17 @@ function emitBody(ctx: EmitContext, node: DesignNode): string {
       const { width, height } = node.transform
       const clipId = `clip-${safeId(node.id)}`
       const bg = emitArtboardBackground(ctx, node.background, node.id, width, height)
-      // The background is part of the backdrop a blurred child sees.
-      const kids = emitChildren(ctx, node.children, node.clipContent ? '' : bg)
+      // Emitted exactly once: emitChildren is not pure — it pushes gradients,
+      // filters and clip paths into ctx.defs — so calling it twice and throwing
+      // one result away duplicated every one of those ids in the output.
       if (node.clipContent) {
         ctx.defs.push(
           `<clipPath id="${clipId}"><rect width="${round(width, 3)}" height="${round(height, 3)}"/></clipPath>`,
         )
         return `${bg}<g clip-path="url(#${clipId})">${emitChildren(ctx, node.children, bg)}</g>`
       }
-      return kids
+      // The background is part of the backdrop a blurred child sees.
+      return emitChildren(ctx, node.children, bg)
     }
 
     case 'group': {
@@ -322,14 +330,28 @@ function emitBody(ctx: EmitContext, node: DesignNode): string {
         return emitChildren(ctx, node.children)
       }
       // Adobe's mask: the topmost child clips the rest and is not itself drawn.
-      const mask = ctx.doc.nodes[node.maskId]!
       const clipId = `maskclip-${safeId(node.id)}`
-      const d = nodePathData(mask) ?? rectPath(mask.transform.width, mask.transform.height, 0)
-      ctx.defs.push(
-        `<clipPath id="${clipId}" clipPathUnits="userSpaceOnUse">` +
-          `<path d="${d}" transform="${toSvgMatrix(localMatrix(mask.transform))}"/></clipPath>`,
-      )
       const kids = emitChildren(ctx, node.children.filter((c) => c !== node.maskId))
+
+      // An imported <mask> modulates by luminance or alpha; it is not an
+      // outline clip, and flattening it to one would change the artwork.
+      if (node.maskMode === 'luminance' || node.maskMode === 'alpha') {
+        const type = node.maskMode === 'alpha' ? ' style="mask-type:alpha"' : ''
+        ctx.defs.push(
+          `<mask id="${clipId}" maskUnits="userSpaceOnUse"${type}>` +
+            `${emitNode(ctx, node.maskId, false)}</mask>`,
+        )
+        return `<g mask="url(#${clipId})">${kids}</g>`
+      }
+
+      // Every outline inside the mask, not its bounding box: an imported
+      // <clipPath> may hold several shapes and clips as their union.
+      const outlines = maskOutlines(ctx.doc, node.maskId)
+        .map((o) => `<path d="${o.d}" transform="${toSvgMatrix(o.m)}"/>`)
+        .join('')
+      ctx.defs.push(
+        `<clipPath id="${clipId}" clipPathUnits="userSpaceOnUse">${outlines}</clipPath>`,
+      )
       return `<g clip-path="url(#${clipId})">${kids}</g>`
     }
 
@@ -500,6 +522,34 @@ function emitText(ctx: EmitContext, node: Extract<DesignNode, { type: 'text' }>)
     (clipped ? ` clip-path="url(#${clipId})"` : '') +
     ` xml:space="preserve"${styleAttrs(ctx, node.style, node.id, true)}>${tspans}</text>`
   )
+}
+
+/**
+ * The imported <defs> entries this output actually points at.
+ *
+ * A shape whose fill is `url(#p)` exports that reference verbatim, so without
+ * the definition the file opens with a dangling paint. Scanning the emitted
+ * markup rather than emitting all of them keeps an artboard export from
+ * carrying every definition in the document, and follows one level of nesting
+ * so a gradient referenced by a pattern comes along too.
+ */
+function referencedImportedDefs(doc: DesignDocument, markup: string): string {
+  const defs = doc.svgDefs
+  if (!defs) return ''
+
+  const wanted = new Set<string>()
+  const scan = (text: string, depth: number) => {
+    if (depth > 4) return
+    for (const m of text.matchAll(/url\(\s*['"]?#([^)'"\s]+)['"]?\s*\)/g)) {
+      const id = m[1]!
+      if (wanted.has(id) || !defs[id]) continue
+      wanted.add(id)
+      scan(defs[id]!, depth + 1)
+    }
+  }
+  scan(markup, 0)
+
+  return [...wanted].map((id) => defs[id]!).join('')
 }
 
 function emitPreservedSvg(ctx: EmitContext, node: Extract<DesignNode, { type: 'svg' }>): string {
