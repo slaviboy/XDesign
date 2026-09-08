@@ -144,7 +144,17 @@ export interface EditorState {
   /** Live overlay state, updated during gestures without touching the document. */
   marquee: Bounds | null
   snapGuides: SnapGuide[]
-  dropIndicator: { x: number; y: number; label: string } | null
+  /**
+   * A file drag in progress: where the cursor is, what will happen, and which
+   * artboard is about to receive it.
+   */
+  dropIndicator: {
+    x: number
+    y: number
+    label: string
+    /** The artboard the file will land in, or null for bare pasteboard. */
+    artboardId: NodeId | null
+  } | null
 
   /**
    * Whether a box's four corners are edited together or individually.

@@ -37,7 +37,7 @@ import {
   type DistributeMode,
 } from '../document/DocumentModel'
 import {
-  artboardIds,
+  artboardAtPoint,
   boundsOfNodes,
   geometryBounds,
   isEffectivelyLocked,
@@ -52,7 +52,7 @@ import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
 import { createArtboard, createGroup, createPath } from '../document/NodeFactory'
 import { current, isDraft } from 'immer'
 import { invert, multiply, rotationAbout, type Mat2D } from '../geometry/Matrix'
-import { center, containsPoint, type Bounds } from '../geometry/Bounds'
+import { center, type Bounds } from '../geometry/Bounds'
 import type {
   ArtboardGrid,
   BlurEffect,
@@ -108,14 +108,7 @@ export function editableSelection(): NodeId[] {
 export function containerAtPoint(doc: DesignDocument, point: { x: number; y: number }): NodeId {
   const editing = editorStore.getState().editingContext
   if (editing && isContainer(doc.nodes[editing])) return editing
-
-  // Topmost artboard wins, matching paint order.
-  const boards = artboardIds(doc)
-  for (let i = boards.length - 1; i >= 0; i--) {
-    const id = boards[i]!
-    if (containsPoint(geometryBounds(doc, id), point)) return id
-  }
-  return doc.rootId
+  return artboardAtPoint(doc, point) ?? doc.rootId
 }
 
 // ---------------------------------------------------------------------------

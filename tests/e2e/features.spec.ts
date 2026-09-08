@@ -1192,3 +1192,93 @@ test('the selected object is not offered twice', async ({ page }) => {
   expect(unblockItems(items)).toEqual([])
   expect(items.some((t) => t.startsWith('Unlock'))).toBe(true)
 })
+
+// ------------------------------------------------------- drop target --
+
+/** Fire a synthetic file drag over a point on the canvas, in canvas coordinates. */
+async function dragFileAt(page: import('@playwright/test').Page, x: number, y: number) {
+  const box = (await page.locator(CANVAS).boundingBox())!
+  await page.evaluate(
+    ({ cx, cy }) => {
+      const el = document.querySelector('[data-testid="canvas-root"]')!
+      const dt = new DataTransfer()
+      dt.items.add(new File(['x'], 'photo.png', { type: 'image/png' }))
+      for (const type of ['dragenter', 'dragover']) {
+        el.dispatchEvent(
+          new DragEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            clientX: cx,
+            clientY: cy,
+            dataTransfer: dt,
+          }),
+        )
+      }
+    },
+    { cx: box.x + x, cy: box.y + y },
+  )
+}
+
+test('a dragged file highlights the artboard it will land in, by name', async ({ page }) => {
+  await openApp(page)
+  await expect(page.locator('.drop-target')).toHaveCount(0)
+
+  await dragFileAt(page, 400, 300)
+  // The badge says WHAT will happen; the highlight says WHERE, which the cursor
+  // cannot show — a file dropped either side of an artboard edge ends up
+  // somewhere quite different and the two look identical until it has happened.
+  await expect(page.locator('.drop-target')).toHaveCount(1)
+  await expect(page.locator('.drop-indicator')).toContainText('Import to Artboard 1')
+
+  // It covers the artboard it names, not the whole canvas.
+  // Within the outline's own 2px stroke, which straddles the edge it traces.
+  const target = (await page.locator('.drop-target').boundingBox())!
+  const artboard = (await nodesOfType(page, 'artboard').first().boundingBox())!
+  expect(Math.abs(target.x - artboard.x)).toBeLessThanOrEqual(2)
+  expect(Math.abs(target.width - artboard.width)).toBeLessThanOrEqual(2)
+})
+
+test('dragging over bare pasteboard highlights nothing and says so', async ({ page }) => {
+  await openApp(page)
+  await dragFileAt(page, 1000, 620)
+  await expect(page.locator('.drop-target')).toHaveCount(0)
+  // Still an offer to import — it just lands on the canvas rather than in an
+  // artboard, and the label stops naming one.
+  await expect(page.locator('.drop-indicator')).toHaveText('Import')
+})
+
+test('the highlight names the artboard the file actually lands in', async ({ page }) => {
+  await openApp(page)
+  await selectTool(page, 'artboard')
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  await page.mouse.move(canvas.x + 760, canvas.y + 160)
+  await page.mouse.down()
+  await page.mouse.move(canvas.x + 1010, canvas.y + 420, { steps: 6 })
+  await page.mouse.up()
+  await selectTool(page, 'select')
+
+  await dragFileAt(page, 880, 300)
+  await expect(page.locator('.drop-indicator')).toContainText('Artboard 2')
+  const target = await page.locator('.drop-target').getAttribute('data-drop-target')
+
+  // And that is genuinely where it goes: the highlight reads the same
+  // artboardAtPoint the drop itself parents by.
+  await dropFiles(page, [{ name: 'photo.png', type: 'image/png', base64: RED_PNG_BASE64 }], { x: 880, y: 300 })
+  const parent = await page.locator('.document-layer image').evaluate(
+    (el) => el.closest('[data-node-type="artboard"]')?.getAttribute('data-node-id') ?? null,
+  )
+  expect(parent).toBe(target)
+})
+
+test('the highlight goes when the drag leaves', async ({ page }) => {
+  await openApp(page)
+  await dragFileAt(page, 400, 300)
+  await expect(page.locator('.drop-target')).toHaveCount(1)
+
+  await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="canvas-root"]')!
+    el.dispatchEvent(new DragEvent('dragleave', { bubbles: true, cancelable: true }))
+  })
+  await expect(page.locator('.drop-target')).toHaveCount(0)
+  await expect(page.locator('.drop-indicator')).toHaveCount(0)
+})

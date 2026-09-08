@@ -33,6 +33,7 @@ import { TextEditor } from './TextEditor'
 import { screenDistanceToDoc, screenToDoc, docToScreen } from './Viewport'
 import { getTool } from '../tools/ToolRegistry'
 import { documentStore, getDoc } from '../state/DocumentStore'
+import { artboardAtPoint, geometryBounds } from '../document/SceneGraph'
 import {
   editorStore,
   panBy,
@@ -41,7 +42,7 @@ import {
   setViewport,
   zoomAt,
 } from '../state/EditorStore'
-import { useEditorStore } from '../state/hooks'
+import { useDocumentStore, useEditorStore } from '../state/hooks'
 import { endPathEditing, syncPathEditing } from '../tools/PathEditing'
 import type { CanvasPointerEvent, ToolContext } from '../tools/types'
 import type { Vec2 } from '../geometry/Matrix'
@@ -270,11 +271,18 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
       e.dataTransfer.dropEffect = 'copy'
       const screen = toCanvasPoint(e.clientX, e.clientY)
       const count = e.dataTransfer.items?.length ?? 0
+      // Named, because this is exactly where the file will be parented — the
+      // same artboardAtPoint that containerAtPoint uses on the drop itself.
+      const doc = getDoc()
+      const artboardId = artboardAtPoint(doc, screenToDoc(editorStore.getState().viewport, screen))
+      const what = count > 1 ? `Import ${count} files` : 'Import'
+      const board = artboardId ? doc.nodes[artboardId] : undefined
       setEditor({
         dropIndicator: {
           x: screen.x,
           y: screen.y,
-          label: count > 1 ? `Import ${count} files` : 'Import',
+          label: board ? `${what} to ${board.name}` : what,
+          artboardId,
         },
       })
     },
@@ -358,6 +366,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
           <ArtboardLabels />
           <GuideHandle />
           <GuideReadout />
+          <DropTarget />
           <SelectionOverlay />
           <ToolOverlay />
         </g>
@@ -367,6 +376,40 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
       <ArtboardNameEditor />
       <DropIndicator />
     </div>
+  )
+}
+
+/**
+ * The artboard a dragged file is about to land in.
+ *
+ * A badge at the cursor says what will happen; this says WHERE, which is the
+ * part the cursor cannot show — a file dropped an inch either side of an
+ * artboard edge ends up somewhere quite different, and the two look identical
+ * until it has happened.
+ *
+ * Screen space, so the outline stays a constant weight at any zoom rather than
+ * becoming a hairline on a zoomed-out board.
+ */
+function DropTarget() {
+  const indicator = useEditorStore((s) => s.dropIndicator)
+  const viewport = useEditorStore((s) => s.viewport)
+  const doc = useDocumentStore((s) => s.doc)
+  if (!indicator?.artboardId) return null
+  const node = doc.nodes[indicator.artboardId]
+  if (!node || node.type !== 'artboard') return null
+
+  const bounds = geometryBounds(doc, indicator.artboardId)
+  const origin = docToScreen(viewport, { x: bounds.x, y: bounds.y })
+  return (
+    <rect
+      className="drop-target"
+      data-drop-target={indicator.artboardId}
+      x={origin.x}
+      y={origin.y}
+      width={bounds.width * viewport.zoom}
+      height={bounds.height * viewport.zoom}
+      pointerEvents="none"
+    />
   )
 }
 

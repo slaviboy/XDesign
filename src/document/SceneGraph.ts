@@ -506,6 +506,25 @@ export function hitTest(
 }
 
 /**
+ * The topmost artboard containing a point, or null for bare pasteboard.
+ *
+ * One definition, shared by everything that has to answer "which artboard is
+ * here": where a drawn or dropped object is parented, which artboard a
+ * right-click acts on, and what a file drag highlights. Topmost, matching paint
+ * order — the same one a click would have resolved to.
+ */
+export function artboardAtPoint(doc: DesignDocument, point: Vec2): NodeId | null {
+  const cache = createMatrixCache()
+  const boards = artboardIds(doc)
+  for (let i = boards.length - 1; i >= 0; i--) {
+    const id = boards[i]!
+    if (doc.nodes[id]?.visible === false) continue
+    if (containsPoint(geometryBounds(doc, id, cache), point)) return id
+  }
+  return null
+}
+
+/**
  * Locked or hidden nodes under a point, topmost first.
  *
  * Deliberately the one hit test that ignores both filters, because it exists to

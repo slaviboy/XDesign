@@ -1333,3 +1333,12 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
 .menu-item-label { display: flex; align-items: center; gap: 8px; }
 .menu-item-icon { display: grid; place-items: center; color: var(--text); }
 .menu-item-check { color: var(--text-muted); }
+
+/* The artboard a dragged file will land in. Tinted and outlined in the accent,
+   like every other "this is the target" state in the app. */
+.drop-target {
+  fill: var(--accent);
+  fill-opacity: 0.08;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
