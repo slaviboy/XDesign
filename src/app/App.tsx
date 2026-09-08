@@ -41,7 +41,8 @@ import {
 import { MenuHost, useMenuState } from '../ui/Menu'
 import { buildContextMenu } from '../ui/contextMenu'
 import { installKeyboard } from '../shortcuts/KeyboardManager'
-import { importFiles, importFromClipboardEvent } from '../images/ImageImporter'
+import { importFiles } from '../images/ImageImporter'
+import { installSystemClipboard } from '../state/SystemClipboard'
 import {
   adoptRecoveredDocument, importFilesFlow, openDocumentFlow, saveDocumentFlow,
 } from './fileOperations'
@@ -109,26 +110,8 @@ export function App() {
     return () => stopAutosave()
   }, [])
 
-  // ---- paste into the canvas ----------------------------------------------
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      const target = e.target as HTMLElement | null
-      // Let a focused field handle its own paste.
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return
-      }
-      const { viewport, canvasSize } = editorStore.getState()
-      const at = screenToDoc(viewport, { x: canvasSize.width / 2, y: canvasSize.height / 2 })
-      void importFromClipboardEvent(e, at).then((created) => {
-        // Only fall back to the internal clipboard if nothing came from the OS.
-        if (!created || created.length === 0) {
-          void import('../state/Clipboard').then((m) => m.paste())
-        }
-      })
-    }
-    window.addEventListener('paste', onPaste)
-    return () => window.removeEventListener('paste', onPaste)
-  }, [])
+  // ---- system clipboard ----------------------------------------------------
+  useEffect(() => installSystemClipboard(), [])
 
   // ---- stop the browser navigating away on a stray file drop ---------------
   useEffect(() => {

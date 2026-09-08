@@ -218,6 +218,39 @@ export async function dropFiles(
   await page.waitForTimeout(600)
 }
 
+/**
+ * Paste onto the canvas via a synthetic ClipboardEvent.
+ *
+ * This is what the browser dispatches for Cmd+V, so it exercises the real
+ * handler rather than a test-only entry point. Files and text can both be on
+ * the clipboard at once, exactly as a real copy from another application often
+ * leaves them.
+ */
+export async function pasteClipboard(
+  page: Page,
+  content: { files?: Array<{ name: string; type: string; base64?: string; text?: string }>; text?: string },
+): Promise<void> {
+  await page.evaluate(async (content) => {
+    const dt = new DataTransfer()
+    for (const f of content.files ?? []) {
+      let blob: Blob
+      if (f.base64) {
+        const binary = atob(f.base64)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+        blob = new Blob([bytes], { type: f.type })
+      } else {
+        blob = new Blob([f.text ?? ''], { type: f.type })
+      }
+      dt.items.add(new File([blob], f.name, { type: f.type }))
+    }
+    if (content.text !== undefined) dt.setData('text/plain', content.text)
+    window.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt }))
+  }, content)
+  // Import is async (decode + measure).
+  await page.waitForTimeout(600)
+}
+
 /** A real 8x6 red PNG with valid chunk CRCs, so the browser actually decodes it. */
 export const RED_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAEUlEQVR4nGO4o6GBFTEMpAQAngY4QZX0zKMAAAAASUVORK5CYII='

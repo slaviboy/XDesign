@@ -26,14 +26,24 @@
  * Pasted assets are re-added to the target document, so pasting an image into a
  * different document carries the pixels with it rather than leaving a dangling
  * reference.
+ *
+ * Every copy carries a `clipId`, which SystemClipboard stamps into the SVG it
+ * writes to the OS clipboard. That stamp is what lets a paste tell our own
+ * markup apart from a foreign application's: reading back our own SVG instead of
+ * the payload below would flatten exactly the fidelity this module exists to
+ * keep.
  */
 
 import { addNode, cloneSubtree } from '../document/DocumentModel'
-import { exportNodesToSvg } from '../svg/SvgExporter'
-import { renderBoundsOfNodes, createMatrixCache, worldMatrix } from '../document/SceneGraph'
+import {
+  artboardAtPoint, artboardOf, createMatrixCache, geometryBounds, renderBoundsOfNodes, worldMatrix,
+} from '../document/SceneGraph'
 import { transaction, getDoc } from '../state/DocumentStore'
 import { containerAtPoint } from '../history/Commands'
 import { editorStore, notify, setSelection } from './EditorStore'
+import { screenToDoc } from '../canvas/Viewport'
+import { createId } from '../document/ids'
+import { isContainer } from '../document/types'
 import { invert, multiply, type Mat2D } from '../geometry/Matrix'
 import { transformFromMatrix } from '../document/DocumentModel'
 import type { DesignNode, ImageAsset, NodeId } from '../document/types'
@@ -45,14 +55,52 @@ interface ClipboardPayload {
   assets: ImageAsset[]
   /** World-space top-left of the copied set, so paste can offset predictably. */
   origin: Vec2
+  /** World-space size of the copied set, so a paste at a point can centre on it. */
+  size: { width: number; height: number }
+  /** Identifies this copy in the SVG written to the OS clipboard. */
+  clipId: string
 }
 
 let internal: ClipboardPayload | null = null
 /** Successive pastes of the same clip cascade instead of stacking exactly. */
 let pasteCount = 0
 
+/**
+ * Set by copySelection, cleared by SystemClipboard when a native `copy` event
+ * takes over the write. Without this the two would race to write the clipboard
+ * and the plain writeText could land last, clobbering the richer flavours.
+ */
+let pendingSystemWrite: readonly NodeId[] | null = null
+
 export function hasClipboardContent(): boolean {
   return internal !== null
+}
+
+/** The id stamped into the SVG of the copy currently on the clipboard. */
+export function currentClipId(): string | null {
+  return internal?.clipId ?? null
+}
+
+/**
+ * Called by SystemClipboard when a native `copy`/`cut` event is writing the
+ * flavours itself, so the deferred fallback below stays out of its way.
+ */
+export function claimSystemWrite(): readonly NodeId[] | null {
+  const ids = pendingSystemWrite
+  pendingSystemWrite = null
+  return ids
+}
+
+/**
+ * Writes the OS clipboard. Registered by SystemClipboard at startup rather than
+ * imported, because that module imports this one and a cycle between them would
+ * be a real one — both have module-level state that has to initialise.
+ */
+type SystemWriter = (ids: readonly NodeId[]) => void
+let systemWriter: SystemWriter | null = null
+
+export function setSystemClipboardWriter(writer: SystemWriter | null): void {
+  systemWriter = writer
 }
 
 export function copySelection(): boolean {
@@ -95,10 +143,25 @@ export function copySelection(): boolean {
   }
 
   const bounds = renderBoundsOfNodes(doc, ids, createMatrixCache())
-  internal = { nodes, rootIds: [...ids], assets, origin: { x: bounds.x, y: bounds.y } }
+  internal = {
+    nodes,
+    rootIds: [...ids],
+    assets,
+    origin: { x: bounds.x, y: bounds.y },
+    size: { width: bounds.width, height: bounds.height },
+    clipId: createId('clip'),
+  }
   pasteCount = 0
 
-  void writeSystemClipboard(ids)
+  // Deferred rather than immediate: a keyboard copy is followed a tick later by
+  // the native `copy` event, which writes the flavours itself and claims the
+  // write. Only a copy with no native event behind it — the menu entries — gets
+  // as far as the timer.
+  pendingSystemWrite = internal.rootIds
+  setTimeout(() => {
+    const pending = claimSystemWrite()
+    if (pending) systemWriter?.(pending)
+  }, 0)
   return true
 }
 
@@ -137,8 +200,14 @@ export function paste(at?: Vec2): NodeId[] {
   const clip = internal
   pasteCount++
 
+  // `at` is the centre of where the clip should land — the point under the
+  // pointer for a right-click paste. Putting the clip's top-left there instead
+  // would drop it down and to the right of where it was asked for.
   const offset = at
-    ? { x: at.x - clip.origin.x, y: at.y - clip.origin.y }
+    ? {
+        x: at.x - (clip.origin.x + clip.size.width / 2),
+        y: at.y - (clip.origin.y + clip.size.height / 2),
+      }
     : { x: pasteCount * 14, y: pasteCount * 14 }
 
   const created: NodeId[] = []
@@ -175,7 +244,13 @@ export function paste(at?: Vec2): NodeId[] {
         y: node.transform.y + offset.y,
       }
 
-      const parentId = containerAtPoint(draft, { x: node.transform.x, y: node.transform.y })
+      // The centre, not the top-left: a copy cascaded past an artboard's right
+      // or bottom edge would otherwise be parented to the pasteboard even though
+      // almost all of it is still over the artboard.
+      const parentId = containerAtPoint(draft, {
+        x: node.transform.x + node.transform.width / 2,
+        y: node.transform.y + node.transform.height / 2,
+      })
       addNode(draft, node, parentId)
 
       if (parentId !== draft.rootId) {
@@ -219,29 +294,47 @@ export function duplicateInPlace(): NodeId[] {
 }
 
 /**
- * Mirror the copy to the system clipboard as SVG, so it can be pasted into
- * another app. Best-effort: clipboard permissions vary, and a failure here must
- * not affect the internal copy that already succeeded.
+ * Where content arriving from another application should land.
+ *
+ * "The artboard I am working in" is not a field anywhere — this derives it the
+ * way the rest of the app does, from the selection first and the viewport
+ * second. The returned point is the centre to place on; because it lies inside
+ * the artboard, `containerAtPoint` then parents the new nodes to it without
+ * needing to be told.
  */
-async function writeSystemClipboard(ids: readonly NodeId[]): Promise<void> {
-  try {
-    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return
-    const doc = getDoc()
-    const bounds = renderBoundsOfNodes(doc, ids, createMatrixCache())
-    const { svg } = await exportNodesToSvg(doc, ids, {
-      bounds,
-      imageHandling: 'embed',
-      textHandling: 'reference',
-    })
-    await navigator.clipboard.writeText(svg)
-  } catch {
-    // Clipboard access denied or unavailable; the internal clipboard still works.
+export function externalPasteTarget(): Vec2 {
+  const doc = getDoc()
+  const editor = editorStore.getState()
+  const cache = createMatrixCache()
+  const centreOf = (id: NodeId): Vec2 => {
+    const b = geometryBounds(doc, id, cache)
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
   }
+
+  // Inside a group or artboard the user has entered, that is the context.
+  const editing = editor.editingContext
+  if (editing && isContainer(doc.nodes[editing])) return centreOf(editing)
+
+  // Otherwise the artboard the selection lives in.
+  for (const id of editor.selection) {
+    const board = doc.nodes[id] ? artboardOf(doc, id) : null
+    if (board) return centreOf(board)
+  }
+
+  const viewCentre = screenToDoc(editor.viewport, {
+    x: editor.canvasSize.width / 2,
+    y: editor.canvasSize.height / 2,
+  })
+
+  // Nothing selected: the artboard the user is looking at, else the pasteboard.
+  const under = artboardAtPoint(doc, viewCentre)
+  return under ? centreOf(under) : viewCentre
 }
 
 export function clearClipboard(): void {
   internal = null
   pasteCount = 0
+  pendingSystemWrite = null
 }
 
 export { notify }

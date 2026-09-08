@@ -23,9 +23,10 @@
  * here: the file never leaves the machine, and no network is involved.
  */
 
-import { insertNode, setText } from '../history/Commands'
+import { containerAtPoint, insertNode, setText } from '../history/Commands'
 import { createText } from '../document/NodeFactory'
 import { DEFAULT_TEXT_STYLE } from '../document/types'
+import { geometryBounds } from '../document/SceneGraph'
 import { intrinsicTextSize } from '../text/TextLayout'
 import { editorStore, notify } from '../state/EditorStore'
 import { getDoc } from '../state/DocumentStore'
@@ -37,6 +38,9 @@ const MAX_BYTES = 5 * 1024 * 1024
 
 /** Width of a text box created from a file, when the drop gives no other clue. */
 const IMPORT_WIDTH = 480
+
+/** Breathing room left either side when a text box is fitted to an artboard. */
+const FIT_MARGIN = 16
 
 /**
  * Anything a text editor would open. Not a whitelist of extensions: a .md, a
@@ -104,30 +108,56 @@ async function readTextFile(file: File): Promise<string | null> {
  *
  * Area text rather than a single line: a file's worth of text on one line is
  * unusable, and Auto Height is what Adobe gives you for a block of copy.
+ *
+ * @param opts.at      where to put it — the top-left corner, or the centre when
+ *                     `centred` is set, which is how a paste and a file drop
+ *                     both name a position.
  */
-export function placeText(text: string, opts: { name?: string; at?: Vec2 } = {}): NodeId | null {
+export function placeText(
+  text: string,
+  opts: { name?: string; at?: Vec2; centred?: boolean } = {},
+): NodeId | null {
   const editor = editorStore.getState()
   const style = { ...DEFAULT_TEXT_STYLE, sizing: 'auto-height' as const }
-  const origin =
+  // A trailing newline would show as an empty last line, which is not what the
+  // text looked like where it came from.
+  const body = text.replace(/\r\n/g, '\n').replace(/\n+$/, '')
+  if (!body) return null
+
+  const at =
     opts.at ??
     screenToDoc(editor.viewport, {
       x: editor.canvasSize.width / 2 - (IMPORT_WIDTH * editor.viewport.zoom) / 2,
       y: editor.canvasSize.height / 3,
     })
 
-  const node = createText(
-    text,
-    {
-      x: origin.x,
-      y: origin.y,
-      width: IMPORT_WIDTH,
-      height: intrinsicTextSize(text, style, IMPORT_WIDTH).height,
-    },
-    {},
-    style,
-  )
+  // Resolve the container from the point we were given, before the box has a
+  // size. Letting insertNode work it out from the top-left instead would put a
+  // box centred on a narrow artboard outside it, and land the text on the
+  // pasteboard — which is how images already avoid the problem.
+  const doc = getDoc()
+  const parentId = containerAtPoint(doc, at)
+  const width = fitWidth(parentId)
+  const height = intrinsicTextSize(body, style, width).height
+
+  const origin =
+    opts.centred && opts.at ? { x: at.x - width / 2, y: at.y - height / 2 } : at
+
+  const node = createText(body, { x: origin.x, y: origin.y, width, height }, {}, style)
   if (opts.name) node.name = opts.name.replace(/\.[^.]+$/, '')
-  return insertNode(node)
+  return insertNode(node, parentId)
+}
+
+/**
+ * The width to pour text into. A 480px column on a 320px phone artboard is not
+ * a text box, it is an overflow — so the artboard wins whenever it is narrower.
+ */
+function fitWidth(parentId: NodeId): number {
+  const doc = getDoc()
+  if (parentId === doc.rootId) return IMPORT_WIDTH
+  const bounds = geometryBounds(doc, parentId)
+  if (bounds.width <= 0) return IMPORT_WIDTH
+  return Math.max(1, Math.min(IMPORT_WIDTH, bounds.width - FIT_MARGIN * 2))
 }
 
 /** One file, as text. Resolves to null when the picker is dismissed. */

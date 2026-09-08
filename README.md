@@ -195,6 +195,16 @@ has to look the same to everyone who opens the file.
 drag-and-drop, paste, or File ▸ Import. Imported SVG becomes real editable nodes: shapes stay
 shapes, gradients stay gradients, groups stay groups. Nothing is ever rasterized on import.
 
+**Clipboard** — copy an image or some text anywhere on the machine and paste it straight in,
+by `⌘V`, right-click ▸ Paste, or the app menu. It lands in the artboard you are working in:
+the one selected, or the one holding the selection. Text becomes a text object sized to the
+artboard, an image becomes an image, and SVG markup becomes editable nodes rather than a
+picture of them. Going the other way, `⌘C` puts three things on the clipboard at once — a PNG
+for the applications that want a picture, the SVG for the ones that want vectors, and, when
+what you copied was text, the characters themselves. Copying inside the app still keeps every
+gradient, group and pixel: the copy carries its own identity, so pasting it back is recognised
+as the original rather than re-imported as flattened markup.
+
 **Export** — SVG, PNG and JPEG, of a selection, an artboard, the whole document, or every
 layer marked for export, at 0.1×–10× scale.
 

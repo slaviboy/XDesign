@@ -46,7 +46,9 @@ import {
   ungroupSelection,
   updateSettings,
 } from '../history/Commands'
-import { copySelection, cutSelection, duplicateInPlace, paste } from '../state/Clipboard'
+import { copySelection, cutSelection, duplicateInPlace } from '../state/Clipboard'
+import { armPasteFallback } from '../state/SystemClipboard'
+import { isTypingTarget } from './focus'
 import { redo, undo, getDoc } from '../state/DocumentStore'
 import {
   clearSelection,
@@ -78,18 +80,6 @@ const NUDGE_SMALL = 1
 const NUDGE_LARGE = 10
 
 let spaceHeld = false
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null
-  if (!el) return false
-  const tag = el.tagName
-  return (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    tag === 'SELECT' ||
-    el.isContentEditable === true
-  )
-}
 
 export function installKeyboard(ctx: ToolContext, handlers: KeyboardHandlers): () => void {
   const onKeyDown = (e: KeyboardEvent) => {
@@ -129,17 +119,23 @@ export function installKeyboard(ctx: ToolContext, handlers: KeyboardHandlers): (
           e.preventDefault()
           redo()
           return
+        // Copy, cut and paste deliberately do NOT preventDefault. Doing so
+        // suppresses the browser's native clipboard events, and those events are
+        // the only way to read what another application copied without a
+        // permission prompt — which is why Cmd+V used to ignore the system
+        // clipboard entirely. SystemClipboard handles all three from the events;
+        // the internal capture still happens here because it has to be
+        // synchronous with the key.
         case 'c':
-          e.preventDefault()
           copySelection()
           return
         case 'x':
-          e.preventDefault()
           cutSelection()
           return
         case 'v':
-          e.preventDefault()
-          paste()
+          // Nothing to do: the native paste event does the work. The fallback
+          // covers a browser that declines to send one.
+          armPasteFallback()
           return
         case 'd':
           e.preventDefault()

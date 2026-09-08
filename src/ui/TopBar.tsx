@@ -39,7 +39,8 @@ import {
   pasteGuides, renameDocument, selectAll, setGuidesLocked, ungroupMask,
   ungroupSelection, updateSettings,
 } from '../history/Commands'
-import { copySelection, cutSelection, duplicateInPlace, paste } from '../state/Clipboard'
+import { copySelection, cutSelection, duplicateInPlace } from '../state/Clipboard'
+import { pasteFromSystem } from '../state/SystemClipboard'
 import { stepZoom, zoomTo, zoomToFit, zoomToSelection } from '../shortcuts/KeyboardManager'
 import { openDialog, setEditor, type WorkspaceTab } from '../state/EditorStore'
 import { useDocumentStore, useEditorStore } from '../state/hooks'
@@ -108,7 +109,7 @@ export const TopBar = memo(function TopBar() {
       { kind: 'separator' },
       { label: t('menu.cut'), shortcut: `${MOD}X`, disabled: !hasSelection, onSelect: () => cutSelection() },
       { label: t('menu.copy'), shortcut: `${MOD}C`, disabled: !hasSelection, onSelect: () => copySelection() },
-      { label: t('menu.paste'), shortcut: `${MOD}V`, onSelect: () => paste() },
+      { label: t('menu.paste'), shortcut: `${MOD}V`, onSelect: () => void pasteFromSystem() },
       { label: t('menu.duplicate'), shortcut: `${MOD}D`, disabled: !hasSelection, onSelect: () => duplicateInPlace() },
       { label: t('menu.delete'), shortcut: 'Del', disabled: !hasSelection, onSelect: () => deleteSelection() },
       { label: t('menu.selectAll'), shortcut: `${MOD}A`, onSelect: selectAll },

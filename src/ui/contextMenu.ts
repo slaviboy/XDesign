@@ -30,7 +30,11 @@ import {
   ungroupSelection,
 } from '../history/Commands'
 import { runBooleanOperation } from '../history/BooleanCommands'
-import { copySelection, cutSelection, duplicateInPlace, hasClipboardContent, paste } from '../state/Clipboard'
+import { copySelection, cutSelection, duplicateInPlace } from '../state/Clipboard'
+// Paste is never disabled: what another application has copied cannot be probed
+// synchronously, and a greyed-out Paste right after copying an image in Finder
+// is exactly the bug this routes around. pasteFromSystem says so instead.
+import { pasteFromSystem } from '../state/SystemClipboard'
 import { getDoc } from '../state/DocumentStore'
 import { editorStore, openDialog } from '../state/EditorStore'
 import { isMaskGroup, isShape, type DesignDocument, type NodeId } from '../document/types'
@@ -149,7 +153,7 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
 
   if (!has) {
     return [
-      { label: t('menu.paste'), shortcut: `${MOD}V`, disabled: !hasClipboardContent(), onSelect: () => paste(at) },
+      { label: t('menu.paste'), shortcut: `${MOD}V`, onSelect: () => void pasteFromSystem({ at }) },
       { kind: 'separator' },
       { label: t('menu.selectAll'), shortcut: `${MOD}A`, onSelect: () => import('../history/Commands').then((m) => m.selectAll()) },
       { label: t('menu.newArtboard'), onSelect: () => openDialog('artboard-preset') },
@@ -163,7 +167,7 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
   return [
     { label: t('menu.cut'), shortcut: `${MOD}X`, onSelect: () => cutSelection() },
     { label: t('menu.copy'), shortcut: `${MOD}C`, onSelect: () => copySelection() },
-    { label: t('menu.paste'), shortcut: `${MOD}V`, disabled: !hasClipboardContent(), onSelect: () => paste(at) },
+    { label: t('menu.paste'), shortcut: `${MOD}V`, onSelect: () => void pasteFromSystem({ at }) },
     { label: t('menu.duplicate'), shortcut: `${MOD}D`, onSelect: () => duplicateInPlace() },
     { label: t('menu.delete'), shortcut: 'Del', onSelect: () => deleteSelection() },
     { kind: 'separator' },

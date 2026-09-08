@@ -33,7 +33,7 @@ import { createAssetId } from '../document/ids'
 import { createImage } from '../document/NodeFactory'
 import { addNode } from '../document/DocumentModel'
 import { importSvg } from '../svg/SvgImporter'
-import { importTextFile, isTextFile } from '../app/textImport'
+import { importTextFile, isTextFile, placeText } from '../app/textImport'
 import { transaction, getDoc } from '../state/DocumentStore'
 import { containerAtPoint } from '../history/Commands'
 import { notify, setSelection } from '../state/EditorStore'
@@ -214,36 +214,47 @@ function insertImported(
 // ---------------------------------------------------------------------------
 
 /**
- * Import whatever is on the system clipboard: image bitmaps, SVG markup, or a
- * data URL pasted as text.
+ * Import whatever another application put on the clipboard: image bitmaps, SVG
+ * markup, a data URL pasted as text, or plain text.
+ *
+ * The order matters. Files come first because a clipboard carrying both a
+ * bitmap and a text description of it means the bitmap. Plain text comes last,
+ * as the fallback for anything that was not one of the richer forms.
+ *
+ * @param at    world point to centre the result on
  * @returns the created node ids, or null when the clipboard held nothing usable.
  */
-export async function importFromClipboardEvent(
-  event: ClipboardEvent,
+export async function importClipboardPayload(
+  payload: { files: readonly File[]; text: string | null },
   at: Vec2,
 ): Promise<NodeId[] | null> {
-  const data = event.clipboardData
-  if (!data) return null
-
-  const files = Array.from(data.files ?? [])
-  if (files.length > 0) {
-    const outcome = await importFiles(files, at)
+  if (payload.files.length > 0) {
+    const outcome = await importFiles([...payload.files], at)
     return outcome.createdIds
   }
 
-  const text = data.getData('text/plain')?.trim()
-  if (text && /^<svg[\s>]/i.test(text)) {
+  const text = payload.text?.trim()
+  if (!text) return null
+
+  if (/^<svg[\s>]/i.test(text)) {
     const file = new File([text], 'Pasted SVG.svg', { type: 'image/svg+xml' })
     const outcome = await importFiles([file], at)
     return outcome.createdIds
   }
-  if (text && /^data:image\//.test(text)) {
+  if (/^data:image\//.test(text)) {
     const blob = await (await fetch(text)).blob()
     const file = new File([blob], 'Pasted image', { type: blob.type })
     const outcome = await importFiles([file], at)
     return outcome.createdIds
   }
-  return null
+
+  // Anything else is text, and text becomes a text object — which is what
+  // Adobe does, and the only reading under which pasting a paragraph copied
+  // from a browser means anything at all.
+  const id = placeText(text, { at, centred: true, name: 'Pasted text' })
+  if (!id) return null
+  setSelection([id])
+  return [id]
 }
 
 // ---------------------------------------------------------------------------
