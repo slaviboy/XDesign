@@ -195,6 +195,24 @@ has to look the same to everyone who opens the file.
 drag-and-drop, paste, or File ▸ Import. Imported SVG becomes real editable nodes: shapes stay
 shapes, gradients stay gradients, groups stay groups. Nothing is ever rasterized on import.
 
+**SVG fidelity** — an Adobe XD or Illustrator export arrives as a scene graph, not a picture
+of one. Groups stay nested and in order, and layer names come from `data-name`, so the Layers
+panel reads the way it did in the tool the file came from. `clip-path` and `<mask>` become
+real clips you can release, rather than a reason to give up and keep the subtree as markup.
+`<style>` blocks and `class` selectors are resolved through the actual CSS cascade —
+presentation attributes at the bottom, inline style above them, `!important` above that —
+which is what stops a file that styles everything by class from arriving uniformly black.
+`<use>` and `<symbol>` are instantiated into editable nodes. Gradients keep the space they
+were authored in, along with `gradientTransform` and `spreadMethod`, instead of being
+flattened into an approximation. `<tspan>` keeps its meaning: a styling span becomes a style
+run inside one text object, a positioned one becomes its own object. `preserveAspectRatio` is
+honoured, so a square viewBox in a wide box letterboxes rather than stretching. Content set to
+`display:none` is imported hidden rather than dropped, and anything genuinely beyond the
+editing model — a filter graph, a pattern — is kept as real vector and says so. The reference
+export the work was built against is checked by rasterizing it alongside the app's own export
+of it and comparing pixels, because "the right nodes in the right tree" can all be true while
+the artwork still looks wrong.
+
 **Clipboard** — copy an image or some text anywhere on the machine and paste it straight in,
 by `⌘V`, right-click ▸ Paste, or the app menu. It lands in the artboard you are working in:
 the one selected, or the one holding the selection. Text becomes a text object sized to the

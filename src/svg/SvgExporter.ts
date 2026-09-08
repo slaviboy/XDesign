@@ -158,15 +158,26 @@ export async function exportNodesToSvg(
   // Explicit width/height are required: Firefox renders a viewBox-only SVG as
   // 0x0 when it is loaded through an <img>, which is exactly what the raster
   // exporter does.
+  // The crop offset lives in the viewBox rather than in a wrapping <g>. Both
+  // place the artwork identically, but a wrapper is a group, and a group
+  // re-imports as one — so every export used to add a level of nesting that
+  // meant nothing.
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" ` +
-    `width="${outW}" height="${outH}" viewBox="0 0 ${round(width, 3)} ${round(height, 3)}">` +
+    `width="${outW}" height="${outH}" ` +
+    `viewBox="${round(b.x - pad, 3)} ${round(b.y - pad, 3)} ${round(width, 3)} ${round(height, 3)}">` +
     defsBlock +
-    bg +
-    `<g transform="translate(${round(pad - b.x, 3)} ${round(pad - b.y, 3)})">${body}</g>` +
+    bgShifted(bg, b.x - pad, b.y - pad) +
+    body +
     `</svg>`
 
   return { svg, linkedAssets: ctx.linkedAssets, warnings: [...ctx.warnings] }
+}
+
+/** The background rect covers the viewBox, which no longer starts at the origin. */
+function bgShifted(bg: string, x: number, y: number): string {
+  if (!bg) return bg
+  return bg.replace('<rect ', `<rect x="${round(x, 3)}" y="${round(y, 3)}" `)
 }
 
 // ---------------------------------------------------------------------------
@@ -236,9 +247,35 @@ function emitNode(ctx: EmitContext, id: NodeId, isRoot: boolean): string {
     filter = ` filter="url(#${fx.id})"`
   }
 
-  const body = emitBody(ctx, node)
+  const { body, attrs = '' } = emitBody(ctx, node)
   if (!body) return ''
-  return `<g${name}${transform}${opacity}${blend}${filter}>${body}</g>`
+
+  // A leaf whose wrapper would carry nothing but a transform and a name puts
+  // them on the element itself. The wrapper is not free: every <g> re-imports
+  // as a group, so exporting and re-importing repeatedly used to add one level
+  // of nesting per node per round trip, without ever changing the artwork.
+  // opacity, mix-blend-mode and filter are all perfectly legal on a shape,
+  // a <text> or an <image>, and mean the same thing there as on a wrapping
+  // group — so none of them is a reason to add one.
+  if (!attrs && LEAF_TYPES.has(node.type)) {
+    return injectAttrs(body, `${name}${transform}${opacity}${blend}${filter}`)
+  }
+  return `<g${name}${transform}${opacity}${blend}${filter}${attrs}>${body}</g>`
+}
+
+/** Types whose body is always exactly one element that can carry a transform. */
+const LEAF_TYPES = new Set(['rect', 'ellipse', 'polygon', 'line', 'path', 'text', 'image'])
+
+/** Put attributes on the body's own opening tag. */
+function injectAttrs(body: string, attrs: string): string {
+  const at = body.indexOf(' ')
+  const selfClose = body.indexOf('/>')
+  const gt = body.indexOf('>')
+  // Guard rather than assume: anything that does not look like a single
+  // element keeps the wrapper, which is always correct if more verbose.
+  if (!body.startsWith('<') || gt === -1) return `<g${attrs}>${body}</g>`
+  const insertAt = at === -1 || at > gt ? (selfClose !== -1 && selfClose < gt ? selfClose : gt) : at
+  return body.slice(0, insertAt) + attrs + body.slice(insertAt)
 }
 
 /**
@@ -303,10 +340,19 @@ function emitBackdropBlur(
   return `${use}/><g clip-path="url(#${clipId})">${use} filter="url(#${filterId})"/></g>`
 }
 
-function emitBody(ctx: EmitContext, node: DesignNode): string {
+/**
+ * A node's contents, plus any attributes that belong on the wrapper rather than
+ * on a <g> of their own.
+ *
+ * A mask group used to return its own `<g clip-path=…>`, which emitNode then
+ * wrapped again — so one group node exported as two nested groups and
+ * re-imported as two. Handing the attribute up means the clip lands on the
+ * wrapper that already exists.
+ */
+function emitBody(ctx: EmitContext, node: DesignNode): { body: string; attrs?: string } {
   switch (node.type) {
     case 'document':
-      return emitChildren(ctx, node.children)
+      return { body: emitChildren(ctx, node.children) }
 
     case 'artboard': {
       const { width, height } = node.transform
@@ -319,15 +365,17 @@ function emitBody(ctx: EmitContext, node: DesignNode): string {
         ctx.defs.push(
           `<clipPath id="${clipId}"><rect width="${round(width, 3)}" height="${round(height, 3)}"/></clipPath>`,
         )
-        return `${bg}<g clip-path="url(#${clipId})">${emitChildren(ctx, node.children, bg)}</g>`
+        return {
+          body: `${bg}<g clip-path="url(#${clipId})">${emitChildren(ctx, node.children, bg)}</g>`,
+        }
       }
       // The background is part of the backdrop a blurred child sees.
-      return emitChildren(ctx, node.children, bg)
+      return { body: emitChildren(ctx, node.children, bg) }
     }
 
     case 'group': {
       if (!isMaskGroup(node) || !ctx.doc.nodes[node.maskId]) {
-        return emitChildren(ctx, node.children)
+        return { body: emitChildren(ctx, node.children) }
       }
       // Adobe's mask: the topmost child clips the rest and is not itself drawn.
       const clipId = `maskclip-${safeId(node.id)}`
@@ -341,7 +389,7 @@ function emitBody(ctx: EmitContext, node: DesignNode): string {
           `<mask id="${clipId}" maskUnits="userSpaceOnUse"${type}>` +
             `${emitNode(ctx, node.maskId, false)}</mask>`,
         )
-        return `<g mask="url(#${clipId})">${kids}</g>`
+        return { body: kids, attrs: ` mask="url(#${clipId})"` }
       }
 
       // Every outline inside the mask, not its bounding box: an imported
@@ -352,7 +400,7 @@ function emitBody(ctx: EmitContext, node: DesignNode): string {
       ctx.defs.push(
         `<clipPath id="${clipId}" clipPathUnits="userSpaceOnUse">${outlines}</clipPath>`,
       )
-      return `<g clip-path="url(#${clipId})">${kids}</g>`
+      return { body: kids, attrs: ` clip-path="url(#${clipId})"` }
     }
 
     case 'repeat-grid': {
@@ -360,7 +408,7 @@ function emitBody(ctx: EmitContext, node: DesignNode): string {
       // built once and reused, so a 10x10 grid does not serialise its contents
       // a hundred times over.
       const cellMarkup = emitChildren(ctx, node.children)
-      if (!cellMarkup) return ''
+      if (!cellMarkup) return { body: '' }
       const size = repeatGridSize(node)
       const clipId = `rgclip-${safeId(node.id)}`
       ctx.defs.push(
@@ -372,21 +420,21 @@ function emitBody(ctx: EmitContext, node: DesignNode): string {
             `<g transform="translate(${round(o.x, 3)} ${round(o.y, 3)})">${cellMarkup}</g>`,
         )
         .join('')
-      return `<g clip-path="url(#${clipId})">${cells}</g>`
+      return { body: cells, attrs: ` clip-path="url(#${clipId})"` }
     }
 
     case 'image':
-      return emitImage(ctx, node)
+      return { body: emitImage(ctx, node) }
 
     case 'text':
-      return emitText(ctx, node)
+      return { body: emitText(ctx, node) }
 
     case 'svg':
       // A preserved subtree is written back exactly as it came in, still vector.
-      return emitPreservedSvg(ctx, node)
+      return { body: emitPreservedSvg(ctx, node) }
 
     default:
-      return emitShape(ctx, node)
+      return { body: emitShape(ctx, node) }
   }
 }
 

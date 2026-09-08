@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url'
 import { test, expect } from '@playwright/test'
 import {
   CANVAS, captureDownload, dropFiles, nodesOfType, openApp, openExportDialog, selectAll,
+  svgPixelDifference,
 } from './helpers'
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/android-mobile-2.svg', import.meta.url))
@@ -333,5 +334,86 @@ test.describe('rich text', () => {
     await importMarkup(page, svg)
     const weights = await page.locator('.document-layer text tspan[font-weight="700"]').count()
     expect(weights).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * Acceptance.
+ *
+ * Everything above this point is structural: the right nodes, in the right
+ * tree, with the right names. All of that can pass while the artwork still
+ * looks wrong. These compare pixels.
+ */
+test.describe('acceptance', () => {
+  /** Export whatever is selected as SVG and return the markup. */
+  async function exportSelectionSvg(page: import('@playwright/test').Page): Promise<string> {
+    const out = await captureDownload(page, async () => {
+      await openExportDialog(page)
+      await page
+        .locator('[role="dialog"] .dialog-row', { hasText: 'Format' })
+        .locator('select')
+        .selectOption('svg')
+      await page.locator('button:text-is("Export")').click()
+    })
+    return out.buffer.toString('utf8')
+  }
+
+  test('the reference SVG renders as the reference SVG', async ({ page }) => {
+    await openApp(page)
+    await importMarkup(page, REFERENCE)
+    await selectAll(page)
+    const exported = await exportSelectionSvg(page)
+
+    const difference = await svgPixelDifference(page, REFERENCE, exported)
+    // The threshold is calibrated against measured scores, not guessed:
+    //   identical input          0.000
+    //   this round trip          0.026  (subpixel edges, substituted fonts)
+    //   gradients replaced flat  0.101
+    //   nothing drawn at all     0.983
+    // So it sits with room above the real score and well below the cheapest
+    // way to break the import.
+    expect(difference).toBeLessThan(0.05)
+  })
+
+  test('a second round trip changes nothing further', async ({ page }) => {
+    // The real regression guard for round-trip stability: whatever the first
+    // export loses, the second must lose nothing more.
+    await openApp(page)
+    await importMarkup(page, REFERENCE)
+    await selectAll(page)
+    const once = await exportSelectionSvg(page)
+
+    // A fresh document: importing into the one that is already open would put
+    // two copies of the artwork in the second export.
+    await openApp(page)
+    await importMarkup(page, once)
+    await selectAll(page)
+    const twice = await exportSelectionSvg(page)
+
+    expect(await svgPixelDifference(page, once, twice)).toBeLessThan(0.02)
+  })
+
+  test('re-importing does not grow the tree', async ({ page }) => {
+    // Every node used to be exported inside its own <g>, and every <g>
+    // re-imported as a group, so each round trip added a level of nesting per
+    // node that changed nothing about the artwork.
+    await openApp(page)
+    await importMarkup(page, REFERENCE)
+    const firstGroups = await nodesOfType(page, 'group').count()
+    const firstShapes = await nodesOfType(page, 'rect').count()
+
+    await selectAll(page)
+    const exported = await exportSelectionSvg(page)
+
+    await openApp(page)
+    await importMarkup(page, exported)
+    const secondGroups = await nodesOfType(page, 'group').count()
+    const secondShapes = await nodesOfType(page, 'rect').count()
+
+    expect(secondShapes).toBe(firstShapes)
+    // Exactly the same groups, not one more per node. Opacity, blend modes and
+    // filters go on the shape itself, and the export's crop offset lives in the
+    // viewBox — so nothing in a round trip invents a group any more.
+    expect(secondGroups).toBe(firstGroups)
   })
 })

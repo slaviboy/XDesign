@@ -268,6 +268,71 @@ export const SAMPLE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="200" h
   <path d="M10 90 C 40 60, 80 120, 120 90 A 20 20 0 0 1 160 90" stroke="#333" stroke-width="3" fill="none"/>
 </svg>`
 
+/**
+ * Rasterize two SVG strings at the same size and report how much they differ.
+ *
+ * Structural assertions can all pass while the artwork still looks wrong — the
+ * right nodes in the right tree painted with the wrong geometry. This is the
+ * only check that answers "does it look the same", so it is what the reference
+ * SVG's acceptance actually rests on.
+ *
+ * Both are drawn through the same <img> sandbox, so anything that sandbox does
+ * to both equally — substituting a font it cannot load, say — cancels out, and
+ * what is left is the difference the import and export introduced.
+ *
+ * @returns the fraction of pixels differing by more than `tolerance` per channel
+ */
+export async function svgPixelDifference(
+  page: Page,
+  a: string,
+  b: string,
+  size = { width: 400, height: 240 },
+  tolerance = 24,
+): Promise<number> {
+  return page.evaluate(
+    async ({ a, b, size, tolerance }) => {
+      const draw = (markup: string): Promise<ImageData> =>
+        new Promise((resolve, reject) => {
+          const img = new Image()
+          const blob = new Blob([markup], { type: 'image/svg+xml' })
+          const url = URL.createObjectURL(blob)
+          img.onload = () => {
+            const canvas = document.createElement('canvas')
+            canvas.width = size.width
+            canvas.height = size.height
+            const ctx = canvas.getContext('2d')!
+            // White ground, so transparency differences do not read as colour
+            // differences and both images are compared on the same backdrop.
+            ctx.fillStyle = '#ffffff'
+            ctx.fillRect(0, 0, size.width, size.height)
+            ctx.drawImage(img, 0, 0, size.width, size.height)
+            URL.revokeObjectURL(url)
+            resolve(ctx.getImageData(0, 0, size.width, size.height))
+          }
+          img.onerror = () => {
+            URL.revokeObjectURL(url)
+            reject(new Error('SVG could not be rasterized'))
+          }
+          img.src = url
+        })
+
+      const [ia, ib] = await Promise.all([draw(a), draw(b)])
+      let differing = 0
+      for (let i = 0; i < ia.data.length; i += 4) {
+        if (
+          Math.abs(ia.data[i]! - ib.data[i]!) > tolerance ||
+          Math.abs(ia.data[i + 1]! - ib.data[i + 1]!) > tolerance ||
+          Math.abs(ia.data[i + 2]! - ib.data[i + 2]!) > tolerance
+        ) {
+          differing++
+        }
+      }
+      return differing / (ia.data.length / 4)
+    },
+    { a, b, size, tolerance },
+  )
+}
+
 /** Trigger a download and return its bytes. */
 export async function captureDownload(
   page: Page,
