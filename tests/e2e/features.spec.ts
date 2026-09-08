@@ -1186,8 +1186,13 @@ test('the selected object is not offered twice', async ({ page }) => {
   await page.locator('.canvas-svg').click({ position: { x: 400, y: 300 } })
   await press(page, 'l')
 
-  // Still selected, so the menu's own Lock entry already covers it. Two ways to
-  // do one thing in a single menu is worse than one.
+  // Locking lets go, so getting back to "locked AND selected" now means the
+  // Layers panel — the one route a locked object can still be picked by.
+  await page.locator('.layer-row', { hasText: 'Rectangle' }).click()
+  await expect(page.locator('.layer-row.selected')).toHaveCount(1)
+
+  // Selected, so the menu's own Unlock entry already covers it. Two ways to do
+  // one thing in a single menu is worse than one.
   const items = await menuAt(page, 400, 300)
   expect(unblockItems(items)).toEqual([])
   expect(items.some((t) => t.startsWith('Unlock'))).toBe(true)
@@ -1281,4 +1286,90 @@ test('the highlight goes when the drag leaves', async ({ page }) => {
   })
   await expect(page.locator('.drop-target')).toHaveCount(0)
   await expect(page.locator('.drop-indicator')).toHaveCount(0)
+})
+
+// ------------------------------------------------- lock and hide let go --
+
+test('locking the selection lets go of it', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 300, y: 200 }, { x: 500, y: 380 })
+  await selectTool(page, 'select')
+  await page.locator('.canvas-svg').click({ position: { x: 400, y: 300 } })
+  await expect(page.locator('.layer-row.selected')).toHaveCount(1)
+
+  await press(page, 'l')
+  // A selection frame over something you can no longer touch is a lie: the
+  // handles do nothing and the inspector offers edits that will not apply.
+  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
+  await expect(page.locator('.transform-frame, .selection-frame')).toHaveCount(0)
+
+  // Unlocking does not take it back: you may have been clearing it out of the
+  // way of something else.
+  await press(page, 'l')
+  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
+})
+
+test('hiding the selection lets go of it', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'ellipse', { x: 300, y: 200 }, { x: 500, y: 380 })
+  await selectTool(page, 'select')
+  await page.locator('.canvas-svg').click({ position: { x: 400, y: 300 } })
+
+  await press(page, 'h', true)
+  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
+  await expect(page.locator('.transform-frame, .selection-frame')).toHaveCount(0)
+})
+
+test('locking a group lets go of a child selected inside it', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 300, y: 200 }, { x: 400, y: 300 })
+  await drawShape(page, 'ellipse', { x: 420, y: 200 }, { x: 520, y: 300 })
+  await selectTool(page, 'select')
+  await page.keyboard.press('Meta+a')
+  await press(page, 'g')
+  await page.keyboard.press('Escape')
+
+  // Step into the group and pick one child.
+  await page.locator('.canvas-svg').dblclick({ position: { x: 350, y: 250 } })
+  await expect(page.locator('.layer-row.selected')).toHaveCount(1)
+
+  // Lock the GROUP from its own layer row, leaving the child selected — the
+  // row action does not change the selection.
+  const groupRow = page.locator('.layer-row', { hasText: 'Group' })
+  await groupRow.hover()
+  await groupRow.locator('[title="Lock"]').click()
+
+  // The child is exactly as untouchable as the group that now contains it.
+  await expect(page.locator('.layer-row.selected')).toHaveCount(0)
+})
+
+test('locking something else leaves the selection alone', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 300, y: 200 }, { x: 400, y: 300 })
+  await drawShape(page, 'ellipse', { x: 500, y: 200 }, { x: 600, y: 300 })
+  await selectTool(page, 'select')
+  await page.locator('.canvas-svg').click({ position: { x: 350, y: 250 } })
+  const selected = await page.locator('.layer-row.selected').textContent()
+
+  // Lock the OTHER one through its layer row, which does not change the selection.
+  const other = page.locator('.layer-row', { hasText: 'Ellipse' })
+  await other.hover()
+  await other.locator('[title="Lock"]').click()
+
+  await expect(page.locator('.layer-row.selected')).toHaveCount(1)
+  expect(await page.locator('.layer-row.selected').textContent()).toBe(selected)
+})
+
+test('locking a shape being point-edited closes the point editor', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 300, y: 200 }, { x: 500, y: 380 })
+  await selectTool(page, 'select')
+  await page.locator('.canvas-svg').dblclick({ position: { x: 400, y: 300 } })
+  await expect(page.locator('.anchor-point')).toHaveCount(4)
+
+  await press(page, 'l')
+  // Holding a point editor open over a locked shape is the same lie in a
+  // different shape.
+  await expect(page.locator('.anchor-point')).toHaveCount(0)
+  await expect(page.locator('.edit-outline')).toHaveCount(0)
 })

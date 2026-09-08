@@ -86,8 +86,8 @@ bury the settings they describe, and a hover tooltip is unreadable at that lengt
 land in and names it: *Import to Artboard 2*. The highlight reads the same `artboardAtPoint` the
 drop itself parents by, so it cannot promise one thing and do another.
 
-**Getting back to a locked or hidden object** — right-clicking where one sits offers to unlock or
-show it by name. A locked object takes no pointer events and a hidden one is not drawn, so
+**Getting back to a locked or hidden object** — locking or hiding the selection lets go of it,
+and right-clicking where one sits offers to unlock or show it by name. A locked object takes no pointer events and a hidden one is not drawn, so
 either way the click finds bare canvas and the Layers panel used to be the only route back.
 
 **Editing** — click, shift-click, marquee, nested group entry, move/resize/rotate with
@@ -562,6 +562,18 @@ around it that adds the entered-group case. That matters most for the drop highl
 where the file will go, and the only way that promise cannot go stale is for it to be answered by
 the same function that keeps it.
 
+### Locking or hiding lets go of what you were holding
+
+A selection frame over an object you can no longer touch is a lie: the handles do nothing, the
+inspector offers edits that will not apply, and the transform fields report a size that cannot be
+changed. So locking or hiding drops the affected nodes from the selection — along with the point
+editor and the entered group, which are two more ways to be holding on to something that has just
+become untouchable.
+
+Descendants go too, because locking a group locks everything inside it: a child selected within a
+group you just locked is exactly as untouchable as the group. Unlocking and showing deliberately
+do NOT select — you are often unblocking something to get it out of the way, not to work on it.
+
 ### A right-click has to reach what the pointer cannot
 
 `blockedNodesAt` is the one hit test that deliberately ignores both the locked and the hidden
@@ -858,7 +870,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 283 unit tests (Vitest)
-npm run test:e2e   # 221 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 226 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

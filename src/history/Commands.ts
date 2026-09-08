@@ -14,6 +14,7 @@ import {
   notify,
   readDefaultGrid,
   setSelection,
+  type EditorState,
   type ToolId,
 } from '../state/EditorStore'
 import {
@@ -39,6 +40,7 @@ import {
 import {
   artboardAtPoint,
   boundsOfNodes,
+  isAncestorOf,
   geometryBounds,
   isEffectivelyLocked,
   nodePathData,
@@ -941,12 +943,14 @@ export function renameNode(id: NodeId, name: string): boolean {
 
 export function setVisibility(ids: readonly NodeId[], visible: boolean): boolean {
   if (ids.length === 0) return false
-  return transaction(visible ? 'Show' : 'Hide', (draft) => {
+  const ok = transaction(visible ? 'Show' : 'Hide', (draft) => {
     for (const id of ids) {
       const node = draft.nodes[id]
       if (node) node.visible = visible
     }
   })
+  if (ok && !visible) dropFromSelection(ids)
+  return ok
 }
 
 export function toggleVisibility(id: NodeId): boolean {
@@ -956,12 +960,45 @@ export function toggleVisibility(id: NodeId): boolean {
 
 export function setLocked(ids: readonly NodeId[], locked: boolean): boolean {
   if (ids.length === 0) return false
-  return transaction(locked ? 'Lock' : 'Unlock', (draft) => {
+  const ok = transaction(locked ? 'Lock' : 'Unlock', (draft) => {
     for (const id of ids) {
       const node = draft.nodes[id]
       if (node) node.locked = locked
     }
   })
+  if (ok && locked) dropFromSelection(ids)
+  return ok
+}
+
+/**
+ * Let go of anything that has just been locked or hidden.
+ *
+ * A selection frame over an object you can no longer touch is a lie: the
+ * handles do nothing, the inspector offers edits that will not apply, and the
+ * transform fields report a size you cannot change. Unlocking and showing do
+ * NOT select — you may have been unblocking something to get it out of the way.
+ *
+ * Descendants go too, because locking a group locks everything inside it: a
+ * child selected within a group you just locked is exactly as untouchable as
+ * the group.
+ */
+function dropFromSelection(affected: readonly NodeId[]): void {
+  const state = editorStore.getState()
+  const doc = getDoc()
+  const hit = (id: NodeId) => affected.some((a) => a === id || isAncestorOf(doc, a, id))
+
+  const selection = state.selection.filter((id) => !hit(id))
+  const patch: Partial<EditorState> = {}
+  if (selection.length !== state.selection.length) {
+    patch.selection = selection
+    patch.selectedPoints = []
+  }
+  // The point editor and the entered group are two more ways to be holding on
+  // to something that has just become untouchable.
+  if (state.nodeEditingId && hit(state.nodeEditingId)) patch.nodeEditingId = null
+  if (state.editingContext && hit(state.editingContext)) patch.editingContext = null
+
+  if (Object.keys(patch).length > 0) editorStore.setState(patch)
 }
 
 export function toggleLock(id: NodeId): boolean {
