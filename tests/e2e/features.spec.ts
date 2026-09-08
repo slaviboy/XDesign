@@ -665,8 +665,10 @@ test('the canvas accepts a dragged file and shows drop feedback', async ({ page 
   // `drop` never fired — which is why dragging an image in did nothing at all.
   const result = await dragFileOver(page, '[data-testid="canvas-root"]')
   expect(result.accepted).toBe(true)
-  await expect(page.locator('.drop-indicator')).toBeVisible()
-  await expect(page.locator('.drop-indicator')).toContainText('Import')
+  // The centre of the canvas is over the artboard, so the feedback is the
+  // message filling it rather than the chip that follows the cursor.
+  await expect(page.locator('.drop-message-body')).toBeVisible()
+  await expect(page.locator('.drop-message-body')).toContainText('Import')
 })
 
 test('a file dragged over the chrome shows no drop target', async ({ page }) => {
@@ -1019,7 +1021,7 @@ test('every preference explains itself behind an (i)', async ({ page }) => {
 
   // One button per setting, and nothing explained until asked.
   const buttons = page.locator('.dialog .info-button')
-  await expect(buttons).toHaveCount(9)
+  await expect(buttons).toHaveCount(10)
   await expect(page.locator('.dialog .pref-note')).toHaveCount(0)
 
   const snap = page.locator('[data-testid="info-snap-objects"]')
@@ -1233,7 +1235,11 @@ test('a dragged file highlights the artboard it will land in, by name', async ({
   // cannot show — a file dropped either side of an artboard edge ends up
   // somewhere quite different and the two look identical until it has happened.
   await expect(page.locator('.drop-target')).toHaveCount(1)
-  await expect(page.locator('.drop-indicator')).toContainText('Import to Artboard 1')
+  // A message large enough to read without looking for it, in the region it is
+  // describing — not a chip beside the cursor.
+  const message = page.locator('.drop-message-body')
+  await expect(message).toContainText('Import')
+  await expect(message).toContainText('Artboard 1')
 
   // It covers the artboard it names, not the whole canvas.
   // Within the outline's own 2px stroke, which straddles the edge it traces.
@@ -1263,7 +1269,7 @@ test('the highlight names the artboard the file actually lands in', async ({ pag
   await selectTool(page, 'select')
 
   await dragFileAt(page, 880, 300)
-  await expect(page.locator('.drop-indicator')).toContainText('Artboard 2')
+  await expect(page.locator('.drop-message-body')).toContainText('Artboard 2')
   const target = await page.locator('.drop-target').getAttribute('data-drop-target')
 
   // And that is genuinely where it goes: the highlight reads the same
@@ -1279,13 +1285,14 @@ test('the highlight goes when the drag leaves', async ({ page }) => {
   await openApp(page)
   await dragFileAt(page, 400, 300)
   await expect(page.locator('.drop-target')).toHaveCount(1)
+  await expect(page.locator('.drop-message')).toHaveCount(1)
 
   await page.evaluate(() => {
     const el = document.querySelector('[data-testid="canvas-root"]')!
     el.dispatchEvent(new DragEvent('dragleave', { bubbles: true, cancelable: true }))
   })
   await expect(page.locator('.drop-target')).toHaveCount(0)
-  await expect(page.locator('.drop-indicator')).toHaveCount(0)
+  await expect(page.locator('.drop-message')).toHaveCount(0)
 })
 
 // ------------------------------------------------- lock and hide let go --
@@ -1372,4 +1379,86 @@ test('locking a shape being point-edited closes the point editor', async ({ page
   // different shape.
   await expect(page.locator('.anchor-point')).toHaveCount(0)
   await expect(page.locator('.edit-outline')).toHaveCount(0)
+})
+
+test('the drop message shrinks to a chip where there is no room for it', async ({ page }) => {
+  await openApp(page)
+  // An artboard too small to hold the panel: the outline still shows, the
+  // words would otherwise be wider than the thing they describe.
+  await selectTool(page, 'artboard')
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  await page.mouse.move(canvas.x + 780, canvas.y + 480)
+  await page.mouse.down()
+  await page.mouse.move(canvas.x + 860, canvas.y + 540, { steps: 4 })
+  await page.mouse.up()
+  await selectTool(page, 'select')
+
+  await dragFileAt(page, 820, 510)
+  await expect(page.locator('.drop-target')).toHaveCount(1)
+  await expect(page.locator('.drop-message')).toHaveCount(1)
+  await expect(page.locator('.drop-message-body')).toHaveCount(0)
+})
+
+// ------------------------------------------------------------- language --
+
+/** Open Preferences and pick a language, whatever language it is currently in. */
+async function setLanguage(page: import('@playwright/test').Page, code: string) {
+  await page.locator('[data-testid="app-menu"]').click()
+  // The menu item is itself translated, so it is found by position rather than
+  // by text: Preferences is the third from the bottom, above Shortcuts/About.
+  await page.locator('.menu-item').nth(-3).click()
+  await page.locator('.dialog select').first().selectOption(code)
+  await page.locator('.dialog button').last().click()
+}
+
+test('the interface can be shown in another language', async ({ page }) => {
+  await openApp(page)
+  await expect(page.locator('.tool-button').first()).toHaveAttribute('aria-label', 'Select')
+
+  await setLanguage(page, 'de')
+  // The rail, the panel and the menu all follow — not just the dialog the
+  // choice was made in.
+  await expect(page.locator('.tool-button').first()).toHaveAttribute('aria-label', 'Auswählen')
+  await expect(page.locator('.section-title').first()).toHaveText('Dokument')
+  await page.locator('[data-testid="app-menu"]').click()
+  await expect(page.locator('.menu-item').first()).toHaveText(/Neu/)
+  await page.keyboard.press('Escape')
+
+  // Including languages with no shared alphabet.
+  await setLanguage(page, 'ja')
+  await expect(page.locator('.tool-button').first()).toHaveAttribute('aria-label', '選択')
+  await expect(page.locator('.section-title').first()).toHaveText('ドキュメント')
+})
+
+test('the language outlives the tab', async ({ page }) => {
+  await openApp(page)
+  await setLanguage(page, 'zh')
+  await expect(page.locator('.tool-button').first()).toHaveAttribute('aria-label', '选择')
+
+  await page.reload()
+  await page.waitForSelector(CANVAS)
+  await dismissRecovery(page)
+  await expect(page.locator('.tool-button').first()).toHaveAttribute('aria-label', '选择')
+
+  await setLanguage(page, 'en')
+})
+
+test('the language menu names each language in itself', async ({ page }) => {
+  await openApp(page)
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('.menu-item').nth(-3).click()
+
+  const options = await page.locator('.dialog select').first().locator('option').allTextContents()
+  // The one menu that cannot be translated: someone looking for their own
+  // language is looking for the word they use for it.
+  expect(options).toEqual([
+    'English',
+    'Български',
+    'Deutsch',
+    'Español',
+    'Français',
+    'Português',
+    '中文',
+    '日本語',
+  ])
 })

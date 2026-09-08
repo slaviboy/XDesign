@@ -23,6 +23,8 @@ import {
 } from '../history/Commands'
 import { isContainer, type DesignNode, type NodeId } from '../document/types'
 import { addToSelection, editorStore, setSelection } from '../state/EditorStore'
+import { t } from '../i18n'
+import { useLanguage } from '../state/hooks-i18n'
 import { useDocument, useEditorStore } from '../state/hooks'
 import {
   ArtboardIcon, ChevronDownIcon, ChevronRightIcon, EllipseIcon, ExportBadgeIcon,
@@ -41,6 +43,7 @@ interface DragState {
 }
 
 export function LayersPanel() {
+  void useLanguage()
   const doc = useDocument()
   const selection = useEditorStore((s) => s.selection)
   const [collapsed, setCollapsed] = useState<Set<NodeId>>(() => new Set())
@@ -93,7 +96,7 @@ export function LayersPanel() {
   return (
     <div className="layers-panel">
       <div className="layers-header">
-        <h3 className="section-title" style={{ margin: 0 }}>Layers</h3>
+        <h3 className="section-title" style={{ margin: 0 }}>{t('section.layers')}</h3>
         <div className="icon-row">
           <IconButton
             icon={<GroupIcon />}

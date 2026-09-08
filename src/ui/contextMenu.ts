@@ -20,6 +20,7 @@ import { isMaskGroup, isShape, type DesignDocument, type NodeId } from '../docum
 import { artboardIds, blockedNodesAt, geometryBounds } from '../document/SceneGraph'
 import { containsPoint } from '../geometry/Bounds'
 import { MOD_LABEL } from '../shortcuts/bindings'
+import { t } from '../i18n'
 import type { MenuItemSpec } from './Menu'
 import type { Vec2 } from '../geometry/Matrix'
 
@@ -47,26 +48,26 @@ function guidesSubmenu(doc: DesignDocument, targets: readonly NodeId[]): MenuIte
   const any = boards.some((n) => n && 'guides' in n && !!n.guides?.length)
   return {
     kind: 'submenu',
-    label: 'Guides',
+    label: t('menu.guides'),
     items: [
       {
-        label: 'Copy Guides',
+        label: t('menu.copyGuides'),
         disabled: targets.length !== 1 || !any,
         onSelect: () => copyGuides(targets[0]!),
       },
       {
-        label: 'Paste Guides',
+        label: t('menu.pasteGuides'),
         disabled: targets.length === 0 || !hasCopiedGuides(),
         onSelect: () => pasteGuides(targets),
       },
       { kind: 'separator' },
       {
-        label: 'Remove All Guides',
+        label: t('menu.removeAllGuides'),
         disabled: !any,
         onSelect: () => clearGuides(targets),
       },
       {
-        label: 'Lock All Guides',
+        label: t('menu.lockAllGuides'),
         shortcut: `⇧${MOD};`,
         checked: locked,
         disabled: targets.length === 0,
@@ -102,10 +103,10 @@ function unblockItems(
     // to do the same thing in one menu is worse than one.
     if (selection.includes(entry.id)) continue
     if (entry.locked) {
-      items.push({ label: `Unlock “${node.name}”`, onSelect: () => setLocked([entry.id], false) })
+      items.push({ label: t('menu.unlockNamed', { name: node.name }), onSelect: () => setLocked([entry.id], false) })
     }
     if (entry.hidden) {
-      items.push({ label: `Show “${node.name}”`, onSelect: () => setVisibility([entry.id], true) })
+      items.push({ label: t('menu.showNamed', { name: node.name }), onSelect: () => setVisibility([entry.id], true) })
     }
   }
   return items.length ? [{ kind: 'separator' }, ...items] : []
@@ -131,33 +132,33 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
 
   if (!has) {
     return [
-      { label: 'Paste', shortcut: `${MOD}V`, disabled: !hasClipboardContent(), onSelect: () => paste(at) },
+      { label: t('menu.paste'), shortcut: `${MOD}V`, disabled: !hasClipboardContent(), onSelect: () => paste(at) },
       { kind: 'separator' },
-      { label: 'Select All', shortcut: `${MOD}A`, onSelect: () => import('../history/Commands').then((m) => m.selectAll()) },
-      { label: 'New Artboard…', onSelect: () => openDialog('artboard-preset') },
+      { label: t('menu.selectAll'), shortcut: `${MOD}A`, onSelect: () => import('../history/Commands').then((m) => m.selectAll()) },
+      { label: t('menu.newArtboard'), onSelect: () => openDialog('artboard-preset') },
       ...(guideBoards.length ? [guidesSubmenu(doc, guideBoards)] : []),
       ...unblockItems(doc, at, selection),
       { kind: 'separator' },
-      { label: 'Export…', shortcut: `${MOD}E`, onSelect: () => openDialog('export') },
+      { label: t('menu.export'), shortcut: `${MOD}E`, onSelect: () => openDialog('export') },
     ]
   }
 
   return [
-    { label: 'Cut', shortcut: `${MOD}X`, onSelect: () => cutSelection() },
-    { label: 'Copy', shortcut: `${MOD}C`, onSelect: () => copySelection() },
-    { label: 'Paste', shortcut: `${MOD}V`, disabled: !hasClipboardContent(), onSelect: () => paste(at) },
-    { label: 'Duplicate', shortcut: `${MOD}D`, onSelect: () => duplicateInPlace() },
-    { label: 'Delete', shortcut: 'Del', onSelect: () => deleteSelection() },
+    { label: t('menu.cut'), shortcut: `${MOD}X`, onSelect: () => cutSelection() },
+    { label: t('menu.copy'), shortcut: `${MOD}C`, onSelect: () => copySelection() },
+    { label: t('menu.paste'), shortcut: `${MOD}V`, disabled: !hasClipboardContent(), onSelect: () => paste(at) },
+    { label: t('menu.duplicate'), shortcut: `${MOD}D`, onSelect: () => duplicateInPlace() },
+    { label: t('menu.delete'), shortcut: 'Del', onSelect: () => deleteSelection() },
     { kind: 'separator' },
-    { label: 'Group', shortcut: `${MOD}G`, disabled: !multiple, onSelect: () => groupSelection() },
+    { label: t('menu.group'), shortcut: `${MOD}G`, disabled: !multiple, onSelect: () => groupSelection() },
     {
-      label: 'Ungroup',
+      label: t('menu.ungroup'),
       shortcut: `⇧${MOD}G`,
       disabled: !nodes.some((n) => n!.type === 'group'),
       onSelect: () => ungroupSelection(),
     },
     {
-      label: 'Mask With Shape',
+      label: t('menu.maskWithShape'),
       shortcut: `⇧${MOD}M`,
       disabled: !canMaskSelection(),
       onSelect: () => maskWithShape(),
@@ -165,12 +166,12 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
     // Adobe: "select the object and right-click ... and select Ungroup Mask
     // from the context menu."
     {
-      label: 'Ungroup Mask',
+      label: t('menu.ungroupMask'),
       disabled: !nodes.some((n) => isMaskGroup(n)),
       onSelect: () => ungroupMask(),
     },
     {
-      label: 'Outline Stroke',
+      label: t('menu.outlineStroke'),
       shortcut: `⇧${MOD}O`,
       disabled: !canOutlineStrokeSelection(),
       onSelect: () => outlineStrokeSelection(),
@@ -180,39 +181,39 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
     { kind: 'separator' },
     {
       kind: 'submenu',
-      label: 'Arrange',
+      label: t('menu.arrange'),
       items: [
-        { label: 'Bring to Front', shortcut: `⇧${MOD}]`, onSelect: () => orderCommand('front') },
-        { label: 'Bring Forward', shortcut: `${MOD}]`, onSelect: () => orderCommand('forward') },
-        { label: 'Send Backward', shortcut: `${MOD}[`, onSelect: () => orderCommand('backward') },
-        { label: 'Send to Back', shortcut: `⇧${MOD}[`, onSelect: () => orderCommand('back') },
+        { label: t('menu.bringToFront'), shortcut: `⇧${MOD}]`, onSelect: () => orderCommand('front') },
+        { label: t('menu.bringForward'), shortcut: `${MOD}]`, onSelect: () => orderCommand('forward') },
+        { label: t('menu.sendBackward'), shortcut: `${MOD}[`, onSelect: () => orderCommand('backward') },
+        { label: t('menu.sendToBack'), shortcut: `⇧${MOD}[`, onSelect: () => orderCommand('back') },
       ],
     },
     {
       kind: 'submenu',
-      label: 'Transform',
+      label: t('menu.transform'),
       items: [
-        { label: 'Flip Horizontal', onSelect: () => flipSelection('h') },
-        { label: 'Flip Vertical', onSelect: () => flipSelection('v') },
+        { label: t('menu.flipHorizontal'), onSelect: () => flipSelection('h') },
+        { label: t('menu.flipVertical'), onSelect: () => flipSelection('v') },
         { kind: 'separator' },
-        { label: 'Rotate 90° CW', onSelect: () => rotateSelection(90) },
-        { label: 'Rotate 90° CCW', onSelect: () => rotateSelection(-90) },
-        { label: 'Rotate 180°', onSelect: () => rotateSelection(180) },
+        { label: t('menu.rotate90cw'), onSelect: () => rotateSelection(90) },
+        { label: t('menu.rotate90ccw'), onSelect: () => rotateSelection(-90) },
+        { label: t('menu.rotate180'), onSelect: () => rotateSelection(180) },
       ],
     },
     {
       kind: 'submenu',
-      label: 'Align',
+      label: t('menu.align'),
       items: [
-        { label: 'Left', onSelect: () => alignSelection('left') },
-        { label: 'Center Horizontally', onSelect: () => alignSelection('center-h') },
-        { label: 'Right', onSelect: () => alignSelection('right') },
-        { label: 'Top', onSelect: () => alignSelection('top') },
-        { label: 'Center Vertically', onSelect: () => alignSelection('center-v') },
-        { label: 'Bottom', onSelect: () => alignSelection('bottom') },
+        { label: t('menu.left'), onSelect: () => alignSelection('left') },
+        { label: t('menu.centerHorizontally'), onSelect: () => alignSelection('center-h') },
+        { label: t('menu.right'), onSelect: () => alignSelection('right') },
+        { label: t('menu.top'), onSelect: () => alignSelection('top') },
+        { label: t('menu.centerVertically'), onSelect: () => alignSelection('center-v') },
+        { label: t('menu.bottom'), onSelect: () => alignSelection('bottom') },
         { kind: 'separator' },
-        { label: 'Distribute Horizontally', disabled: nodes.length < 3, onSelect: () => distributeSelection('horizontal') },
-        { label: 'Distribute Vertically', disabled: nodes.length < 3, onSelect: () => distributeSelection('vertical') },
+        { label: t('menu.distributeHorizontally'), disabled: nodes.length < 3, onSelect: () => distributeSelection('horizontal') },
+        { label: t('menu.distributeVertically'), disabled: nodes.length < 3, onSelect: () => distributeSelection('vertical') },
       ],
     },
     {

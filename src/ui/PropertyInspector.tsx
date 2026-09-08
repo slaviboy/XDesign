@@ -57,6 +57,8 @@ import {
   setEditor,
 } from '../state/EditorStore'
 import { liveGuide } from '../tools/GuideDrag'
+import { t } from '../i18n'
+import { useLanguage } from '../state/hooks-i18n'
 import { useDocument, useEditorStore, useLiveTransformTick, useSelectedNodes } from '../state/hooks'
 import { IconSelect, NumberField, Section, Select, TextField, common, IconButton } from './primitives'
 import { PaintPopover, PAINT_POPOVER_WIDTH } from './ColorPicker'
@@ -99,6 +101,8 @@ import {
 
 export function PropertyInspector() {
   const selected = useSelectedNodes()
+  // The whole panel is text; one subscription at the top re-renders all of it.
+  void useLanguage()
   const guide = useEditorStore((s) => s.selectedGuide)
   return (
     <div className="inspector-scroll">
@@ -143,8 +147,8 @@ function GuideSection({ selected }: { selected: { artboardId: string; guideId: s
   const extent = guide.axis === 'x' ? board.transform.width : board.transform.height
 
   return (
-    <Section title="Guide">
-      <div className="multi-note">{guide.axis === 'x' ? 'Vertical' : 'Horizontal'} · {board.name}</div>
+    <Section title={t('section.guide')}>
+      <div className="multi-note">{guide.axis === 'x' ? t('label.vertical') : t('label.horizontal')} · {board.name}</div>
       <div className="field-row cols-3">
         <NumberField
           label={guide.axis.toUpperCase()}
@@ -170,7 +174,7 @@ function GuideSection({ selected }: { selected: { artboardId: string; guideId: s
           disabled={board.guidesLocked}
           onClick={() => removeGuide(board.id, guide.id)}
         >
-          Delete Guide
+          {t('label.deleteGuide')}
         </button>
       </div>
     </Section>
@@ -187,29 +191,29 @@ function DocumentSection() {
 
   return (
     <>
-      <Section title="Document">
+      <Section title={t('section.document')}>
         <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
-          <TextField label="Name" value={doc.name} onChange={renameDocument} />
+          <TextField label={t('label.name')} value={doc.name} onChange={renameDocument} />
         </div>
         <div className="multi-note">
-          {Object.keys(doc.nodes).length - 1} objects · {Object.keys(doc.assets).length} images
+          {t('document.counts', {
+            objects: Object.keys(doc.nodes).length - 1,
+            images: Object.keys(doc.assets).length,
+          })}
         </div>
       </Section>
 
       {/* Named to distinguish it from an artboard's own grid, which is a
           different feature with different settings. */}
-      <Section title="Canvas Grid">
-        <div className="multi-note">
-          A drawing aid across the whole canvas. An artboard's own Square or
-          Layout grid is set on the artboard.
-        </div>
+      <Section title={t('section.canvasGrid')}>
+        <div className="multi-note">{t('note.canvasGrid')}</div>
         <label className="checkbox-row">
           <input
             type="checkbox"
             checked={doc.settings.gridVisible}
             onChange={(e) => updateSettings({ gridVisible: e.target.checked })}
           />
-          Show grid
+          {t('label.showGrid')}
         </label>
         <label className="checkbox-row">
           <input
@@ -217,11 +221,11 @@ function DocumentSection() {
             checked={doc.settings.snapToGrid}
             onChange={(e) => updateSettings({ snapToGrid: e.target.checked })}
           />
-          Snap to grid
+          {t('label.snapToGrid')}
         </label>
         <div className="field-row">
           <NumberField
-            label="Size"
+            label={t('label.size')}
             value={doc.settings.gridSize}
             min={1}
             max={500}
@@ -233,14 +237,14 @@ function DocumentSection() {
         </div>
       </Section>
 
-      <Section title="Guides & Snapping">
+      <Section title={t('section.guidesSnapping')}>
         <label className="checkbox-row">
           <input
             type="checkbox"
             checked={doc.settings.guidesVisible}
             onChange={(e) => updateSettings({ guidesVisible: e.target.checked })}
           />
-          Show guides
+          {t('label.showGuides')}
         </label>
         <label className="checkbox-row">
           <input
@@ -248,7 +252,7 @@ function DocumentSection() {
             checked={doc.settings.snapToObjects}
             onChange={(e) => updateSettings({ snapToObjects: e.target.checked })}
           />
-          Snap to objects
+          {t('label.snapToObjects')}
         </label>
         <label className="checkbox-row">
           <input
@@ -256,7 +260,7 @@ function DocumentSection() {
             checked={snapEnabled}
             onChange={(e) => setEditor({ snapEnabled: e.target.checked })}
           />
-          Snapping enabled
+          {t('label.snappingEnabled')}
         </label>
       </Section>
 
@@ -355,7 +359,7 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
         <span className="truncate">{multiple ? `${nodes.length} objects selected` : nodes[0]!.name}</span>
       </div>
 
-      <Section title="Transform">
+      <Section title={t('section.transform')}>
         <div className="transform-grid">
           <NumberField className="tf-w" label="W" value={effectiveW} min={0.5} onChange={(v) => applyWidth(v)} scrubStep={0.5} />
           <button
@@ -413,7 +417,7 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
         </div>
       </Section>
 
-      <Section title="Align">
+      <Section title={t('section.align')}>
         <div className="icon-row">
           <IconButton icon={<AlignLeftIcon />} label="Align left" onClick={() => alignSelection('left')} />
           <IconButton icon={<AlignCenterHIcon />} label="Align center" onClick={() => alignSelection('center-h')} />
@@ -679,7 +683,7 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
 
   return (
     <>
-      <Section title="Fill">
+      <Section title={t('section.fill')}>
         <div className="paint-row">
           <PaintToggle
             on={fillOn}
@@ -716,7 +720,7 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
         )}
       </Section>
 
-      <Section title="Stroke">
+      <Section title={t('section.stroke')}>
         <div className="paint-row">
           <PaintToggle
             on={strokeOn}
@@ -780,7 +784,7 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
 
       {/* Adobe: "click Drop Shadow or Inner Shadow in the Property Inspector",
           and the checkbox next to it turns the effect off without losing it. */}
-      <Section title="Shadow">
+      <Section title={t('section.shadow')}>
         <div className="paint-row">
           <PaintToggle
             on={!!shadow?.visible}
@@ -830,7 +834,7 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
           an object blur blurs the shape, a background blur blurs what is behind
           it. Brightness and Opacity belong to the background one alone — Adobe:
           "Ignored for object blur effects." */}
-      <Section title="Blur">
+      <Section title={t('section.blur')}>
         <div className="paint-row">
           <PaintToggle
             on={!!blur?.visible}
@@ -1161,7 +1165,7 @@ function ArtboardSection({ nodes }: { nodes: DesignNode[] }) {
 
   return (
     <>
-      <Section title="Grid">
+      <Section title={t('section.grid')}>
         <div className="paint-row">
           <PaintToggle
             on={on}
@@ -1176,11 +1180,11 @@ function ArtboardSection({ nodes }: { nodes: DesignNode[] }) {
           <Select
             value={kind}
             options={[
-              { value: 'square', label: 'Square' },
-              { value: 'layout', label: 'Layout' },
+              { value: 'square', label: t('label.square') },
+              { value: 'layout', label: t('label.layout') },
             ]}
             onChange={(v) => set({ type: v as 'square' | 'layout', visible: true })}
-            title="Grid type"
+            title={t('label.gridType')}
           />
           <Swatch
             paint={{ type: 'solid', color }}
@@ -1278,7 +1282,7 @@ function ArtboardSection({ nodes }: { nodes: DesignNode[] }) {
             title="Use this grid for new artboards, in this and future documents"
             onClick={() => saveDefaultGrid(first.grid ?? defaultGridOf(kind))}
           >
-            Make Default
+            {t('label.makeDefault')}
           </button>
         </div>
       </Section>
@@ -1322,7 +1326,7 @@ function RepeatGridSection({ nodes }: { nodes: DesignNode[] }) {
   }
 
   return (
-    <Section title="Repeat Grid">
+    <Section title={t('section.repeatGrid')}>
       <div className="field-row">
         <NumberField
           label="Cols"
@@ -1372,7 +1376,7 @@ function ShapeSection({ nodes }: { nodes: DesignNode[] }) {
   if (roundable.length === 0 && polygons.length === 0) return null
 
   return (
-    <Section title="Shape">
+    <Section title={t('section.shape')}>
       {polygons.length > 0 && (
         <div className="field-row">
           <NumberField
@@ -1430,7 +1434,7 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
   const groups = fontsByCategory()
 
   return (
-    <Section title="Text">
+    <Section title={t('section.text')}>
       <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
         <Select
           value={family ?? ''}
@@ -1519,7 +1523,7 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
 function ExportSection({ nodes }: { nodes: DesignNode[] }) {
   const marked = common(nodes, (n) => n.markedForExport)
   return (
-    <Section title="Export">
+    <Section title={t('section.export')}>
       <label className="checkbox-row">
         <input
           type="checkbox"

@@ -82,9 +82,15 @@ between sessions. Every preference carries an **(i)** that opens a sentence or t
 actually does — behind a press rather than a hover, because six notes stacked permanently would
 bury the settings they describe, and a hover tooltip is unreadable at that length.
 
-**Dropping a file** — dragging an image over the canvas outlines and tints the artboard it will
-land in and names it: *Import to Artboard 2*. The highlight reads the same `artboardAtPoint` the
-drop itself parents by, so it cannot promise one thing and do another.
+**Dropping a file** — dragging an image over the canvas outlines the artboard it will land in with
+a dashed accent border and fills it with a message: *Import*, and underneath, *Release to add it to
+Artboard 2*. The highlight reads the same `artboardAtPoint` the drop itself parents by, so it
+cannot promise one thing and do another. Over bare pasteboard, where there is no region to fill,
+it shrinks to a chip at the cursor.
+
+**Eight languages** — English, Български, Deutsch, Español, Français, Português, 中文 and 日本語,
+chosen in Preferences and remembered on the machine. One JSON catalogue per locale keyed by
+resource id, with English as the source of truth and the fallback.
 
 **Getting back to a locked or hidden object** — locking or hiding the selection lets go of it,
 and right-clicking where one sits offers to unlock or show it by name. A locked object takes no pointer events and a hidden one is not drawn, so
@@ -562,6 +568,23 @@ around it that adds the entered-group case. That matters most for the drop highl
 where the file will go, and the only way that promise cannot go stale is for it to be answered by
 the same function that keeps it.
 
+### The language catalogues are checked against each other, not just parsed
+
+A translation drifts silently: a key goes missing, one is added that English does not have, a
+`{name}` placeholder gets renamed while being translated. None of that is visible until someone
+switches language and finds a raw resource id, or a sentence with a hole in it where the artboard
+name should be.
+
+So three tests compare the seven translations against English rather than merely loading them —
+identical key sets, identical sets of named placeholders per key, and fewer than a dozen strings
+per language that are byte-identical to English, which is what catches a file that was copied and
+never actually translated. Placeholders are named rather than positional precisely because word
+order is what changes between languages: German does not put the artboard where English does.
+
+English is also the runtime fallback, so a key a translation has not reached yet shows the English
+words rather than `menu.file.new` — a half-finished locale degrades to a readable mixture instead
+of to gibberish.
+
 ### Locking or hiding lets go of what you were holding
 
 A selection frame over an object you can no longer touch is a lie: the handles do nothing, the
@@ -869,8 +892,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 283 unit tests (Vitest)
-npm run test:e2e   # 226 end-to-end tests (Playwright, real Chromium)
+npm test           # 291 unit tests (Vitest)
+npm run test:e2e   # 230 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

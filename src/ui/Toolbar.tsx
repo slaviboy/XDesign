@@ -11,6 +11,8 @@ import { TOOLBAR_LAYOUT, getTool } from '../tools/ToolRegistry'
 import { setTool, type ToolId } from '../state/EditorStore'
 import { useEditorStore } from '../state/hooks'
 import { Tooltip } from './primitives'
+import { t, type MessageKey } from '../i18n'
+import { useLanguage } from '../state/hooks-i18n'
 import {
   ArtboardIcon,
   CursorIcon,
@@ -46,21 +48,39 @@ const TOOL_ICONS: Record<ToolId, ReactNode> = {
   hand: <HandIcon size={TOOL_ICON_SIZE} />,
 }
 
+/** Registry id -> resource id. The registry keeps English for the shortcut layer. */
+const TOOL_KEYS: Record<ToolId, MessageKey> = {
+  select: 'tool.select',
+  'direct-select': 'tool.directSelect',
+  rect: 'tool.rect',
+  ellipse: 'tool.ellipse',
+  polygon: 'tool.polygon',
+  line: 'tool.line',
+  pen: 'tool.pen',
+  pencil: 'tool.pencil',
+  text: 'tool.text',
+  artboard: 'tool.artboard',
+  zoom: 'tool.zoom',
+  hand: 'tool.hand',
+}
+
 export const Toolbar = memo(function Toolbar() {
   const active = useEditorStore((s) => s.tool)
+  void useLanguage()
 
   return (
     <div className="toolbar" role="toolbar" aria-label="Tools">
       {TOOLBAR_LAYOUT.map((entry, i) => {
         if (entry === 'separator') return <div key={`sep${i}`} className="tool-separator" />
         const tool = getTool(entry)
+        const label = t(TOOL_KEYS[entry])
         return (
-          <Tooltip key={entry} label={tool.label} shortcut={tool.shortcut}>
+          <Tooltip key={entry} label={label} shortcut={tool.shortcut}>
             <button
               type="button"
               className={`tool-button${active === entry ? ' active' : ''}`}
               onClick={() => setTool(entry)}
-              aria-label={tool.label}
+              aria-label={label}
               aria-pressed={active === entry}
               data-tool={entry}
             >

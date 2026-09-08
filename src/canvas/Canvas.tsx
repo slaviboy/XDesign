@@ -26,6 +26,9 @@ import {
 import { DocumentLayer } from './NodeRenderer'
 import { SelectionOverlay } from './SelectionOverlay'
 import { GridOverlay } from './GridOverlay'
+import { ImportIcon } from '../ui/icons'
+import { t } from '../i18n'
+import { useLanguage } from '../state/hooks-i18n'
 import { ArtboardGuides, GuideHandle, GuideReadout, GuideStrips } from './ArtboardGuides'
 import { ToolOverlay } from './ToolOverlay'
 import { ArtboardLabels, ArtboardNameEditor } from './ArtboardLabels'
@@ -275,15 +278,8 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
       // same artboardAtPoint that containerAtPoint uses on the drop itself.
       const doc = getDoc()
       const artboardId = artboardAtPoint(doc, screenToDoc(editorStore.getState().viewport, screen))
-      const what = count > 1 ? `Import ${count} files` : 'Import'
-      const board = artboardId ? doc.nodes[artboardId] : undefined
       setEditor({
-        dropIndicator: {
-          x: screen.x,
-          y: screen.y,
-          label: board ? `${what} to ${board.name}` : what,
-          artboardId,
-        },
+        dropIndicator: { x: screen.x, y: screen.y, label: dropLabel(count), artboardId },
       })
     },
     [toCanvasPoint],
@@ -413,12 +409,64 @@ function DropTarget() {
   )
 }
 
+/**
+ * What will happen, without where.
+ *
+ * The destination belongs to the panel's second line — putting it in both makes
+ * the heading repeat the sentence underneath it.
+ */
+function dropLabel(count: number): string {
+  return count > 1 ? t('drop.importCount', { count }) : t('drop.import')
+}
+
+/**
+ * What a dragged file is about to become.
+ *
+ * Two presentations of one thing. Over an artboard there is a region to fill,
+ * so it fills it: a message centred in the target, big enough to read without
+ * looking for it, which is what every drop zone worth the name does. Over bare
+ * pasteboard there is no region — the file lands wherever the cursor is — so it
+ * shrinks to a chip at the cursor, which is the only honest place to put it.
+ *
+ * HTML rather than SVG text: this is a paragraph with a heading, and laying that
+ * out in SVG means measuring strings by hand.
+ */
 function DropIndicator() {
+  void useLanguage()
   const indicator = useEditorStore((s) => s.dropIndicator)
+  const viewport = useEditorStore((s) => s.viewport)
+  const doc = useDocumentStore((s) => s.doc)
   if (!indicator) return null
+
+  const board = indicator.artboardId ? doc.nodes[indicator.artboardId] : undefined
+  if (!board || board.type !== 'artboard') {
+    return (
+      <div className="drop-indicator" style={{ left: indicator.x, top: indicator.y }}>
+        {indicator.label}
+      </div>
+    )
+  }
+
+  const bounds = geometryBounds(doc, board.id)
+  const origin = docToScreen(viewport, { x: bounds.x, y: bounds.y })
+  const width = bounds.width * viewport.zoom
+  const height = bounds.height * viewport.zoom
+
   return (
-    <div className="drop-indicator" style={{ left: indicator.x, top: indicator.y }}>
-      {indicator.label}
+    <div
+      className="drop-message"
+      style={{ left: origin.x, top: origin.y, width, height }}
+      data-drop-message={board.id}
+    >
+      {/* Below this the words would be wider than the artboard and the panel
+          would be describing itself rather than the target. */}
+      {width > 220 && height > 140 && (
+        <div className="drop-message-body">
+          <ImportIcon size={28} />
+          <strong>{indicator.label}</strong>
+          <span>{t('drop.release', { name: board.name })}</span>
+        </div>
+      )}
     </div>
   )
 }

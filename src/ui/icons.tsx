@@ -487,6 +487,14 @@ export const JoinBevelIcon = (p: IconProps) => (
   </Icon>
 )
 
+/** A tray with an arrow going into it: the universal "drop a file here". */
+export const ImportIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 2.5v7" />
+    <path d="M5 6.5L8 9.5l3-3" />
+    <path d="M2.8 10.5v1.7a1.3 1.3 0 001.3 1.3h7.8a1.3 1.3 0 001.3-1.3v-1.7" />
+  </Icon>
+)
 export const InfoIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="8" cy="8" r="6" />

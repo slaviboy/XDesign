@@ -12,6 +12,8 @@ import { useDocument, useEditorStore } from '../state/hooks'
 import { getStorageEstimate, clearRecent } from '../persistence/IndexedDbStore'
 import { supportsFileSystemAccess } from '../persistence/FileSystem'
 import { ALT_LABEL, MOD_LABEL, shortcutGroups } from '../shortcuts/bindings'
+import { LANGUAGES, getLanguage, setLanguage, t, type LanguageCode } from '../i18n'
+import { useLanguage } from '../state/hooks-i18n'
 import { InfoIcon } from './icons'
 import { NumberField, Select, TextField } from './primitives'
 import { PaintPopover, PAINT_POPOVER_WIDTH } from './ColorPicker'
@@ -194,6 +196,10 @@ export function PreferencesDialog() {
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const marqueeMode = useEditorStore((s) => s.marqueeMode)
   const [guideColorAt, setGuideColorAt] = useState<{ x: number; y: number } | null>(null)
+  // Re-renders the dialog when the language changes, so the choice takes effect
+  // in the panel you made it in.
+  void useLanguage()
+  const language = getLanguage()
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
 
   useEffect(() => {
@@ -202,18 +208,34 @@ export function PreferencesDialog() {
 
   return (
     <DialogShell
-      title="Preferences"
+      title={t('prefs.title')}
       onClose={closeDialog}
-      footer={<button type="button" className="button primary" onClick={closeDialog}>Done</button>}
+      footer={<button type="button" className="button primary" onClick={closeDialog}>{t('prefs.done')}</button>}
     >
-      <h4 style={{ margin: '0 0 8px', fontSize: 12 }}>Canvas</h4>
+      <h4 style={{ margin: '0 0 8px', fontSize: 12 }}>{t('prefs.language')}</h4>
+      <PreferenceRow
+        name="language"
+        info="The language the interface is shown in. It is remembered on this computer rather than saved with the document, because it is a fact about you and not about the artwork. Anything a translation has not covered yet falls back to English."
+      >
+        <div className="dialog-row">
+          <label>{t('label.language')}</label>
+          <Select
+            value={language}
+            options={LANGUAGES.map((l) => ({ value: l.code, label: l.label }))}
+            onChange={(v) => setLanguage(v as LanguageCode)}
+            title={t('label.language')}
+          />
+        </div>
+      </PreferenceRow>
+
+      <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>{t('prefs.canvas')}</h4>
       <PreferenceRow
         name="grid-visible"
         info="Draws a ruled grid over the canvas as a drawing aid. It is never part of the document and never appears in an export."
       >
         <label className="checkbox-row">
           <input type="checkbox" checked={doc.settings.gridVisible} onChange={(e) => updateSettings({ gridVisible: e.target.checked })} />
-          Show grid
+          {t('label.showGrid')}
         </label>
       </PreferenceRow>
       <PreferenceRow
@@ -222,7 +244,7 @@ export function PreferencesDialog() {
       >
         <label className="checkbox-row">
           <input type="checkbox" checked={doc.settings.snapToGrid} onChange={(e) => updateSettings({ snapToGrid: e.target.checked })} />
-          Snap to grid
+          {t('label.snapToGrid')}
         </label>
       </PreferenceRow>
       <PreferenceRow
@@ -231,7 +253,7 @@ export function PreferencesDialog() {
       >
         <label className="checkbox-row">
           <input type="checkbox" checked={doc.settings.snapToObjects} onChange={(e) => updateSettings({ snapToObjects: e.target.checked })} />
-          Snap to objects
+          {t('label.snapToObjects')}
         </label>
       </PreferenceRow>
       <PreferenceRow
@@ -240,7 +262,7 @@ export function PreferencesDialog() {
       >
         <label className="checkbox-row">
           <input type="checkbox" checked={doc.settings.guidesVisible} onChange={(e) => updateSettings({ guidesVisible: e.target.checked })} />
-          Show guides
+          {t('label.showGuides')}
         </label>
       </PreferenceRow>
       <PreferenceRow
@@ -249,7 +271,7 @@ export function PreferencesDialog() {
       >
         <label className="checkbox-row">
           <input type="checkbox" checked={snapEnabled} onChange={(e) => setEditor({ snapEnabled: e.target.checked })} />
-          Snapping enabled
+          {t('label.snappingEnabled')}
         </label>
       </PreferenceRow>
       <PreferenceRow
@@ -257,7 +279,7 @@ export function PreferencesDialog() {
         info="The spacing between grid lines, in document units — the same units as the W and H fields."
       >
         <div className="dialog-row" style={{ marginTop: 10 }}>
-          <label>Canvas grid size</label>
+          <label>{t('label.canvasGridSize')}</label>
           <NumberField
             value={doc.settings.gridSize}
             min={1}
@@ -270,18 +292,18 @@ export function PreferencesDialog() {
         </div>
       </PreferenceRow>
 
-      <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>Guides</h4>
+      <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>{t('prefs.guides')}</h4>
       <PreferenceRow
         name="guide-drag"
         info="A guide's line lies across the artwork, so dragging it is easy to do by accident when you meant to grab a shape. Restricting it to the handle puts the whole artboard back within reach of the tools; the line still selects the guide either way, and the handle appears on whichever guide is selected."
       >
         <div className="dialog-row">
-          <label>Guides drag from</label>
+          <label>{t('label.guidesDragFrom')}</label>
           <Select
             value={doc.settings.guideDragMode}
             options={[
-              { value: 'line', label: 'The line or its handle' },
-              { value: 'handle', label: 'Only the handle' },
+              { value: 'line', label: t('prefs.dragFromLine') },
+              { value: 'handle', label: t('prefs.dragFromHandle') },
             ]}
             onChange={(v) => updateSettings({ guideDragMode: v as GuideDragMode })}
             title="Where a guide can be picked up"
@@ -293,11 +315,11 @@ export function PreferencesDialog() {
         info="The colour guides are drawn in. It is saved with the document rather than following the theme, because it is a choice about the artwork you are working on — a magenta guide is invisible over magenta artwork."
       >
         <div className="dialog-row">
-          <label>Guide colour</label>
+          <label>{t('label.guideColour')}</label>
           <button
             type="button"
             className="swatch"
-            aria-label="Guide colour"
+            aria-label={t('label.guideColour')}
             data-testid="guide-color"
             style={{ background: toCss(doc.settings.guideColor) }}
             onClick={(e) => {
@@ -308,18 +330,18 @@ export function PreferencesDialog() {
         </div>
       </PreferenceRow>
 
-      <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>Selection</h4>
+      <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>{t('prefs.selection')}</h4>
       <PreferenceRow
         name="marquee-mode"
         info={`Dragging a rectangle over the canvas selects whatever falls inside it. “Anything it touches” selects an object the moment the rectangle clips any part of it, so a single stroke through a row picks up the whole row. “Objects fully inside” takes only what the rectangle completely surrounds. Holding ${ALT_LABEL} while you drag uses the other mode for that one selection.`}
       >
         <div className="dialog-row">
-          <label>Marquee selects</label>
+          <label>{t('label.marqueeSelects')}</label>
           <Select
             value={marqueeMode}
             options={[
-              { value: 'touch', label: 'Anything it touches' },
-              { value: 'enclose', label: 'Objects fully inside' },
+              { value: 'touch', label: t('prefs.marqueeTouch') },
+              { value: 'enclose', label: t('prefs.marqueeEnclose') },
             ]}
             onChange={(v) => setMarqueeMode(v as MarqueeMode)}
             title="What a drag-selection has to cover before an object counts as selected"
@@ -327,7 +349,7 @@ export function PreferencesDialog() {
         </div>
       </PreferenceRow>
 
-      <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>Storage</h4>
+      <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>{t('prefs.storage')}</h4>
       <div className="multi-note">
         Documents autosave to this browser's local database every few seconds. Nothing is uploaded
         anywhere.
@@ -348,7 +370,7 @@ export function PreferencesDialog() {
         style={{ marginTop: 8 }}
         onClick={() => void clearRecent()}
       >
-        Clear recent documents
+        {t('prefs.clearRecent')}
       </button>
 
       {guideColorAt && (
@@ -394,7 +416,7 @@ function PreferenceRow({
         <button
           type="button"
           className={`info-button${open ? ' active' : ''}`}
-          aria-label={open ? 'Hide explanation' : 'What does this do?'}
+          aria-label={open ? t('prefs.hideExplanation') : t('prefs.whatDoesThisDo')}
           aria-expanded={open}
           aria-controls={noteId}
           data-testid={`info-${name}`}
@@ -429,7 +451,7 @@ export function ShortcutsDialog() {
       title="Keyboard Shortcuts"
       width={520}
       onClose={closeDialog}
-      footer={<button type="button" className="button primary" onClick={closeDialog}>Done</button>}
+      footer={<button type="button" className="button primary" onClick={closeDialog}>{t('prefs.done')}</button>}
     >
       <div className="shortcut-grid">
         {shortcutGroups().map((group) => (
