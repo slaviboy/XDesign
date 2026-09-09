@@ -1229,6 +1229,20 @@ half that falls outside the glyph — which is what an outlined letter is suppos
 like, and what Adobe does, where Stroke sits below Fill in a type object's appearance. An
 outer stroke is then asked for at double width so the full width lands outside.
 
+### What you click is the stroke, not the curve down the middle of it
+
+Hit-testing a whole object has always counted the stroke: a line drawn eight
+pixels wide is an eight-pixel target. Selecting a SEGMENT of one used a flat
+seven-pixel radius around the zero-width curve instead, and between the two lay
+a band where clicking a line opened its points and selected nothing. You clicked
+what you could see, the anchors appeared, and nothing moved — worse the thicker
+the stroke, and worse the further in the view was zoomed, because zooming is
+what makes a thin stroke wide on screen.
+
+The segment test counts the stroke now, so anywhere the line is visible is
+somewhere it can be picked up. Anchors deliberately do not: an anchor is a
+handle drawn at a fixed size on screen, not something the artwork draws.
+
 ### A click target is a screen distance, wherever the object is
 
 The tolerance a click carries is in world units — screen pixels divided by the zoom — but
@@ -1407,7 +1421,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 680 unit tests (Vitest)
-npm run test:e2e   # 354 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 356 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

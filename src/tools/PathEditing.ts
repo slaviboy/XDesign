@@ -48,6 +48,7 @@ import { convertNodeToPath } from '../document/DocumentModel'
 import { liveTransform } from '../canvas/LiveTransform'
 import { geomKey } from '../canvas/liveKeys'
 import { transaction, getDoc } from '../state/DocumentStore'
+import { hasStyle } from '../document/types'
 import { editorStore, refreshOverlay, setEditor } from '../state/EditorStore'
 import type { PointRef } from '../state/EditorStore'
 import type { DesignNode, NodeId } from '../document/types'
@@ -284,6 +285,25 @@ function samePoint(a: PointHandleRef, b: PointHandleRef): boolean {
   return a.subpath === b.subpath && a.index === b.index && a.kind === b.kind
 }
 
+/**
+ * Half the stroke's width, in local units.
+ *
+ * A click on a line has to count anywhere the line is VISIBLE, and what is
+ * visible is the stroke — not the zero-width curve down its middle. Hit-testing
+ * whole objects has always included this; the segment test did not, so between
+ * the two radii lay a band where clicking a line opened its points and selected
+ * nothing. On a thick stroke, or at a zoom that makes a thin one thick, that
+ * band is most of the line: you click what you can see, the anchors appear, and
+ * nothing moves.
+ */
+function strokeSlack(): number {
+  const node = edit.nodeId ? getDoc().nodes[edit.nodeId] : undefined
+  if (!node || !hasStyle(node)) return 0
+  const { stroke } = node.style
+  if (stroke.paint.type === 'none' || stroke.width <= 0) return 0
+  return stroke.width / 2
+}
+
 export function pathEditPointerDown(
   e: CanvasPointerEvent,
   ctx: ToolContext,
@@ -338,8 +358,11 @@ export function pathEditPointerDown(
     return true
   }
 
+  // The stroke counts: see strokeSlack. Anchors do not get it, because an
+  // anchor is a handle drawn at a fixed size on screen rather than something
+  // the artwork draws.
   const near = closestSegment(edit.subs, local)
-  if (near && near.distance <= tolLocal) {
+  if (near && near.distance <= tolLocal + strokeSlack()) {
     if (options.insertOnSegment) {
       const sub = edit.subs[near.subpath]
       if (sub) {

@@ -125,3 +125,55 @@ test('a resized line lands where the drag left it', async ({ page }) => {
   expect(after!.width).toBeCloseTo(during!.width, 0)
   expect(after!.height).toBeCloseTo(during!.height, 0)
 })
+
+test('clicking a line anywhere it is visible selects it, not just its centreline', async ({ page }) => {
+  // The bug this exists for: hit-testing an OBJECT counts the stroke, so a
+  // click anywhere on the visible line opened its points — but the segment test
+  // used a flat screen radius, so between the two lay a band where the anchors
+  // appeared and nothing was selected. You clicked what you could see, and
+  // nothing moved. A thick stroke is what a thin one looks like zoomed in.
+  await drawShape(page, 'line', { x: 300, y: 320 }, { x: 460, y: 320 })
+  const strokeWidth = page.locator('.section', { hasText: 'STROKE' })
+    .locator('.field', { has: page.locator('.field-label:text-is("W")') })
+    .locator('input')
+    .first()
+  await strokeWidth.fill('24')
+  await strokeWidth.press('Enter')
+  await selectTool(page, 'direct-select')
+
+  const shape = page.locator('.document-layer [data-node-id]:not([data-node-type="artboard"])').first()
+  const box = (await shape.boundingBox())!
+  const x = box.x + box.width / 2
+  const middle = box.y + box.height / 2
+
+  for (const offset of [0, 3, 6, box.height / 2]) {
+    await page.keyboard.press('Escape')
+    await page.mouse.click(x, middle + offset)
+    // Whatever opened the points must also have selected something to drag.
+    await expect(page.locator('.path-points .anchor-point'), `offset ${offset}`).toHaveCount(2)
+    await expect(page.locator('.path-points .selected-segment'), `offset ${offset}`).toHaveCount(1)
+  }
+})
+
+test('a segment selected on a line can be dragged', async ({ page }) => {
+  await drawShape(page, 'line', { x: 300, y: 300 }, { x: 440, y: 380 })
+  await selectTool(page, 'direct-select')
+
+  const shape = page.locator('.document-layer [data-node-id]:not([data-node-type="artboard"])').first()
+  const box = (await shape.boundingBox())!
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+
+  await page.mouse.click(x, y)
+  await expect(page.locator('.path-points .selected-segment')).toHaveCount(1)
+
+  const before = (await shape.boundingBox())!
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x + 40, y + 30, { steps: 6 })
+  await page.mouse.up()
+
+  const after = (await shape.boundingBox())!
+  expect(after.x - before.x).toBeCloseTo(40, 0)
+  expect(after.y - before.y).toBeCloseTo(30, 0)
+})
