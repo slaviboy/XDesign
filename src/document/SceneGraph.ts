@@ -36,6 +36,7 @@ import {
   IDENTITY,
   type Mat2D,
   type Vec2,
+  meanScale,
 } from '../geometry/Matrix'
 import {
   EMPTY_BOUNDS,
@@ -533,7 +534,12 @@ export function hitTestNode(
   if (!node) return false
   const m = cache ? cache.world(doc, id) : worldMatrix(doc, id)
   const local = applyToPoint(invert(m), worldPoint)
-  const tolerance = options.tolerance ?? 0
+  // The tolerance arrives in WORLD units and everything below compares it
+  // against LOCAL geometry, which is a different distance the moment a node —
+  // or any group above it — is scaled. Converting it here is what makes a
+  // click target the same size on screen wherever the object sits and whatever
+  // the zoom, rather than growing with both.
+  const tolerance = (options.tolerance ?? 0) / (meanScale(m) || 1)
 
   const d = nodePathData(node)
   if (!d) return containsPoint(localBox(node), local, tolerance)
@@ -554,7 +560,11 @@ export function hitTestNode(
   }
 
   if (hasFill && pointInPath(d, local, styled!.style.fillRule)) return true
-  if (pointOnStroke(d, local, strokeW, Math.max(tolerance, 2))) return true
+  // A floor, so a caller that asks for no tolerance can still hit a hairline —
+  // but a small one, in the same local units as everything else. The 2 world
+  // units this used to be made a line at 800% selectable from sixteen pixels
+  // away, and one at 25% from barely two.
+  if (pointOnStroke(d, local, strokeW, Math.max(tolerance, 0.5))) return true
 
   // An unfilled, unstroked shape would otherwise be impossible to click.
   if (!hasFill && strokeW === 0) return pointInPath(d, local, 'nonzero')

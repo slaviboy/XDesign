@@ -21,12 +21,12 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { serializeDocument, deserializeDocument, DocumentFormatError, dataUrlToBytes, bytesToDataUrl } from '@/persistence/FileFormat'
-import { createDocument, createRect, createEllipse, createPolygon, createImage, createText, createLinearGradient, createStop, createGroup } from '@/document/NodeFactory'
+import { createDocument, createRect, createEllipse, createPolygon, createImage, createText, createLinearGradient, createStop, createGroup, createLine } from '@/document/NodeFactory'
 import {
   addNode, bringForward, bringToFront, cloneSubtree, duplicateNodes, groupNodes, removeNode,
   sendBackward, sendToBack, alignNodes, distributeNodes, reparentNode,
 } from '@/document/DocumentModel'
-import { geometryBounds, isEffectivelyLocked, isEffectivelyVisible, hitTest, nodesInBounds, descendantIds, artboardOf } from '@/document/SceneGraph'
+import { geometryBounds, isEffectivelyLocked, isEffectivelyVisible, hitTest, hitTestNode, nodesInBounds, descendantIds, artboardOf } from '@/document/SceneGraph'
 import { getDoc, replaceDocument, transaction, undo, redo, documentStore } from '@/state/DocumentStore'
 import type { DesignDocument } from '@/document/types'
 
@@ -399,5 +399,55 @@ describe('cloning a mask group', () => {
     // Sharing the original's mask meant deleting one group broke the other.
     expect(copy.maskId).not.toBe(mask.id)
     expect(copy.children).toContain(copy.maskId)
+  })
+})
+
+describe('how big a click target is', () => {
+  /**
+   * The tolerance a caller passes is in WORLD units — screen pixels divided by
+   * the zoom — but every distance it is compared against is in the node's own
+   * local space. Under a scaled node those are different distances, so the
+   * conversion is what keeps a click target the same size on screen wherever
+   * the object sits and however far in the view is zoomed.
+   */
+  function scaledLine(scale: number) {
+    replaceDocument(createDocument('Hit', false))
+    const group = createGroup([], { x: 0, y: 0, width: 100, height: 100 })
+    group.transform = { ...group.transform, scaleX: scale, scaleY: scale }
+    const line = createLine({ x: 0, y: 0, width: 100, height: 0 })
+    transaction('seed', (draft) => {
+      addNode(draft, group, draft.rootId)
+      addNode(draft, line, group.id)
+    })
+    return { line: line.id }
+  }
+
+  it('keeps the target the same world size however the node is scaled', () => {
+    for (const scale of [0.2, 1, 5]) {
+      const { line } = scaledLine(scale)
+      const doc = getDoc()
+      // Where the line actually ended up: a group scales about its own centre,
+      // so its children do not simply multiply out from the origin.
+      const box = geometryBounds(doc, line)
+      const mid = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+
+      // Four world units off the line, with five world units of slack: a hit at
+      // every scale, because five world units is five world units.
+      expect(hitTestNode(doc, line, { x: mid.x, y: mid.y + 4 }, { tolerance: 5 }), `scale ${scale}`)
+        .toBe(true)
+
+      // Forty world units off is a miss at every scale. Compared in local units
+      // instead, a scale of 5 would have made this eight local units away
+      // against five local of slack — which is how a line came to be selectable
+      // from an inch away once anything above it was scaled up.
+      expect(hitTestNode(doc, line, { x: mid.x, y: mid.y + 40 }, { tolerance: 5 }), `scale ${scale}`)
+        .toBe(false)
+    }
+  })
+
+  it('still finds a hairline when the caller asks for no slack at all', () => {
+    const { line } = scaledLine(1)
+    const box = geometryBounds(getDoc(), line)
+    expect(hitTestNode(getDoc(), line, { x: box.x + box.width / 2, y: box.y }, {})).toBe(true)
   })
 })

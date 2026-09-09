@@ -330,12 +330,18 @@ test('TEST 9 — export scale produces exact pixel dimensions', async ({ page })
   expect(await at('4')).toEqual({ width: 800, height: 400 })
 })
 
+/** Autosave's 2s debounce, plus the 2s timeout on the idle callback after it. */
+const AUTOSAVE_WORST_CASE_MS = 4600
+
 test('TEST 10 — recovers the previous document after an abnormal exit', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 320, y: 300 })
   await drawShape(page, 'ellipse', { x: 340, y: 200 }, { x: 440, y: 300 })
-  // Let the autosave debounce fire.
-  await page.waitForTimeout(2600)
+  // Let the autosave land. It is a 2s debounce and THEN a requestIdleCallback
+  // with a 2s timeout of its own, so the worst case is a little over four
+  // seconds — 2.6 only ever passed because the browser happened to go idle at
+  // once, and any extra work on the page tipped it over.
+  await page.waitForTimeout(AUTOSAVE_WORST_CASE_MS)
 
   // Reload without a clean shutdown — the tab simply goes away.
   await page.reload()

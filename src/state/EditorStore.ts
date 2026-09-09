@@ -79,11 +79,12 @@ function readStoredMarqueeMode(): MarqueeMode {
 /**
  * How the toolbar shows which tool is active.
  *
- * 'fill'   a filled chip behind the icon, which is unmistakable and is what
- *          this app has always done.
- * 'tint'   the icon itself takes the accent colour and nothing else changes,
- *          which is quieter and keeps the rail's rhythm — every button stays
- *          the same shape whether or not it is the one in use.
+ * 'tint'   the icon itself takes the accent colour and draws a little heavier,
+ *          and nothing else changes. The default: it keeps the rail's rhythm,
+ *          because every button stays the same shape whether or not it is the
+ *          one in use.
+ * 'fill'   a filled chip behind the icon. Louder, and unmistakable at a
+ *          glance.
  *
  * A preference about the person rather than the artwork, so it lives in
  * localStorage beside the theme and travels in an exported preferences file.
@@ -94,9 +95,9 @@ export const TOOL_HIGHLIGHT_STORAGE_KEY = 'xdesign.toolHighlight'
 
 function readStoredToolHighlight(): ToolHighlight {
   try {
-    return localStorage.getItem(TOOL_HIGHLIGHT_STORAGE_KEY) === 'tint' ? 'tint' : 'fill'
+    return localStorage.getItem(TOOL_HIGHLIGHT_STORAGE_KEY) === 'fill' ? 'fill' : 'tint'
   } catch {
-    return 'fill'
+    return 'tint'
   }
 }
 

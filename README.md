@@ -1229,6 +1229,18 @@ half that falls outside the glyph — which is what an outlined letter is suppos
 like, and what Adobe does, where Stroke sits below Fill in a type object's appearance. An
 outer stroke is then asked for at double width so the full width lands outside.
 
+### A click target is a screen distance, wherever the object is
+
+The tolerance a click carries is in world units — screen pixels divided by the zoom — but
+every distance it was compared against is in the node's own local space, and under a scaled
+node those are not the same distance. On top of that the stroke test floored it at two world
+units, which at 800% is sixteen screen pixels and at 25% is barely one. So how close you had
+to be to a line depended on the zoom and on whatever scaling sat above it.
+
+It is converted into local units now, and the floor with it. What is left varying is the
+stroke's own on-screen width, which should vary: a thick line genuinely is a bigger target
+than a hairline.
+
 ### The tool that adjusts a shape should not be the one most likely to add to it
 
 Clicking an outline with Direct Selection used to insert an anchor, so every attempt to pick
@@ -1394,7 +1406,7 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 678 unit tests (Vitest)
+npm test           # 680 unit tests (Vitest)
 npm run test:e2e   # 351 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck

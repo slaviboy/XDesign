@@ -1034,25 +1034,30 @@ test('the marquee mode outlives the tab', async ({ page }) => {
 test('the toolbar can mark the active tool by colour instead of a chip', async ({ page }) => {
   await openApp(page)
   const active = page.locator('.tool-button.active')
-  // The default: a filled chip behind the icon.
-  await expect(page.locator('.toolbar')).toHaveClass(/highlight-fill/)
-  const filled = await active.evaluate((el) => getComputedStyle(el).backgroundColor)
-  expect(filled).not.toBe('rgba(0, 0, 0, 0)')
-
-  await page.locator('[data-testid="app-menu"]').click()
-  await page.locator('[data-testid="menu-preferences"]').click()
-  await page.locator('.dialog-row', { hasText: 'Active tool' }).locator('select').selectOption('tint')
-  await page.locator('.dialog button').last().click()
-
-  // The chip is gone and the icon carries the signal on its own.
+  // The default: no chip, the icon carries the signal on its own.
   await expect(page.locator('.toolbar')).toHaveClass(/highlight-tint/)
   await page.mouse.move(700, 400)
   expect(await active.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
   expect(await active.evaluate((el) => getComputedStyle(el).color)).toBe('rgb(68, 146, 229)')
+  // And drawn heavier than the tools around it, since colour alone is a weak
+  // signal on a rail of thin outlines.
+  const activeWidth = await active.locator('svg').evaluate((el) => getComputedStyle(el).strokeWidth)
+  const idleWidth = await page.locator('.tool-button:not(.active) svg').first()
+    .evaluate((el) => getComputedStyle(el).strokeWidth)
+  expect(Number.parseFloat(activeWidth)).toBeGreaterThan(Number.parseFloat(idleWidth))
+
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-preferences"]').click()
+  await page.locator('.dialog-row', { hasText: 'Active tool' }).locator('select').selectOption('fill')
+  await page.locator('.dialog button').last().click()
+
+  // The other way round: a filled chip behind the icon.
+  await expect(page.locator('.toolbar')).toHaveClass(/highlight-fill/)
+  expect(await active.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)')
 
   // And it is a preference, so it outlives the tab.
   await page.reload()
-  await expect(page.locator('.toolbar')).toHaveClass(/highlight-tint/)
+  await expect(page.locator('.toolbar')).toHaveClass(/highlight-fill/)
 })
 
 test('every preference explains itself behind an (i)', async ({ page }) => {

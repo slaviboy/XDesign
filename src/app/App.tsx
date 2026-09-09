@@ -64,6 +64,9 @@ import { useStore } from 'zustand'
 import type { ToolContext } from '../tools/types'
 import type { Vec2 } from '../geometry/Matrix'
 
+/** How far from a shape a click still counts, in screen pixels. */
+const HIT_TOLERANCE_PX = 5
+
 export function App() {
   const dialog = useEditorStore((s) => s.dialog)
   const inspectorWidth = useEditorStore((s) => s.inspectorWidth)
@@ -79,7 +82,9 @@ export function App() {
       viewport: () => editorStore.getState().viewport,
       screenToDoc: (p) => screenToDoc(editorStore.getState().viewport, p),
       docToScreen: (p) => docToScreen(editorStore.getState().viewport, p),
-      tolerance: () => screenDistanceToDoc(editorStore.getState().viewport, 4),
+      // Screen pixels, converted to document units by the viewport: a click
+      // target should be the same size on screen at every zoom.
+      tolerance: () => screenDistanceToDoc(editorStore.getState().viewport, HIT_TOLERANCE_PX),
       refreshOverlay,
     }),
     [],

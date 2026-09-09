@@ -169,6 +169,15 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   background: none;
   color: var(--tool-active-tint);
 }
+/* Drawn a little heavier as well as coloured. Colour alone is a weak signal on
+   a rail of thin outlines — and it is the only signal here, with no chip behind
+   it to carry any of the weight. The `svg *` half is what overrides the icons
+   that set a width of their own; a rule on the <svg> alone would lose to their
+   presentation attributes. */
+.toolbar.highlight-tint .tool-button.active svg,
+.toolbar.highlight-tint .tool-button.active svg * {
+  stroke-width: 1.75;
+}
 .toolbar.highlight-tint .tool-button.active:hover { background: var(--bg-hover); }
 
 .tool-separator {
