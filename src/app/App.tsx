@@ -39,6 +39,7 @@ import {
   AboutDialog, ArtboardPresetDialog, NewDocumentDialog, PreferencesDialog,
   RecoveryDialog, ShortcutsDialog,
 } from '../ui/Dialogs'
+import { PreferencesExportDialog, PreferencesImportDialog } from '../ui/PreferencesTransferDialogs'
 import { MenuHost, useMenuState } from '../ui/Menu'
 import { buildContextMenu } from '../ui/contextMenu'
 import { installKeyboard } from '../shortcuts/KeyboardManager'
@@ -213,6 +214,8 @@ export function App() {
       {dialog === 'about' && <AboutDialog />}
       {dialog === 'new-document' && <NewDocumentDialog />}
       {dialog === 'artboard-preset' && <ArtboardPresetDialog />}
+      {dialog === 'preferences-export' && <PreferencesExportDialog />}
+      {dialog === 'preferences-import' && <PreferencesImportDialog />}
 
       {recovery && (
         <RecoveryDialog

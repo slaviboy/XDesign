@@ -56,7 +56,7 @@ import type { ArtboardGrid, DesignDocument, GuideDragMode, RGBA } from '../docum
 /** Bumped only for a change that an older reader could get WRONG, not merely miss. */
 export const PREFERENCES_VERSION = 1
 
-export const PREFERENCES_EXTENSION = '.xdprefs'
+export const PREFERENCES_EXTENSION = '.xprefs'
 
 export interface CanvasPreferences {
   gridSize?: number
@@ -82,6 +82,43 @@ export interface PreferencesFile {
   canvas?: CanvasPreferences
 }
 
+/**
+ * The pieces a preferences file is made of.
+ *
+ * Both dialogs are a list of these with a checkbox each, so this is the one
+ * place that decides what "a preference" is. Export writes the ticked ones;
+ * import applies the ticked ones, offering only those the file actually
+ * contains — a checkbox for something that is not in the file would be a
+ * promise nothing can keep.
+ */
+export type PreferenceSection =
+  | 'language'
+  | 'theme'
+  | 'spellCheck'
+  | 'marqueeMode'
+  | 'defaultGrid'
+  | 'shortcuts'
+  | 'canvas'
+
+export const PREFERENCE_SECTIONS: readonly PreferenceSection[] = [
+  'language', 'theme', 'spellCheck', 'marqueeMode', 'defaultGrid', 'shortcuts', 'canvas',
+]
+
+/** Which sections a parsed file has something to say about. */
+export function sectionsInFile(file: PreferencesFile): PreferenceSection[] {
+  const present: PreferenceSection[] = []
+  if (isLanguage(file.language)) present.push('language')
+  if (isTheme(file.theme)) present.push('theme')
+  if (typeof file.spellCheck === 'boolean') present.push('spellCheck')
+  if (file.marqueeMode === 'touch' || file.marqueeMode === 'enclose') present.push('marqueeMode')
+  // A file that deliberately carries "no default grid" is still saying
+  // something about the default grid, so null counts as present.
+  if (file.defaultGrid === null || isArtboardGrid(file.defaultGrid)) present.push('defaultGrid')
+  if (file.shortcuts && typeof file.shortcuts === 'object') present.push('shortcuts')
+  if (canvasPatch(file.canvas)) present.push('canvas')
+  return present
+}
+
 /** What changed, so the notification can be specific rather than "done". */
 export interface ImportSummary {
   applied: string[]
@@ -93,19 +130,28 @@ export interface ImportSummary {
 // Export
 // ---------------------------------------------------------------------------
 
-export function collectPreferences(now: string): PreferencesFile {
+export function collectPreferences(
+  now: string,
+  sections: readonly PreferenceSection[] = PREFERENCE_SECTIONS,
+): PreferencesFile {
+  const wanted = new Set(sections)
   const settings = getDoc().settings
-  return {
+  const file: PreferencesFile = {
     format: 'xdesign-preferences',
     version: PREFERENCES_VERSION,
     exported: now,
-    language: getLanguage(),
-    theme: getThemePreference(),
-    spellCheck: isSpellCheckEnabled(),
-    marqueeMode: editorStore.getState().marqueeMode,
-    defaultGrid: readDefaultGrid(),
-    shortcuts: keymapOverrides(),
-    canvas: {
+  }
+
+  // A section left out is ABSENT rather than null: an importer distinguishes
+  // "this file has nothing to say about your theme" from "set no theme".
+  if (wanted.has('language')) file.language = getLanguage()
+  if (wanted.has('theme')) file.theme = getThemePreference()
+  if (wanted.has('spellCheck')) file.spellCheck = isSpellCheckEnabled()
+  if (wanted.has('marqueeMode')) file.marqueeMode = editorStore.getState().marqueeMode
+  if (wanted.has('defaultGrid')) file.defaultGrid = readDefaultGrid()
+  if (wanted.has('shortcuts')) file.shortcuts = keymapOverrides()
+  if (wanted.has('canvas')) {
+    file.canvas = {
       gridSize: settings.gridSize,
       gridVisible: settings.gridVisible,
       snapToGrid: settings.snapToGrid,
@@ -113,8 +159,9 @@ export function collectPreferences(now: string): PreferencesFile {
       guidesVisible: settings.guidesVisible,
       guideColor: settings.guideColor,
       guideDragMode: settings.guideDragMode,
-    },
+    }
   }
+  return file
 }
 
 /** Pretty-printed, because someone will open it in a text editor. */
@@ -154,35 +201,39 @@ export function parsePreferences(text: string): PreferencesFile {
  * Apply a parsed file. Each section is independent: one unrecognisable value
  * costs its own setting and nothing else.
  */
-export function applyPreferences(file: PreferencesFile): ImportSummary {
+export function applyPreferences(
+  file: PreferencesFile,
+  sections: readonly PreferenceSection[] = PREFERENCE_SECTIONS,
+): ImportSummary {
+  const wanted = new Set(sections)
   const applied: string[] = []
 
-  if (isLanguage(file.language)) {
+  if (wanted.has('language') && isLanguage(file.language)) {
     setLanguage(file.language)
     applied.push('language')
   }
-  if (file.theme === 'light' || file.theme === 'dark' || file.theme === 'system') {
+  if (wanted.has('theme') && isTheme(file.theme)) {
     setThemePreference(file.theme)
     applied.push('theme')
   }
-  if (typeof file.spellCheck === 'boolean') {
+  if (wanted.has('spellCheck') && typeof file.spellCheck === 'boolean') {
     setSpellCheckEnabled(file.spellCheck)
     applied.push('spell check')
   }
-  if (file.marqueeMode === 'touch' || file.marqueeMode === 'enclose') {
+  if (wanted.has('marqueeMode') && (file.marqueeMode === 'touch' || file.marqueeMode === 'enclose')) {
     setMarqueeMode(file.marqueeMode)
     applied.push('marquee mode')
   }
-  if (isArtboardGrid(file.defaultGrid)) {
+  if (wanted.has('defaultGrid') && isArtboardGrid(file.defaultGrid)) {
     saveDefaultGrid(file.defaultGrid)
     applied.push('default grid')
   }
-  if (file.shortcuts && typeof file.shortcuts === 'object') {
+  if (wanted.has('shortcuts') && file.shortcuts && typeof file.shortcuts === 'object') {
     applyKeymapOverrides(file.shortcuts)
     applied.push('shortcuts')
   }
 
-  const canvas = canvasPatch(file.canvas)
+  const canvas = wanted.has('canvas') ? canvasPatch(file.canvas) : null
   let changedDocument = false
   if (canvas) {
     changedDocument = updateSettings(canvas)
@@ -195,6 +246,10 @@ export function applyPreferences(file: PreferencesFile): ImportSummary {
 // ---------------------------------------------------------------------------
 // Shape checks
 // ---------------------------------------------------------------------------
+
+function isTheme(value: unknown): value is ThemePreference {
+  return value === 'light' || value === 'dark' || value === 'system'
+}
 
 function isLanguage(value: unknown): value is LanguageCode {
   return typeof value === 'string' && LANGUAGES.some((l) => l.code === value)

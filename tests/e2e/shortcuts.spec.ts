@@ -179,11 +179,19 @@ test('preferences export and import move settings between machines', async ({ pa
   await expect(save).toHaveText('K')
   await page.locator('.dialog-footer .button.primary').click()
 
-  const download = page.waitForEvent('download')
   await page.locator('[data-testid="app-menu"]').click()
   await page.locator('[data-testid="menu-export-prefs"]').click()
 
+  // Every section is offered, ticked, and says what it holds.
+  const rows = page.locator('.prefs-transfer-list .prefs-transfer-row')
+  await expect(rows).toHaveCount(7)
+  await expect(rows.filter({ hasText: 'Keyboard Shortcuts' })).toContainText('1 of')
+
+  const download = page.waitForEvent('download')
+  await page.locator('.dialog-footer .button.primary').click()
   const file = await download
+  expect(file.suggestedFilename()).toMatch(/\.xprefs$/)
+
   const body = await file.createReadStream()
   const chunks: Buffer[] = []
   for await (const chunk of body) chunks.push(chunk as Buffer)
@@ -204,11 +212,84 @@ test('preferences export and import move settings between machines', async ({ pa
   const chooser = page.waitForEvent('filechooser')
   await page.locator('[data-testid="app-menu"]').click()
   await page.locator('[data-testid="menu-import-prefs"]').click()
-  await (await chooser).setFiles({ name: 'prefs.xdprefs', mimeType: 'application/json', buffer: Buffer.from(text) })
+  await (await chooser).setFiles({ name: 'prefs.xprefs', mimeType: 'application/json', buffer: Buffer.from(text) })
+
+  await expect(page.locator('.prefs-transfer-list .prefs-transfer-row')).toHaveCount(7)
+  await page.locator('.dialog-footer .button.primary').click()
 
   await expect(page.locator('.notification').last()).toContainText('shortcuts')
   await openShortcuts(page)
   await expect(shortcutButton(page, 'Save')).toHaveText('K')
+})
+
+test('export writes only the sections that are ticked', async ({ page }) => {
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-export-prefs"]').click()
+
+  // Untick everything, then take one section back.
+  await page.locator('.prefs-transfer-all input').click()
+  await expect(page.locator('.dialog-footer .button.primary')).toBeDisabled()
+
+  await page.locator('.prefs-transfer-list .prefs-transfer-row', { hasText: 'Theme' }).locator('input').check()
+  const download = page.waitForEvent('download')
+  await page.locator('.dialog-footer .button.primary').click()
+
+  const body = await (await download).createReadStream()
+  const chunks: Buffer[] = []
+  for await (const chunk of body) chunks.push(chunk as Buffer)
+  const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+
+  expect(parsed.theme).toBeDefined()
+  expect(parsed.language).toBeUndefined()
+  expect(parsed.shortcuts).toBeUndefined()
+  expect(parsed.canvas).toBeUndefined()
+})
+
+test('import applies only the sections that are ticked', async ({ page }) => {
+  const source = JSON.stringify({
+    format: 'xdesign-preferences',
+    version: 1,
+    theme: 'dark',
+    shortcuts: { 'file.save': 'Mod+K' },
+  })
+
+  const chooser = page.waitForEvent('filechooser')
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-import-prefs"]').click()
+  await (await chooser).setFiles({ name: 'two.xprefs', mimeType: 'application/json', buffer: Buffer.from(source) })
+
+  // Only the two sections the file actually holds are offered.
+  const rows = page.locator('.prefs-transfer-list .prefs-transfer-row')
+  await expect(rows).toHaveCount(2)
+
+  // Take the shortcut but not the theme.
+  await rows.filter({ hasText: 'Theme' }).locator('input').uncheck()
+  await page.locator('.dialog-footer .button.primary').click()
+
+  await expect(page.locator('.notification').last()).toContainText('shortcuts')
+  await expect(page.locator('.notification').last()).not.toContainText('theme')
+  await openShortcuts(page)
+  await expect(shortcutButton(page, 'Save')).toHaveText(MOD === 'Meta' ? '⌘K' : 'Ctrl+K')
+})
+
+test('Cancel leaves everything as it was', async ({ page }) => {
+  const source = JSON.stringify({
+    format: 'xdesign-preferences',
+    version: 1,
+    shortcuts: { 'file.save': 'Mod+K' },
+  })
+
+  const chooser = page.waitForEvent('filechooser')
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-import-prefs"]').click()
+  await (await chooser).setFiles({ name: 'one.xprefs', mimeType: 'application/json', buffer: Buffer.from(source) })
+
+  await expect(page.locator('.prefs-transfer-list')).toBeVisible()
+  await page.locator('.dialog-footer .button', { hasText: 'Cancel' }).click()
+
+  await expect(page.locator('.prefs-transfer-list')).toHaveCount(0)
+  await openShortcuts(page)
+  await expect(shortcutButton(page, 'Save')).toHaveText(MOD === 'Meta' ? '⌘S' : 'Ctrl+S')
 })
 
 test('a corrupt preferences file is refused, not half-applied', async ({ page }) => {
@@ -216,7 +297,7 @@ test('a corrupt preferences file is refused, not half-applied', async ({ page })
   await page.locator('[data-testid="app-menu"]').click()
   await page.locator('[data-testid="menu-import-prefs"]').click()
   await (await chooser).setFiles({
-    name: 'broken.xdprefs',
+    name: 'broken.xprefs',
     mimeType: 'application/json',
     buffer: Buffer.from('{ not json'),
   })

@@ -246,11 +246,15 @@ lost it, and leaves that one visibly unbound rather than firing two things off o
 Menus and tooltips print whatever a command is currently bound to, so a rebinding is
 visible everywhere the app mentions it.
 
-**Take your settings with you** — Export Preferences writes a small, readable JSON file
-holding the interface language, the theme, spell check, marquee mode, the default artboard
-grid, the canvas settings, and the whole keymap. Import it on another machine and you have
-your editor. Chords are stored by meaning rather than by symbol — `Mod+S`, never `⌘S` — so a
-Mac's shortcuts arrive intact on Windows and read as Ctrl+S there.
+**Take your settings with you** — Export Preferences writes a small, readable `.xprefs`
+file holding the interface language, the theme, spell check, marquee mode, the default
+artboard grid, the canvas settings, and the whole keymap. Both directions open a dialog with
+a checkbox per section, each saying what it actually holds — "Deutsch", "3 of 55 changed", "7
+settings" — so you can take the keymap without the theme, or send someone your shortcuts and
+nothing else. Import offers only the sections its file contains, because a checkbox for
+something that is not in the file is a promise nothing can keep. Chords are stored by meaning
+rather than by symbol — `Mod+S`, never `⌘S` — so a Mac's shortcuts arrive intact on Windows
+and read as Ctrl+S there.
 
 **Files** — a self-contained `.xdesign` document you can copy to another machine and open
 with every vector and every pixel intact. Plus autosave and crash recovery.
@@ -1276,8 +1280,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 633 unit tests (Vitest)
-npm run test:e2e   # 325 end-to-end tests (Playwright, real Chromium)
+npm test           # 643 unit tests (Vitest)
+npm run test:e2e   # 328 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

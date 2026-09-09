@@ -1667,3 +1667,63 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   stroke-width: 1;
   opacity: 0.9;
 }
+
+/* ---------------------------------------------------- preferences transfer */
+
+.prefs-transfer-hint {
+  margin: 0 0 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* Checkbox, name, value. The value column is right-aligned and fixed so the
+   values line up as a column that can be read down. */
+.prefs-transfer-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: var(--fs-sm);
+}
+.prefs-transfer-row:hover { background: var(--bg-hover); }
+.prefs-transfer-row input { margin: 0; cursor: pointer; }
+.prefs-transfer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prefs-transfer-value {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  text-align: right;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Everything sits above the list it governs, separated from it. */
+.prefs-transfer-all {
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  margin-bottom: 4px;
+  padding-bottom: 8px;
+  font-weight: 600;
+}
+
+.prefs-transfer-empty,
+.prefs-transfer-note {
+  margin: 10px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.prefs-transfer-note {
+  padding: 6px 8px;
+  border-radius: 3px;
+  background: var(--bg-panel-alt);
+}

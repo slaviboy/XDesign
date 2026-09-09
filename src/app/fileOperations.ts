@@ -25,7 +25,7 @@
 
 import { createDocument } from '../document/NodeFactory'
 import { documentStore, getDoc, markSaved, replaceDocument, pruneUnusedAssets } from '../state/DocumentStore'
-import { clearSelection, notify, readDefaultGrid, setEditor, setViewport } from '../state/EditorStore'
+import { clearSelection, notify, openDialog, readDefaultGrid, setEditor, setViewport } from '../state/EditorStore'
 import {
   downloadBytes,
   DocumentFormatError,
@@ -36,9 +36,10 @@ import {
   type SaveTarget,
 } from '../persistence/FileSystem'
 import {
-  applyPreferences, collectPreferences, parsePreferences, PreferencesFormatError,
-  PREFERENCES_EXTENSION, serializePreferences,
+  applyPreferences, parsePreferences, PreferencesFormatError, PREFERENCES_EXTENSION,
+  serializePreferences, type PreferencesFile, type PreferenceSection,
 } from '../persistence/Preferences'
+import { setPendingPreferences } from '../state/PreferencesTransfer'
 import { flush, markDocumentSaved } from '../persistence/Autosave'
 import { importFiles } from '../images/ImageImporter'
 import { preloadFontsFor } from '../text/FontRegistry'
@@ -193,7 +194,17 @@ export { setEditor }
  * one by hand or check it into a dotfiles repository.
  */
 export function exportPreferencesFlow(): void {
-  const file = collectPreferences(new Date().toISOString())
+  openDialog('preferences-export')
+}
+
+/**
+ * Write a chosen set of preferences out.
+ *
+ * A plain, pretty-printed JSON document rather than anything packed: it is
+ * small, it is meant to be readable, and somebody will inevitably want to edit
+ * one by hand or check it into a dotfiles repository.
+ */
+export function writePreferencesFile(file: PreferencesFile): void {
   const bytes = new TextEncoder().encode(serializePreferences(file))
   const stamp = file.exported?.slice(0, 10) ?? 'preferences'
   downloadBytes(bytes, `XDesign ${stamp}${PREFERENCES_EXTENSION}`)
@@ -201,31 +212,17 @@ export function exportPreferencesFlow(): void {
 }
 
 /**
- * Read a preferences file and apply what it holds.
- *
- * The report names what changed rather than saying "imported", because the
- * settings this touches are spread across four dialogs and a menu — and because
- * the canvas half of them is a document edit, which the user is entitled to
- * know about before reaching for undo.
+ * Pick a preferences file and open the dialog that chooses what to take from
+ * it. Reading has to come first: until the file is parsed there is nothing to
+ * offer a choice between.
  */
 export async function importPreferencesFlow(): Promise<void> {
-  const file = await pickFileViaInput(`${PREFERENCES_EXTENSION},application/json`)
-  if (!file) return
+  const picked = await pickFileViaInput(`${PREFERENCES_EXTENSION},application/json`)
+  if (!picked) return
 
   try {
-    const summary = applyPreferences(parsePreferences(await file.text()))
-    if (summary.applied.length === 0) {
-      notify('warn', 'That preferences file had nothing this version can use.')
-      return
-    }
-    notify(
-      'success',
-      `Preferences imported: ${summary.applied.join(', ')}.`,
-      summary.changedDocument
-        ? 'The canvas settings changed this document, which one undo reverses.'
-        : undefined,
-      6000,
-    )
+    setPendingPreferences(parsePreferences(await picked.text()))
+    openDialog('preferences-import')
   } catch (error) {
     notify(
       'error',
@@ -235,3 +232,31 @@ export async function importPreferencesFlow(): Promise<void> {
     )
   }
 }
+
+/**
+ * Apply the sections the user ticked.
+ *
+ * The report names what changed rather than saying "imported", because the
+ * settings this touches are spread across four dialogs and a menu — and because
+ * the canvas half of them is a document edit, which the user is entitled to
+ * know about before reaching for undo.
+ */
+export function applyImportedPreferences(
+  file: PreferencesFile,
+  sections: readonly PreferenceSection[],
+): void {
+  const summary = applyPreferences(file, sections)
+  if (summary.applied.length === 0) {
+    notify('warn', 'Nothing was imported.')
+    return
+  }
+  notify(
+    'success',
+    `Preferences imported: ${summary.applied.join(', ')}.`,
+    summary.changedDocument
+      ? 'The canvas settings changed this document, which one undo reverses.'
+      : undefined,
+    6000,
+  )
+}
+

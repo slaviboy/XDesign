@@ -28,8 +28,9 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
-  applyPreferences, collectPreferences, parsePreferences, serializePreferences,
-  PreferencesFormatError, PREFERENCES_VERSION, type PreferencesFile,
+  applyPreferences, collectPreferences, parsePreferences, sectionsInFile, serializePreferences,
+  PreferencesFormatError, PREFERENCES_VERSION, PREFERENCE_SECTIONS, PREFERENCES_EXTENSION,
+  type PreferencesFile,
 } from '@/persistence/Preferences'
 import { createDocument } from '@/document/NodeFactory'
 import { getDoc, replaceDocument } from '@/state/DocumentStore'
@@ -223,5 +224,93 @@ describe('applying', () => {
     expect(editorStore.getState().marqueeMode).toBe('enclose')
     expect(chordFor('arrange.group')).toBe('Mod+Shift+K')
     expect(getDoc().settings.gridSize).toBe(20)
+  })
+})
+
+describe('choosing which sections to move', () => {
+  const file = (patch: Partial<PreferencesFile>): PreferencesFile => ({
+    format: 'xdesign-preferences',
+    version: PREFERENCES_VERSION,
+    ...patch,
+  })
+
+  it('is written with an .xprefs extension', () => {
+    expect(PREFERENCES_EXTENSION).toBe('.xprefs')
+  })
+
+  it('writes only the sections asked for', () => {
+    const partial = collectPreferences(NOW, ['theme', 'shortcuts'])
+    expect(partial.theme).toBeDefined()
+    expect(partial.shortcuts).toBeDefined()
+    // Absent, not null: the reader must be able to tell "nothing to say about
+    // your language" from "set no language".
+    expect('language' in partial).toBe(false)
+    expect('canvas' in partial).toBe(false)
+  })
+
+  it('writes everything when asked for nothing in particular', () => {
+    const full = collectPreferences(NOW)
+    for (const section of PREFERENCE_SECTIONS) {
+      const key = section === 'canvas' ? 'canvas' : section
+      expect(key in full, section).toBe(true)
+    }
+  })
+
+  it('reports which sections a file actually holds', () => {
+    expect(sectionsInFile(collectPreferences(NOW))).toEqual([...PREFERENCE_SECTIONS])
+    expect(sectionsInFile(collectPreferences(NOW, ['theme']))).toEqual(['theme'])
+    expect(sectionsInFile(file({}))).toEqual([])
+  })
+
+  it('counts a deliberate "no default grid" as something the file says', () => {
+    // null is an answer; undefined is silence.
+    expect(sectionsInFile(file({ defaultGrid: null }))).toEqual(['defaultGrid'])
+    expect(sectionsInFile(file({ defaultGrid: undefined }))).toEqual([])
+  })
+
+  it('ignores a section whose values are all malformed', () => {
+    expect(sectionsInFile(file({ canvas: { gridSize: -1 } }))).toEqual([])
+    expect(sectionsInFile(file({ language: 'klingon' as never }))).toEqual([])
+  })
+
+  it('applies only the sections asked for', () => {
+    const source = file({ theme: 'dark', language: 'de', marqueeMode: 'enclose' })
+    const summary = applyPreferences(source, ['theme'])
+
+    expect(getThemePreference()).toBe('dark')
+    expect(getLanguage()).toBe('en')
+    expect(editorStore.getState().marqueeMode).toBe('touch')
+    expect(summary.applied).toEqual(['theme'])
+  })
+
+  it('leaves the document alone when canvas is not among them', () => {
+    const before = getDoc().settings.gridSize
+    const summary = applyPreferences(
+      file({ theme: 'dark', canvas: { gridSize: 99 } }),
+      ['theme'],
+    )
+    expect(getDoc().settings.gridSize).toBe(before)
+    expect(summary.changedDocument).toBe(false)
+  })
+
+  it('applies nothing when nothing is chosen', () => {
+    const summary = applyPreferences(collectPreferences(NOW), [])
+    expect(summary.applied).toEqual([])
+    expect(summary.changedDocument).toBe(false)
+  })
+
+  it('round-trips a partial export', () => {
+    setThemePreference('dark')
+    setBinding('file.save', 'Mod+K')
+    const text = serializePreferences(collectPreferences(NOW, ['shortcuts']))
+
+    resetAllBindings()
+    setThemePreference('light')
+    const parsed = parsePreferences(text)
+    applyPreferences(parsed, sectionsInFile(parsed))
+
+    expect(chordFor('file.save')).toBe('Mod+K')
+    // The theme was never in the file, so it was never touched.
+    expect(getThemePreference()).toBe('light')
   })
 })

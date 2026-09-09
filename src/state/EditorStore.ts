@@ -98,6 +98,8 @@ export type DialogId =
   | 'about'
   | 'new-document'
   | 'artboard-preset'
+  | 'preferences-export'
+  | 'preferences-import'
   | 'recover'
   | null
 

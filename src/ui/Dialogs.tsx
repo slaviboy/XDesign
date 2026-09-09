@@ -30,7 +30,7 @@ import { getStorageEstimate, clearRecent } from '../persistence/IndexedDbStore'
 import { supportsFileSystemAccess } from '../persistence/FileSystem'
 import { ALT_LABEL, MOD_LABEL } from '../shortcuts/bindings'
 import { ShortcutEditor } from './ShortcutEditor'
-import { isShortcutRecording } from '../shortcuts/recording'
+import { DialogShell } from './DialogShell'
 import { LANGUAGES, getLanguage, setLanguage, t, type LanguageCode } from '../i18n'
 import { canSpellCheck, isSpellCheckEnabled, setSpellCheckEnabled } from '../text/spellcheck'
 import { useLanguage } from '../state/hooks-i18n'
@@ -44,44 +44,6 @@ import type { RecoveryOffer } from '../persistence/Autosave'
 // ---------------------------------------------------------------------------
 // Shell
 // ---------------------------------------------------------------------------
-
-function DialogShell({
-  title,
-  width = 420,
-  onClose,
-  footer,
-  children,
-}: {
-  title: string
-  width?: number
-  onClose: () => void
-  footer?: React.ReactNode
-  children: React.ReactNode
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // While a shortcut is being recorded, Escape belongs to the recorder:
-      // it cancels the recording, and closing the dialog as well would take
-      // the thing being edited off screen. See shortcuts/recording.ts.
-      if (e.key === 'Escape' && !isShortcutRecording()) { e.stopPropagation(); onClose() }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [onClose])
-
-  return (
-    <div
-      className="dialog-backdrop"
-      onPointerDown={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div className="dialog" style={{ width }} role="dialog" aria-label={title}>
-        <div className="dialog-header">{title}</div>
-        <div className="dialog-body">{children}</div>
-        {footer && <div className="dialog-footer">{footer}</div>}
-      </div>
-    </div>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // New document
