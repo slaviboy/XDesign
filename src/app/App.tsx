@@ -54,6 +54,7 @@ import { screenDistanceToDoc, screenToDoc, docToScreen } from '../canvas/Viewpor
 import { getDoc } from '../state/DocumentStore'
 import {
   closeDialog, editorStore, openDialog, refreshOverlay, setEditor,
+  setToolActivateHandler,
   setToolDeactivateHandler,
 } from '../state/EditorStore'
 import { getTool } from '../tools/ToolRegistry'
@@ -89,7 +90,11 @@ export function App() {
   // a cycle. This is what makes Tool.onDeactivate actually run.
   useEffect(() => {
     setToolDeactivateHandler((outgoing) => getTool(outgoing).onDeactivate?.(ctx))
-    return () => setToolDeactivateHandler(null)
+    setToolActivateHandler((incoming) => getTool(incoming).onActivate?.(ctx))
+    return () => {
+      setToolDeactivateHandler(null)
+      setToolActivateHandler(null)
+    }
   }, [ctx])
 
   // ---- keyboard ------------------------------------------------------------

@@ -41,6 +41,7 @@ import {
   subpathsToPath,
   togglePointType,
   type PenSubpath,
+  isSmooth,
 } from '../geometry/PathPoints'
 import { ancestorIds, nodePathData, worldMatrix } from '../document/SceneGraph'
 import { convertNodeToPath } from '../document/DocumentModel'
@@ -64,6 +65,17 @@ interface EditState {
   changed: boolean
   /** True while a LiveTransform override is open, so it is closed exactly once. */
   live: boolean
+  /**
+   * An anchor pressed but not yet dragged.
+   *
+   * Adobe's convention, and the one this exists for: double-clicking a corner
+   * rounds it, and clicking a rounded one straightens it again. Deciding on
+   * pointerUP rather than DOWN is what keeps that from firing every time a
+   * point is picked up to be moved — a press that turns into a drag is a move,
+   * and only a press that goes nowhere is a click.
+   */
+  clickCandidate: PointHandleRef | null
+  moved: boolean
 }
 
 const edit: EditState = {
@@ -74,6 +86,8 @@ const edit: EditState = {
   lastLocal: null,
   changed: false,
   live: false,
+  clickCandidate: null,
+  moved: false,
 }
 
 /**
@@ -226,10 +240,59 @@ function findGrab(local: Vec2, toleranceLocal: number): PointHandleRef | null {
 }
 
 /** @returns true when the event was consumed by point editing. */
-export function pathEditPointerDown(e: CanvasPointerEvent, ctx: ToolContext): boolean {
+/** What a click on the outline should do, which differs by tool. */
+export interface PathEditOptions {
+  /**
+   * Insert a point where the outline was clicked.
+   *
+   * The Pen's job, and only the Pen's. Direct Selection used to do it too, so
+   * every attempt to pick up an edge and move it left a new anchor behind
+   * instead — the tool for adjusting a shape was the tool most likely to add
+   * to it by accident.
+   */
+  insertOnSegment?: boolean
+}
+
+/** The points a drag should move: the selected anchors, plus both ends of every selected segment. */
+function movingPoints(): Map<number, Set<number>> {
+  const { selectedPoints, selectedSegments } = editorStore.getState()
+  const out = new Map<number, Set<number>>()
+  const add = (subpath: number, index: number) => {
+    const set = out.get(subpath) ?? new Set<number>()
+    set.add(index)
+    out.set(subpath, set)
+  }
+  for (const point of selectedPoints) {
+    if (point.kind === 'anchor') add(point.subpath, point.index)
+  }
+  for (const segment of selectedSegments) {
+    const sub = edit.subs[segment.subpath]
+    if (!sub) continue
+    add(segment.subpath, segment.index)
+    // The far end wraps on a closed ring: its last segment ends at point 0.
+    const next = segment.index + 1
+    add(segment.subpath, next < sub.points.length ? next : sub.closed ? 0 : segment.index)
+  }
+  return out
+}
+
+function sameSegment(a: { subpath: number; index: number }, b: { subpath: number; index: number }): boolean {
+  return a.subpath === b.subpath && a.index === b.index
+}
+
+function samePoint(a: PointHandleRef, b: PointHandleRef): boolean {
+  return a.subpath === b.subpath && a.index === b.index && a.kind === b.kind
+}
+
+export function pathEditPointerDown(
+  e: CanvasPointerEvent,
+  ctx: ToolContext,
+  options: PathEditOptions = {},
+): boolean {
   if (!edit.nodeId) return false
   const tolLocal = (GRAB_PX / ctx.viewport().zoom) * localScale()
   const local = toLocal(e.doc)
+  const editor = editorStore.getState()
 
   const grab = findGrab(local, tolLocal)
   if (grab) {
@@ -243,34 +306,93 @@ export function pathEditPointerDown(e: CanvasPointerEvent, ctx: ToolContext): bo
       }
       return true
     }
+
+    if (e.shiftKey && grab.kind === 'anchor') {
+      // Add or remove one point, and start nothing: a shift-click is about
+      // building a selection, and dragging from it would move the object the
+      // user is still choosing.
+      const already = editor.selectedPoints.some((p) => samePoint(p, grab))
+      setEditor({
+        selectedPoints: already
+          ? editor.selectedPoints.filter((p) => !samePoint(p, grab))
+          : [...editor.selectedPoints, grab],
+      })
+      refreshOverlay()
+      return true
+    }
+
+    // Pressing an already-selected point keeps the whole selection, so a
+    // multiple selection can be picked up by any one of its members.
+    const inSelection =
+      grab.kind === 'anchor' && editor.selectedPoints.some((p) => samePoint(p, grab))
+    if (!inSelection) {
+      setEditor({ selectedPoints: [grab], selectedSegments: [] })
+    }
+
     edit.dragging = grab
     edit.lastLocal = local
+    edit.moved = false
+    edit.clickCandidate = grab.kind === 'anchor' ? grab : null
     beginLive()
-    setEditor({ selectedPoints: [grab] })
     refreshOverlay()
     return true
   }
 
-  // Clicking on the outline inserts a point there.
   const near = closestSegment(edit.subs, local)
   if (near && near.distance <= tolLocal) {
-    const sub = edit.subs[near.subpath]
-    if (sub) {
-      const inserted = insertPointAt(sub, near.index, near.t)
-      if (inserted !== null) {
-        edit.changed = true
-        // Armed before the commit so the point can be dragged in the SAME
-        // gesture: commitPath can reload edit.subs, which would drop the ref.
-        edit.dragging = { subpath: near.subpath, index: inserted, kind: 'anchor' }
-        edit.lastLocal = local
-        commitPath('Insert point')
-        beginLive()
-        setEditor({ selectedPoints: [{ subpath: near.subpath, index: inserted, kind: 'anchor' }] })
+    if (options.insertOnSegment) {
+      const sub = edit.subs[near.subpath]
+      if (sub) {
+        const inserted = insertPointAt(sub, near.index, near.t)
+        if (inserted !== null) {
+          edit.changed = true
+          // Armed before the commit so the point can be dragged in the SAME
+          // gesture: commitPath can reload edit.subs, which would drop the ref.
+          edit.dragging = { subpath: near.subpath, index: inserted, kind: 'anchor' }
+          edit.lastLocal = local
+          commitPath('Insert point')
+          beginLive()
+          setEditor({
+            selectedPoints: [{ subpath: near.subpath, index: inserted, kind: 'anchor' }],
+            selectedSegments: [],
+          })
+        }
       }
+      return true
     }
+
+    // Direct Selection: the segment itself is what was clicked, so select it
+    // and let it be dragged. Both of its ends move, which is what moving a
+    // line means.
+    const segment = { subpath: near.subpath, index: near.index }
+    const already = editor.selectedSegments.some((sg) => sameSegment(sg, segment))
+    if (e.shiftKey) {
+      setEditor({
+        selectedSegments: already
+          ? editor.selectedSegments.filter((sg) => !sameSegment(sg, segment))
+          : [...editor.selectedSegments, segment],
+      })
+      refreshOverlay()
+      return true
+    }
+    if (!already) setEditor({ selectedPoints: [], selectedSegments: [segment] })
+
+    // Dragged by its first point, whose delta every moving point follows.
+    edit.dragging = { subpath: segment.subpath, index: segment.index, kind: 'anchor' }
+    edit.lastLocal = local
+    edit.moved = false
+    edit.clickCandidate = null
+    beginLive()
+    refreshOverlay()
     return true
   }
 
+  // Empty space inside the shape: drop the point selection rather than keeping
+  // a highlight the next drag would move.
+  if (editor.selectedPoints.length || editor.selectedSegments.length) {
+    setEditor({ selectedPoints: [], selectedSegments: [] })
+    refreshOverlay()
+  }
   return false
 }
 
@@ -293,8 +415,24 @@ export function pathEditPointerMove(e: CanvasPointerEvent, _ctx: ToolContext): b
   const sub = edit.subs[edit.dragging.subpath]
   if (!sub) return false
 
+  const dx = local.x - edit.lastLocal.x
+  const dy = local.y - edit.lastLocal.y
+  if (dx !== 0 || dy !== 0) edit.moved = true
+
   if (edit.dragging.kind === 'anchor') {
-    movePoint(sub, edit.dragging.index, local.x - edit.lastLocal.x, local.y - edit.lastLocal.y)
+    // Everything selected moves by the same delta, so several points or
+    // several edges keep their shape relative to one another. The dragged
+    // point is included by construction: pressing it selected it.
+    const moving = movingPoints()
+    if (moving.size === 0) {
+      movePoint(sub, edit.dragging.index, dx, dy)
+    } else {
+      for (const [subpath, indices] of moving) {
+        const target = edit.subs[subpath]
+        if (!target) continue
+        for (const index of indices) movePoint(target, index, dx, dy)
+      }
+    }
   } else {
     // Alt breaks the joint so the two handles move independently.
     moveHandle(sub, edit.dragging.index, edit.dragging.kind, local, !e.altKey)
@@ -307,6 +445,27 @@ export function pathEditPointerMove(e: CanvasPointerEvent, _ctx: ToolContext): b
 
 export function pathEditPointerUp(): boolean {
   if (!edit.nodeId || !edit.dragging) return false
+
+  // A press on a rounded point that went nowhere straightens it, the other
+  // half of the double-click that rounded it. Only when it did not move: a
+  // point picked up and put back is still a move, and flattening it would be
+  // a surprise the user did not ask for.
+  const candidate = edit.clickCandidate
+  edit.clickCandidate = null
+  if (candidate && !edit.moved && !edit.changed) {
+    const sub = edit.subs[candidate.subpath]
+    const point = sub?.points[candidate.index]
+    if (sub && point && isSmooth(point)) {
+      togglePointType(sub, candidate.index)
+      edit.changed = true
+      commitPath('Convert point')
+      edit.dragging = null
+      edit.lastLocal = null
+      endLive(true)
+      return true
+    }
+  }
+
   // Commit FIRST, while `dragging` is still set. Any store write notifies the
   // Canvas subscriber, and syncPathEditing reloads edit.subs from the document
   // unless a drag is in progress — so clearing `dragging` before committing
@@ -385,6 +544,11 @@ export function pathEditDoubleClick(e: CanvasPointerEvent, ctx: ToolContext): bo
   if (!grab || grab.kind !== 'anchor') return false
   const sub = edit.subs[grab.subpath]
   if (!sub) return false
+  const point = sub.points[grab.index]
+  // Rounds a corner. A rounded point is straightened by a plain click instead,
+  // so the pair reads as one gesture and its opposite rather than as one
+  // gesture that does different things depending on what it lands on.
+  if (!point || isSmooth(point)) return false
   togglePointType(sub, grab.index)
   edit.changed = true
   commitPath('Convert point')

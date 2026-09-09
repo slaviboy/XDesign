@@ -25,6 +25,11 @@
  * only becomes an editable path when a point is actually moved, so a rectangle
  * keeps its Corners and Radius fields until you commit to editing it.
  *
+ * Clicking an outline selects that SEGMENT so it can be dragged; it does not
+ * add a point. Adding points belongs to the Pen, and having it here as well
+ * meant the tool for adjusting a shape was the one most likely to add to it by
+ * accident — every attempt to pick up an edge left a new anchor behind.
+ *
  * All the point-level work is PathEditing's; this file is only the entry point.
  */
 
@@ -46,6 +51,24 @@ export const directSelectionTool: Tool = {
   cursor: 'default',
   label: 'Direct Selection',
   shortcut: 'D',
+
+  /**
+   * Pick up where the other pointer left off.
+   *
+   * Switching tools with something selected should hand that object straight
+   * to this tool, points and all — having to click it again to "wake" the tool
+   * is a step that exists only because the tool was not listening.
+   */
+  onActivate(ctx: ToolContext): void {
+    const editor = editorStore.getState()
+    if (editor.nodeEditingId) return
+    if (editor.selection.length !== 1) return
+    const id = editor.selection[0]!
+    const doc = ctx.doc()
+    if (isEffectivelyLocked(doc, id) || !isPointEditable(doc.nodes[id])) return
+    setEditor({ nodeEditingId: id, selectedPoints: [], selectedSegments: [] })
+    beginPathEditing(id)
+  },
 
   onPointerDown(e: CanvasPointerEvent, ctx: ToolContext): void {
     // Points own the pointer whenever they are on screen.
@@ -72,7 +95,7 @@ export const directSelectionTool: Tool = {
       pathEditPointerDown(e, ctx)
     } else {
       // Text, images and groups have no points; select them and stop.
-      setEditor({ nodeEditingId: null, selectedPoints: [] })
+      setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
     }
   },
 

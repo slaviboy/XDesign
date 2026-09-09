@@ -46,6 +46,11 @@ export interface PenSubpath {
   closed: boolean
 }
 
+/** Within a thousandth of a unit, which no real handle ever is. */
+function coincident(ax: number, ay: number, bx: number, by: number): boolean {
+  return Math.abs(ax - bx) < 1e-3 && Math.abs(ay - by) < 1e-3
+}
+
 export function corner(x: number, y: number): PenPoint {
   return { x, y, inX: null, inY: null, outX: null, outY: null }
 }
@@ -90,11 +95,24 @@ export function pathToSubpaths(d: string): PenSubpath[] {
         if (!current) break
         const [, c1x, c1y, c2x, c2y, ex, ey] = seg as [string, number, number, number, number, number, number]
         const prev = current.points[current.points.length - 1]
-        if (prev) {
+        // A control point sitting ON its anchor is not a handle: the curve it
+        // describes is a straight line, and keeping it draws a handle dot on
+        // top of the anchor that can be grabbed and dragged but represents
+        // nothing. Straightening one end of a curve leaves exactly this, so
+        // without the test the point editor fills up with phantom handles.
+        if (prev && !coincident(c1x, c1y, prev.x, prev.y)) {
           prev.outX = c1x
           prev.outY = c1y
         }
-        current.points.push({ x: ex, y: ey, inX: c2x, inY: c2y, outX: null, outY: null })
+        const incoming = coincident(c2x, c2y, ex, ey)
+        current.points.push({
+          x: ex,
+          y: ey,
+          inX: incoming ? null : c2x,
+          inY: incoming ? null : c2y,
+          outX: null,
+          outY: null,
+        })
         break
       }
       case 'Z': {

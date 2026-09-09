@@ -180,6 +180,13 @@ export interface EditorState {
    * appear on the matching point of every ring.
    */
   selectedPoints: PointRef[]
+  /**
+   * Whole segments selected in the path editor, by the point each one starts
+   * at. Selected alongside points rather than instead of them: dragging moves
+   * the union of the selected points and both ends of every selected segment,
+   * which is what makes "pick two edges and move them together" work.
+   */
+  selectedSegments: Array<{ subpath: number; index: number }>
 
   viewport: Viewport
   canvasSize: { width: number; height: number }
@@ -243,6 +250,7 @@ export const editorStore = createStore<EditorState>()(
     activeGradientStop: null,
     nodeEditingId: null,
     selectedPoints: [],
+    selectedSegments: [],
 
     viewport: { ...DEFAULT_VIEWPORT },
     canvasSize: { width: 1200, height: 800 },
@@ -278,6 +286,22 @@ let deactivateHandler: ((outgoing: ToolId) => void) | null = null
 
 export function setToolDeactivateHandler(fn: ((outgoing: ToolId) => void) | null): void {
   deactivateHandler = fn
+}
+
+/**
+ * The incoming tool's chance to pick up whatever is already selected.
+ *
+ * The mirror of the deactivate handler, and it runs AFTER the state has
+ * changed rather than before: a tool waking up wants to see the world it is
+ * waking into. Without it a tool could only ever react to a click, so switching
+ * to Direct Selection with an object already selected showed nothing until the
+ * object was clicked a second time — a step that existed only because nobody
+ * was listening.
+ */
+let activateHandler: ((incoming: ToolId) => void) | null = null
+
+export function setToolActivateHandler(fn: ((incoming: ToolId) => void) | null): void {
+  activateHandler = fn
 }
 
 /** Persisted, because a selection habit should outlive the tab. */
@@ -359,6 +383,7 @@ export function setTool(tool: ToolId, keepEditing = false): void {
     // Both pointers keep the point overlay; every other tool drops it.
     nodeEditingId: tool === 'select' || tool === 'direct-select' ? s.nodeEditingId : null,
   })
+  activateHandler?.(tool)
 }
 
 /**
@@ -374,6 +399,7 @@ export function pushTemporaryTool(tool: ToolId): void {
   if (s.toolBeforeTemporary !== null || s.tool === tool) return
   deactivateHandler?.(s.tool)
   editorStore.setState({ toolBeforeTemporary: s.tool, tool })
+  activateHandler?.(tool)
 }
 
 export function popTemporaryTool(): void {
@@ -381,6 +407,7 @@ export function popTemporaryTool(): void {
   if (s.toolBeforeTemporary === null) return
   deactivateHandler?.(s.tool)
   editorStore.setState({ tool: s.toolBeforeTemporary, toolBeforeTemporary: null })
+  activateHandler?.(s.toolBeforeTemporary)
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +428,7 @@ export function setSelection(ids: readonly NodeId[]): void {
   editorStore.setState({
     selection: [...ids],
     selectedPoints: [],
+    selectedSegments: [],
     cornerRadiusMode: null,
     // Selecting artwork puts a selected guide down: the inspector shows one
     // thing at a time, and a guide is not part of a multi-selection.
@@ -439,6 +467,7 @@ export function clearSelection(): void {
     editingContext: null,
     nodeEditingId: null,
     selectedPoints: [],
+    selectedSegments: [],
     selectedGuide: null,
   })
 }

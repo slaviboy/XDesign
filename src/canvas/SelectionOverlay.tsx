@@ -839,6 +839,7 @@ function PathPointOverlay({ viewport, tick }: { viewport: Viewport; tick: number
   void tick
   const editing = getEditingSubpaths()
   const selectedPoints = useEditorStore((s) => s.selectedPoints)
+  const selectedSegments = useEditorStore((s) => s.selectedSegments)
   if (!editing) return null
 
   const toScreen = (x: number, y: number): Vec2 =>
@@ -856,9 +857,34 @@ function PathPointOverlay({ viewport, tick }: { viewport: Viewport; tick: number
     multiply([viewport.zoom, 0, 0, viewport.zoom, viewport.x, viewport.y], editing.world),
   )
 
+  // A selected segment is drawn as a thicker line over the outline, so it is
+  // obvious which edges a drag is about to move — the anchors alone cannot say
+  // it, since a segment is selected without either of its ends being.
+  const segmentPaths = selectedSegments.flatMap((segment) => {
+    const sub = editing.subs[segment.subpath]
+    if (!sub) return []
+    const from = sub.points[segment.index]
+    const to = sub.points[segment.index + 1] ?? (sub.closed ? sub.points[0] : undefined)
+    if (!from || !to) return []
+    const a = toScreen(from.x, from.y)
+    const b = toScreen(to.x, to.y)
+    // Through the handles when there are any, so the highlight follows a curve
+    // rather than cutting the corner off it.
+    const c1 = from.outX !== null && from.outY !== null ? toScreen(from.outX, from.outY) : null
+    const c2 = to.inX !== null && to.inY !== null ? toScreen(to.inX, to.inY) : null
+    const d =
+      c1 || c2
+        ? `M ${a.x} ${a.y} C ${(c1 ?? a).x} ${(c1 ?? a).y} ${(c2 ?? b).x} ${(c2 ?? b).y} ${b.x} ${b.y}`
+        : `M ${a.x} ${a.y} L ${b.x} ${b.y}`
+    return [{ key: `${segment.subpath}-${segment.index}`, d }]
+  })
+
   return (
     <g className="path-points">
       <path className="edit-outline" d={outline} />
+      {segmentPaths.map((segment) => (
+        <path key={segment.key} className="selected-segment" d={segment.d} />
+      ))}
       {editing.subs.map((sub, si) =>
         sub.points.map((p, i) => {
           const a = toScreen(p.x, p.y)

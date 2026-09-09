@@ -215,6 +215,20 @@ export const selectionTool: Tool = {
   label: 'Select',
   shortcut: 'V',
 
+  /**
+   * Taking the object back from Direct Selection.
+   *
+   * Whatever was being point-edited is still selected, so this tool has
+   * something to show the moment it arrives — but it shows a transform box,
+   * not anchors. Closing the point editor here is what makes the switch
+   * immediate instead of requiring a click to wake the tool up.
+   */
+  onActivate(): void {
+    if (!editorStore.getState().nodeEditingId) return
+    setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
+    endPathEditing()
+  },
+
   onPointerDown(e: CanvasPointerEvent, ctx: ToolContext): void {
     const editor = editorStore.getState()
     const doc = ctx.doc()

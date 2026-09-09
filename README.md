@@ -237,6 +237,15 @@ as the original rather than re-imported as flattened markup.
 **Export** — SVG, PNG and JPEG, of a selection, an artboard, the whole document, or every
 layer marked for export, at 0.1×–10× scale.
 
+**Two pointers that hand the object back and forth** — Direct Selection reaches inside a
+group to the leaf and shows its points; clicking an edge selects that SEGMENT so it can be
+dragged, and never adds a point to it. Adding points is the Pen's job. Shift-click collects
+points, segments or whole objects one at a time and takes them back out again, and dragging
+any member moves the whole collection, updating the shape as it goes rather than on release.
+Double-clicking a corner rounds it; clicking a rounded point straightens it again. Switching
+between the two pointers takes effect at once — the box for the one that moves objects, the
+points for the one that moves points — with no second click to wake the tool up.
+
 **Format text, or part of it** — click into a text object, select a word or a few
 characters, and the Text panel describes those characters instead of the whole object: font,
 size, weight, italic, tracking, case, and colour. Everything else stays where it belongs —
@@ -1220,6 +1229,41 @@ half that falls outside the glyph — which is what an outlined letter is suppos
 like, and what Adobe does, where Stroke sits below Fill in a type object's appearance. An
 outer stroke is then asked for at double width so the full width lands outside.
 
+### The tool that adjusts a shape should not be the one most likely to add to it
+
+Clicking an outline with Direct Selection used to insert an anchor, so every attempt to pick
+up an edge and move it left a new point behind. Insertion belongs to the Pen, which is the
+tool you reach for when you mean to add something; Direct Selection selects the segment
+instead, and dragging it moves both of its ends.
+
+Selection is a set, not a slot. Points and segments are collected separately and dragged
+together — the moving set is the selected points plus both ends of every selected segment —
+which is what lets two opposite edges of a rectangle be pulled apart in one gesture. Pressing
+an already-selected member keeps the whole set, so a collection can be picked up by any one
+of the things in it.
+
+Rounding and straightening are one gesture and its opposite: double-click rounds a corner, a
+plain click on a rounded point straightens it. Deciding on pointer-UP rather than pointer-DOWN
+is what keeps the second from firing every time a point is picked up to be moved — a press
+that turns into a drag is a move, and only a press that goes nowhere is a click.
+
+### A control point sitting on its anchor is not a handle
+
+Straightening one end of a curve leaves a cubic whose control point coincides with the point
+it belongs to. Read back literally that is a handle, so the editor drew a dot on top of the
+anchor that could be grabbed and dragged and represented nothing — and they accumulated, one
+per straightened end. The path parser now treats a coincident control point as absent, which
+is what it means: the curve it describes is a straight line.
+
+### A tool should be able to see what it is waking up into
+
+`onActivate` existed on the Tool interface and was never called, so a tool could only ever
+react to a click. Switching to Direct Selection with an object already selected showed
+nothing until the object was clicked a second time — a step that existed purely because
+nobody was listening. It is wired now, and runs AFTER the state has changed rather than
+before, which is the difference between the two handlers: a tool being torn down needs the
+world it is leaving, and a tool waking up needs the world it has arrived in.
+
 ### Formatting a selection is a conversation between two panels
 
 You select a word on the canvas and reach for a control in the inspector — and clicking the
@@ -1350,8 +1394,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 672 unit tests (Vitest)
-npm run test:e2e   # 342 end-to-end tests (Playwright, real Chromium)
+npm test           # 678 unit tests (Vitest)
+npm run test:e2e   # 350 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

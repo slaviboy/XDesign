@@ -43,6 +43,7 @@ export const GESTURES: GestureSpec[] = [
   { group: 'Tools', keys: 'Space (hold)', label: 'Temporary pan' },
 
   // Pen — every modifier Adobe XD documents for drawing paths.
+  { group: 'Pen', keys: 'Click a line', label: 'Insert a point (only the Pen does this)' },
   { group: 'Pen', keys: 'Click', label: 'Corner point (straight segment)' },
   { group: 'Pen', keys: 'Drag', label: 'Smooth point (curve)' },
   { group: 'Pen', keys: `${ALT} drag`, label: 'Split the direction lines (cusp)' },
@@ -53,10 +54,17 @@ export const GESTURES: GestureSpec[] = [
   { group: 'Pen', keys: 'Escape', label: 'End the path and return to Select' },
   { group: 'Pen', keys: 'Backspace', label: 'Remove the last point placed' },
 
+  { group: 'Tools', keys: 'Shift click', label: 'Add or remove an object from the selection' },
+
   { group: 'Points', keys: 'Click with D', label: "Show a shape's points" },
+  { group: 'Points', keys: 'Shift click point', label: 'Add or remove a point from the selection' },
+  { group: 'Points', keys: 'Click a line', label: 'Select that segment (does not add a point)' },
+  { group: 'Points', keys: 'Shift click a line', label: 'Add or remove a segment from the selection' },
+  { group: 'Points', keys: 'Drag a selection', label: 'Move every selected point and segment together' },
+  { group: 'Points', keys: 'Double-click point', label: 'Round a corner' },
+  { group: 'Points', keys: 'Click a round point', label: 'Straighten it again' },
   { group: 'Points', keys: 'Double-click shape', label: 'Edit its points' },
   { group: 'Points', keys: 'Drag a point', label: 'Converts the shape to a path' },
-  { group: 'Points', keys: 'Double-click point', label: 'Convert corner and smooth' },
   { group: 'Points', keys: `${ALT} click point`, label: 'Convert corner and smooth' },
   { group: 'Points', keys: 'Click outline', label: 'Insert a point' },
   { group: 'Points', keys: `${ALT} drag handle`, label: 'Break the joint' },

@@ -64,6 +64,12 @@ function weightSelect(page: import('@playwright/test').Page) {
 async function setWeight(page: import('@playwright/test').Page, weight: string) {
   await weightSelect(page).focus()
   await weightSelect(page).selectOption(weight)
+  // Wait for the run to actually reach the canvas. Everything after this reads
+  // the node back, and a test that raced the commit would be asking about a
+  // text object that has no runs yet.
+  await expect(
+    page.locator(`.document-layer [data-node-type="text"] tspan[font-weight="${weight}"]`),
+  ).not.toHaveCount(0)
 }
 
 /** Every tspan the canvas drew for the one text node, with its weight. */
@@ -239,8 +245,11 @@ test('typing into formatted text keeps it formatted as it goes', async ({ page }
   await selectRange(page, 0, 3)
   await setWeight(page, '700')
 
-  // Put the caret at the very end and keep typing.
+  // Put the caret at the very end and keep typing. The note going away is the
+  // signal that the collapsed selection has reached the store, so the typing
+  // below cannot race ahead of it.
   await selectRange(page, 14, 14)
+  await expect(page.locator('.text-range-note')).toHaveCount(0)
   await page.locator('[data-testid="text-editor"]').focus()
   await page.keyboard.type(' more')
 

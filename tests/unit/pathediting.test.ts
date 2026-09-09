@@ -135,7 +135,9 @@ describe('path point editing', () => {
     expect(sub().points).toHaveLength(2)
   })
 
-  it('double-clicking an anchor converts it corner <-> smooth', () => {
+  it('double-clicking a corner rounds it, and clicking it again straightens it', () => {
+    // The pair every vector editor has: one gesture and its opposite, rather
+    // than one gesture that does different things depending on what it lands on.
     openPath('M0 0 L100 0 L100 100 Z')
     const sub = () => getEditingSubpaths()!.subs[0]!
     expect(isSmooth(sub().points[1]!)).toBe(false)
@@ -143,8 +145,27 @@ describe('path point editing', () => {
     expect(pathEditDoubleClick(ev(100, 0), ctx)).toBe(true)
     expect(isSmooth(sub().points[1]!)).toBe(true)
 
-    expect(pathEditDoubleClick(ev(100, 0), ctx)).toBe(true)
+    // A second double-click has nothing to do: it only ever rounds.
+    expect(pathEditDoubleClick(ev(100, 0), ctx)).toBe(false)
+    expect(isSmooth(sub().points[1]!)).toBe(true)
+
+    // A press that goes nowhere straightens it again.
+    pathEditPointerDown(ev(100, 0), ctx)
+    pathEditPointerUp()
     expect(isSmooth(sub().points[1]!)).toBe(false)
+  })
+
+  it('does not straighten a point that was dragged', () => {
+    openPath('M0 0 L100 0 L100 100 Z')
+    const sub = () => getEditingSubpaths()!.subs[0]!
+    pathEditDoubleClick(ev(100, 0), ctx)
+    expect(isSmooth(sub().points[1]!)).toBe(true)
+
+    // Picked up and moved: that is a move, not a click.
+    pathEditPointerDown(ev(100, 0), ctx)
+    pathEditPointerMove(ev(120, 10, { buttons: 1 }), ctx)
+    pathEditPointerUp()
+    expect(isSmooth(sub().points[1]!)).toBe(true)
   })
 
   it('Alt-click still converts, as it did before', () => {
@@ -176,12 +197,91 @@ describe('path point editing', () => {
     expect(pathEditExtendAt(ev(0, 0), ctx)).toBe(false)
   })
 
-  it('clicking the outline inserts a point that drags in the same gesture', () => {
+  it('inserts a point on the outline only when the caller asks for it', () => {
+    // The Pen asks; Direct Selection does not, because adding an anchor to
+    // every attempt to move an edge is how the tool for adjusting a shape
+    // became the one most likely to add to it by accident.
     openPath('M0 0 L100 0 L100 100')
-    expect(pathEditPointerDown(ev(50, 0), ctx)).toBe(true)
+    expect(pathEditPointerDown(ev(50, 0), ctx, { insertOnSegment: true })).toBe(true)
     expect(getEditingSubpaths()!.subs[0]!.points).toHaveLength(4)
     // Armed for the drag that follows, rather than needing a second gesture.
     expect(editorStore.getState().selectedPoints[0]!.kind).toBe('anchor')
+  })
+
+  it('selects the segment instead of adding to it', () => {
+    openPath('M0 0 L100 0 L100 100')
+    expect(pathEditPointerDown(ev(50, 0), ctx)).toBe(true)
+    expect(getEditingSubpaths()!.subs[0]!.points).toHaveLength(3)
+    expect(editorStore.getState().selectedSegments).toEqual([{ subpath: 0, index: 0 }])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Selecting more than one thing
+// ---------------------------------------------------------------------------
+
+describe('multiple points and segments', () => {
+  it('adds and removes points with shift', () => {
+    openPath('M0 0 L100 0 L100 100')
+    pathEditPointerDown(ev(0, 0), ctx)
+    pathEditPointerUp()
+    pathEditPointerDown(ev(100, 0, { shiftKey: true }), ctx)
+    expect(editorStore.getState().selectedPoints).toHaveLength(2)
+
+    // Shift again takes it back out.
+    pathEditPointerDown(ev(100, 0, { shiftKey: true }), ctx)
+    expect(editorStore.getState().selectedPoints).toHaveLength(1)
+  })
+
+  it('moves every selected point by the same delta', () => {
+    openPath('M0 0 L100 0 L100 100')
+    const sub = () => getEditingSubpaths()!.subs[0]!
+    pathEditPointerDown(ev(0, 0), ctx)
+    pathEditPointerUp()
+    pathEditPointerDown(ev(100, 0, { shiftKey: true }), ctx)
+
+    // Drag from one of them; both follow.
+    pathEditPointerDown(ev(100, 0), ctx)
+    pathEditPointerMove(ev(110, 20, { buttons: 1 }), ctx)
+    pathEditPointerUp()
+
+    expect(sub().points[0]!.x).toBeCloseTo(10, 4)
+    expect(sub().points[0]!.y).toBeCloseTo(20, 4)
+    expect(sub().points[1]!.x).toBeCloseTo(110, 4)
+    expect(sub().points[1]!.y).toBeCloseTo(20, 4)
+    // The one nobody selected stayed where it was.
+    expect(sub().points[2]!.x).toBeCloseTo(100, 4)
+    expect(sub().points[2]!.y).toBeCloseTo(100, 4)
+  })
+
+  it('moves a whole segment, both ends together', () => {
+    openPath('M0 0 L100 0 L100 100')
+    const sub = () => getEditingSubpaths()!.subs[0]!
+    pathEditPointerDown(ev(50, 0), ctx)
+    pathEditPointerMove(ev(50, 30, { buttons: 1 }), ctx)
+    pathEditPointerUp()
+
+    expect(sub().points[0]!.y).toBeCloseTo(30, 4)
+    expect(sub().points[1]!.y).toBeCloseTo(30, 4)
+    // The far end of the other segment did not come along.
+    expect(sub().points[2]!.y).toBeCloseTo(100, 4)
+  })
+
+  it('collects segments with shift and moves them together', () => {
+    openPath('M0 0 L100 0 L100 100')
+    const sub = () => getEditingSubpaths()!.subs[0]!
+    pathEditPointerDown(ev(50, 0), ctx)
+    pathEditPointerUp()
+    pathEditPointerDown(ev(100, 50, { shiftKey: true }), ctx)
+    expect(editorStore.getState().selectedSegments).toHaveLength(2)
+
+    pathEditPointerDown(ev(50, 0), ctx)
+    pathEditPointerMove(ev(60, 0, { buttons: 1 }), ctx)
+    pathEditPointerUp()
+    // Both segments share point 1, and every end moved once, not twice.
+    expect(sub().points[0]!.x).toBeCloseTo(10, 4)
+    expect(sub().points[1]!.x).toBeCloseTo(110, 4)
+    expect(sub().points[2]!.x).toBeCloseTo(110, 4)
   })
 })
 

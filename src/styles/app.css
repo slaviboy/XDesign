@@ -1780,3 +1780,14 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
 @media (prefers-reduced-motion: reduce) {
   .text-caret { animation: none; }
 }
+
+/* An edge picked out for moving. Thicker than the outline it sits on, because
+   a segment is selected without either of its end points being — the anchors
+   cannot say which edge is about to move. */
+.selected-segment {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 0.85;
+}

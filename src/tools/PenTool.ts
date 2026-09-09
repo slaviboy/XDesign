@@ -283,7 +283,8 @@ export const penTool: Tool = {
     // open end continues the path rather than beginning a second one.
     if (editorStore.getState().nodeEditingId) {
       if (pathEditExtendAt(e, ctx)) return
-      if (pathEditPointerDown(e, ctx)) return
+      // Only the Pen adds points by clicking an outline.
+      if (pathEditPointerDown(e, ctx, { insertOnSegment: true })) return
     }
 
     if (!pen.building) {

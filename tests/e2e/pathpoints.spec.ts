@@ -171,20 +171,25 @@ test('a shape keeps its parametric fields until a point actually moves', async (
   await expect(page.locator('.field[title="Corner count"]')).toHaveCount(1)
 })
 
-test('handing points between the two pointers keeps them on screen', async ({ page }) => {
+test('the two pointers hand the object back and forth, without a second click', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 400, y: 360 })
   await selectTool(page, 'direct-select')
   await page.mouse.click(...Object.values(await pt(page, 300, 280)) as [number, number])
   await expect(page.locator('.anchor-point')).toHaveCount(4)
 
-  // Both pointers own point editing, so switching between them must not drop it.
+  // Each pointer shows the object the way IT works on it, and does so on
+  // arrival: the box for the one that moves whole objects, the points for the
+  // one that moves points. Having to click the object again to wake the tool
+  // up was a step that existed only because nobody was listening for the switch.
   await selectTool(page, 'select')
-  await expect(page.locator('.anchor-point')).toHaveCount(4)
+  await expect(page.locator('.anchor-point')).toHaveCount(0)
+  await expect(page.locator('.selection-frame')).toHaveCount(1)
+
   await selectTool(page, 'direct-select')
   await expect(page.locator('.anchor-point')).toHaveCount(4)
 
-  // Any other tool does drop it.
+  // Any other tool drops the points entirely.
   await selectTool(page, 'rect')
   await expect(page.locator('.anchor-point')).toHaveCount(0)
 })
