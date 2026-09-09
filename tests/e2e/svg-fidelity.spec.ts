@@ -138,6 +138,14 @@ test('exports back to SVG as vector, with its clip and gradients intact', async 
   const defined = new Set([...svg.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]))
   const referenced = [...svg.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1])
   expect(referenced.filter((id) => !defined.has(id!))).toEqual([])
+
+  // The crop is the artwork's own size. It used to come out 1926 wide, because
+  // the bounds counted content the clip hides — which then rasterized
+  // everything 3% small, enough to move a 3px ruler tick clear of where it
+  // belongs and put a fifth of the pixels in the wrong place.
+  const viewBox = /viewBox="([^"]*)"/.exec(svg)?.[1]?.split(/\s+/).map(Number)
+  expect(viewBox?.[2]).toBeCloseTo(1870, 0)
+  expect(viewBox?.[3]).toBeCloseTo(1112, 0)
 })
 
 /**
@@ -366,13 +374,13 @@ test.describe('acceptance', () => {
 
     const difference = await svgPixelDifference(page, REFERENCE, exported)
     // The threshold is calibrated against measured scores, not guessed:
-    //   identical input          0.000
-    //   this round trip          0.026  (subpixel edges, substituted fonts)
-    //   gradients replaced flat  0.101
-    //   nothing drawn at all     0.983
-    // So it sits with room above the real score and well below the cheapest
-    // way to break the import.
-    expect(difference).toBeLessThan(0.05)
+    //   identical input          0.0000
+    //   this round trip          0.0019  (subpixel edges, substituted fonts)
+    //   gradients replaced flat  0.4022
+    //   nothing drawn at all     0.9283
+    // Far more headroom below the cheapest way to break the import than above
+    // the real score.
+    expect(difference).toBeLessThan(0.01)
   })
 
   test('a second round trip changes nothing further', async ({ page }) => {

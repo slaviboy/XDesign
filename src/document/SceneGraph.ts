@@ -45,6 +45,7 @@ import {
   containsPoint,
   intersects,
   type Bounds,
+  intersection,
 } from '../geometry/Bounds'
 import {
   ellipsePath,
@@ -283,9 +284,21 @@ export function renderBounds(doc: DesignDocument, id: NodeId, cache?: MatrixCach
 
   if (isContainer(node) && !usesOwnBox(node)) {
     const kids = node.children
+      // A mask is not painted, so it contributes nothing of its own here.
+      .filter((k) => !isMaskGroup(node) || k !== node.maskId)
       .map((k) => renderBounds(doc, k, cache))
       .filter((b) => b.width > 0 || b.height > 0)
-    return kids.length ? unionAll(kids) : transformBounds(localBox(node), m)
+    const box = kids.length ? unionAll(kids) : transformBounds(localBox(node), m)
+
+    // Nothing outside the mask is drawn, so nothing outside it counts. Without
+    // this the box covers artwork the clip hides — and since this is what the
+    // exporter crops to and what zoom-to-fit frames, a masked drawing exported
+    // wider than itself, scaling everything down to fit a margin of nothing.
+    if (isMaskGroup(node) && doc.nodes[node.maskId]) {
+      const clip = renderBounds(doc, node.maskId, cache)
+      if (clip.width > 0 || clip.height > 0) return intersection(box, clip) ?? EMPTY_BOUNDS
+    }
+    return box
   }
 
   const local = localGeometryBounds(node)

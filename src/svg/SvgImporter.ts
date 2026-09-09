@@ -671,14 +671,31 @@ function collectSvgDefs(root: Element): Map<string, string> {
  * Whatever the entry itself references comes along, so a pattern that paints
  * with a gradient does not arrive half-defined.
  */
-function requireDef(id: string, ctx: ImportContext, depth = 0): void {
-  if (depth > 4 || ctx.svgDefs[id]) return
-  const markup = ctx.defsById.get(id)
-  if (!markup) return
+function requireDef(id: string, ctx: ImportContext, depth = 0): boolean {
+  if (depth > 4) return false
+  if (ctx.svgDefs[id]) return true
+
+  // <defs> first, then anywhere else in the file: SVG does not require a paint
+  // server to live inside <defs>, and a <pattern> written at the top level is
+  // perfectly legal and just as referenceable.
+  const markup = ctx.defsById.get(id) ?? paintServerMarkup(ctx.byId.get(id))
+  if (!markup) return false
+
   ctx.svgDefs[id] = markup
   for (const m of markup.matchAll(/url\(\s*['"]?#([^)'"\s]+)['"]?\s*\)/g)) {
     requireDef(m[1]!, ctx, depth + 1)
   }
+  return true
+}
+
+/** Paint servers and the other referenceable definitions, wherever they sit. */
+const REFERENCEABLE = new Set([
+  'pattern', 'lineargradient', 'radialgradient', 'mask', 'clippath', 'filter', 'marker', 'symbol',
+])
+
+function paintServerMarkup(el: Element | undefined): string | null {
+  if (!el) return null
+  return REFERENCEABLE.has(el.tagName.toLowerCase()) ? el.outerHTML : null
 }
 
 /**
@@ -1182,12 +1199,24 @@ function paintFrom(value: string | null, ctx: ImportContext, el: Element): Paint
     const id = urlMatch[1]!
     const gradient = ctx.gradients.get(id)
     if (gradient) return structuredClone(gradient)
-    // A paint server we do not model (a pattern). Keep the reference alive so
-    // it still renders, rather than replacing it with a flat colour — and keep
-    // the definition it points at, or the reference would dangle.
-    requireDef(id, ctx)
-    ctx.warnings.add('A pattern or unsupported paint was preserved but cannot be edited.')
-    return { type: 'ref', ref: value }
+
+    // Not a gradient — a pattern, or another paint server. Its definition is
+    // carried with the document and the shape keeps pointing at it, so it
+    // renders exactly as authored and exports the same way. That is a
+    // supported outcome, not a loss, and it used to warn as though it were:
+    // every file with a pattern in it opened with a message saying something
+    // had gone wrong when nothing had.
+    if (requireDef(id, ctx)) return { type: 'ref', ref: `url(#${id})` }
+
+    // Nothing in the file defines it. SVG allows a fallback paint after the
+    // reference for exactly this case, so use it before giving up.
+    const fallback = value.slice(urlMatch[0].length).trim()
+    if (fallback === 'none') return { type: 'none' }
+    const parsed = fallback ? parseCssColor(fallback) : null
+    if (parsed) return { type: 'solid', color: parsed }
+
+    ctx.warnings.add(`A fill or stroke referenced "${id}", which the file does not define.`)
+    return { type: 'none' }
   }
 
   if (value === 'currentColor') {
