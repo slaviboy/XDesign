@@ -237,5 +237,10 @@
   "prefs.transfer.count": "{count} от {total}",
   "prefs.transfer.nothing": "Този файл не съдържа нищо, което тази версия може да използва.",
   "prefs.transfer.canvasNote": "Настройките на платното променят отворения документ. Едно връщане назад ги отменя.",
-  "prefs.transfer.export": "Експортиране"
+  "prefs.transfer.export": "Експортиране",
+  "text.formattingSelection": "Форматиране на {count} знака",
+  "text.clearFormatting": "Изчистване",
+  "label.fontFamily": "Шрифт",
+  "label.fontWeight": "Плътност",
+  "label.mixed": "Смесено"
 }

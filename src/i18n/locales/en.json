@@ -237,5 +237,10 @@
   "prefs.transfer.count": "{count} of {total}",
   "prefs.transfer.nothing": "This file holds nothing this version can use.",
   "prefs.transfer.canvasNote": "Canvas settings change the open document. One undo reverses it.",
-  "prefs.transfer.export": "Export"
+  "prefs.transfer.export": "Export",
+  "text.formattingSelection": "Formatting {count} characters",
+  "text.clearFormatting": "Clear",
+  "label.fontFamily": "Font",
+  "label.fontWeight": "Weight",
+  "label.mixed": "Mixed"
 }

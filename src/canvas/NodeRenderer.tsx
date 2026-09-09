@@ -328,12 +328,17 @@ function shapePathData(node: DesignNode): string {
 }
 
 function TextBody({ node }: { node: TextNode }): ReactNode {
-  // While this node is being edited the <textarea> is the rendering. Drawing
+  // While this node is being TYPED IN the <textarea> is the rendering. Drawing
   // both would show two sets of glyphs at once — they cannot line up, because a
   // textarea centres its text in a CSS line box and SVG sits it on a baseline —
   // and any mismatch between the two, a wrap or a transformation, doubles the
   // text visibly instead of subtly.
-  const editing = useEditorStore((s) => s.editingTextId === node.id)
+  //
+  // The moment focus leaves for the inspector, though, the textarea is no
+  // longer what is being looked at, and it cannot show mixed styling anyway. So
+  // it hides and this takes over, which is what makes formatting a selection
+  // visible while you are formatting it.
+  const editing = useEditorStore((s) => s.editingTextId === node.id && s.textEditingFocused)
   const fill = paintToAttrs(node.style.fill, node.id, 'fill')
   const stroke = paintToAttrs(node.style.stroke.paint, node.id, 'stroke')
   const hasStroke = node.style.stroke.paint.type !== 'none' && node.style.stroke.width > 0

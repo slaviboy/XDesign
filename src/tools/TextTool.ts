@@ -30,6 +30,7 @@ import { insertNode } from '../history/Commands'
 import { intrinsicTextSize } from '../text/TextLayout'
 import { DEFAULT_TEXT_STYLE } from '../document/types'
 import {
+  endTextEditing,
   editorStore,
   refreshOverlay,
   setEditor,
@@ -118,7 +119,7 @@ export const textTool: Tool = {
         return true
       }
       if (editorStore.getState().editingTextId) {
-        setEditor({ editingTextId: null })
+        endTextEditing()
         return true
       }
     }

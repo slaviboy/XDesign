@@ -56,6 +56,7 @@ import { getTool } from '../tools/ToolRegistry'
 import { documentStore, getDoc } from '../state/DocumentStore'
 import { artboardAtPoint, geometryBounds } from '../document/SceneGraph'
 import {
+  endTextEditing,
   editorStore,
   panBy,
   refreshOverlay,
@@ -194,7 +195,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
       if (e.button !== 0) return
 
       // Committing an in-progress text edit before anything else runs.
-      if (editorStore.getState().editingTextId) setEditor({ editingTextId: null })
+      if (editorStore.getState().editingTextId) endTextEditing()
 
       const ev = buildEvent(e)
       lastScreenRef.current = ev.screen

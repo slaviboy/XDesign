@@ -237,6 +237,14 @@ as the original rather than re-imported as flattened markup.
 **Export** — SVG, PNG and JPEG, of a selection, an artboard, the whole document, or every
 layer marked for export, at 0.1×–10× scale.
 
+**Format text, or part of it** — click into a text object, select a word or a few
+characters, and the Text panel describes those characters instead of the whole object: font,
+size, weight, italic, tracking, case. Everything else stays where it belongs — alignment,
+line height and paragraph spacing are properties of a block, so they keep applying to the
+whole object even while a range is selected, because "these three words are centred" is not
+something text can be. Where the selection disagrees, the panel says Mixed rather than
+showing you the first option as though it were the answer.
+
 **Keyboard shortcuts you can change** — every command in the Shortcuts dialog is
 rebindable. Double-click one, and the field starts listening: it shows the modifiers as you
 hold them, the whole chord once a key joins them, and commits when you let go. A changed
@@ -1184,6 +1192,40 @@ to render at all while a view that replaces it is showing, and the traced paths 
 the viewport's own space over the hole where it was. Turning Preview off puts the picture
 back untouched, which is what the checkbox promises.
 
+### Formatting a selection is a conversation between two panels
+
+You select a word on the canvas and reach for a control in the inspector — and clicking the
+inspector blurs the textarea holding the selection. So the selection is mirrored into the
+editor store as it changes, and a blur that lands inside the inspector is deliberately not
+the end of editing. Without both, the interaction cannot exist: by the time the control is
+clicked, there is nothing left to say what it applies to.
+
+The selection is read through `selectionchange` on the document rather than React's
+`onSelect`, which is synthesised from React's own heuristics and does not fire for a
+programmatic `setSelectionRange` — which is exactly what selecting all the text on entry is.
+
+### While you type the textarea draws; the moment you format, the canvas does
+
+A `<textarea>` has one font. It cannot show a bold word inside a plain sentence, and the two
+renderings cannot be shown together either — a textarea centres its text in a CSS line box
+while SVG sits it on a baseline, so any overlap doubles the glyphs visibly.
+
+They are never needed at the same time, though. While you are typing, the textarea is the
+rendering and the canvas keeps its text hidden. The moment focus moves to the inspector —
+which is the only way to format a selection — the textarea is not what is being looked at, so
+it goes transparent and the canvas draws the real, formatted text underneath. Transparent
+rather than hidden, and this is load-bearing: `visibility: hidden` also makes an element
+unfocusable, and this one focuses itself on mount, so it could never have come back.
+
+### A run replaces, it does not merge
+
+The layout engine resolves a character's style by taking the LAST run covering it and laying
+it over the object's own — an earlier overlapping run is ignored outright rather than merged
+into. Everything that edits or reads runs has to agree with that, or the inspector would
+describe text the canvas does not draw. So `applyRunStyle` cuts runs at the edges of the
+range it is given and never emits an overlap: overlapping runs are legal for the renderer,
+but they make every later question ("what weight is this character?") depend on list order.
+
 ### A shortcut you can change has to exist first
 
 The shortcuts used to be two things that did not know about each other: a `switch` in the
@@ -1280,8 +1322,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 643 unit tests (Vitest)
-npm run test:e2e   # 329 end-to-end tests (Playwright, real Chromium)
+npm test           # 664 unit tests (Vitest)
+npm run test:e2e   # 337 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

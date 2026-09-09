@@ -1735,3 +1735,30 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   border-radius: 3px;
   background: var(--bg-panel-alt);
 }
+
+/* A range of characters is being formatted rather than the whole object. The
+   note says so, because every control above it is about to mean something
+   narrower than usual. */
+.text-range-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: var(--bg-selected);
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.link-button:hover { color: var(--accent-hover); }

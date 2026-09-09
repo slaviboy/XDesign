@@ -699,6 +699,136 @@ export function shiftRuns(
   return normalizeRuns(moved, newLength)
 }
 
+/**
+ * One stretch of characters that all look the same, with its style resolved
+ * against the node's own.
+ *
+ * What the inspector reads when a range is selected: it asks for the segments
+ * the selection covers and shows a value only where they agree, which is the
+ * same "common or nothing" rule a multiple selection uses.
+ */
+export interface ResolvedRun {
+  start: number
+  end: number
+  style: TextStyle
+  fill?: Paint
+}
+
+/**
+ * The run covering a character, or undefined.
+ *
+ * The LAST one, and that is the rule the layout engine follows: a later run
+ * replaces an earlier one outright rather than merging into it, so a run that
+ * says nothing about weight leaves the weight at the node's, not at whatever an
+ * overlapping run said. Anything written here has to agree with that, or the
+ * inspector would describe text the canvas does not draw.
+ */
+function runCovering(runs: readonly TextRun[], index: number): TextRun | undefined {
+  let found: TextRun | undefined
+  for (const run of runs) {
+    if (index >= run.start && index < run.end) found = run
+  }
+  return found
+}
+
+/** Every boundary where the styling can change, in order. */
+function runBoundaries(runs: readonly TextRun[], textLength: number, extra: number[]): number[] {
+  const points = new Set<number>([0, textLength, ...extra])
+  for (const run of runs) {
+    points.add(Math.max(0, Math.min(textLength, run.start)))
+    points.add(Math.max(0, Math.min(textLength, run.end)))
+  }
+  return [...points].filter((p) => p >= 0 && p <= textLength).sort((a, b) => a - b)
+}
+
+/**
+ * The distinct styles a character range is made of.
+ *
+ * An empty range still answers, with the single segment the caret sits in, so
+ * the inspector can show what typing at the caret would produce.
+ */
+export function runsIn(node: TextNode, from: number, to: number): ResolvedRun[] {
+  const length = node.text.length
+  const lo = Math.max(0, Math.min(length, Math.min(from, to)))
+  const hi = Math.max(0, Math.min(length, Math.max(from, to)))
+  const runs = node.runs ?? []
+
+  if (hi === lo) {
+    // A caret inherits from the character BEFORE it, which is what makes
+    // typing continue the word you are in rather than starting a new style.
+    const at = Math.max(0, lo - 1)
+    const run = runCovering(runs, at)
+    return [{ start: lo, end: lo, style: { ...node.textStyle, ...run?.style }, ...(run?.fill ? { fill: run.fill } : {}) }]
+  }
+
+  const out: ResolvedRun[] = []
+  const points = runBoundaries(runs, length, [lo, hi]).filter((p) => p >= lo && p <= hi)
+  for (let i = 0; i < points.length - 1; i++) {
+    const start = points[i]!
+    const end = points[i + 1]!
+    if (end <= start) continue
+    const run = runCovering(runs, start)
+    out.push({
+      start,
+      end,
+      style: { ...node.textStyle, ...run?.style },
+      ...(run?.fill ? { fill: run.fill } : {}),
+    })
+  }
+  return out
+}
+
+/** What a range should be styled with. `fill: null` removes a fill override. */
+export interface RunPatch {
+  style?: Partial<TextStyle>
+  fill?: Paint | null
+}
+
+/**
+ * Style one character range, leaving the rest alone.
+ *
+ * Existing runs are cut at the range's edges and the patch is merged into the
+ * pieces inside it, so styling a word in the middle of an already-styled
+ * sentence keeps both. The output never overlaps, which is worth more than it
+ * sounds: overlapping runs are legal for the layout engine but make every later
+ * question ("what is this character's weight?") depend on list order.
+ */
+export function applyRunStyle(
+  runs: readonly TextRun[] | undefined,
+  textLength: number,
+  from: number,
+  to: number,
+  patch: RunPatch,
+): TextRun[] | undefined {
+  const lo = Math.max(0, Math.min(textLength, Math.min(from, to)))
+  const hi = Math.max(0, Math.min(textLength, Math.max(from, to)))
+  const existing = runs ?? []
+  if (hi <= lo) return normalizeRuns(existing, textLength)
+
+  const out: TextRun[] = []
+  const points = runBoundaries(existing, textLength, [lo, hi])
+  for (let i = 0; i < points.length - 1; i++) {
+    const start = points[i]!
+    const end = points[i + 1]!
+    if (end <= start) continue
+
+    const covering = runCovering(existing, start)
+    const inside = start >= lo && end <= hi
+    const style = inside ? { ...covering?.style, ...patch.style } : covering?.style
+    const fill = inside
+      ? patch.fill === null
+        ? undefined
+        : (patch.fill ?? covering?.fill)
+      : covering?.fill
+
+    const hasStyle = style && Object.keys(style).length > 0
+    if (!hasStyle && !fill) continue
+    out.push({ start, end, ...(hasStyle ? { style } : {}), ...(fill ? { fill } : {}) })
+  }
+
+  return normalizeRuns(out, textLength)
+}
+
 export type ImageFit = 'fill' | 'contain' | 'cover'
 
 export interface ImageNode extends StyledNode {

@@ -139,6 +139,28 @@ export interface EditorState {
   selectedGuide: { artboardId: NodeId; guideId: string } | null
   /** Text node currently being edited inline. */
   editingTextId: NodeId | null
+  /**
+   * The characters selected inside the text being edited.
+   *
+   * Kept in the store rather than read from the textarea because the inspector
+   * needs it AFTER the textarea has lost focus to the field being clicked —
+   * which is the whole interaction: select a word, then reach for the size.
+   * `start === end` is a caret, and still meaningful: it says what typing next
+   * would look like.
+   */
+  textSelection: { nodeId: NodeId; start: number; end: number } | null
+  /**
+   * Whether the text editor's textarea actually holds focus.
+   *
+   * A textarea cannot draw mixed styling, so while you are typing it shows the
+   * object's base style and the canvas keeps its own text hidden. The moment
+   * focus moves to the inspector — which is where formatting a selection
+   * happens — the textarea is not the thing being looked at, so it steps aside
+   * and the real, formatted rendering takes over. That is the only moment both
+   * are possible: they cannot be shown together, because a textarea centres its
+   * text in a line box and SVG sits it on a baseline.
+   */
+  textEditingFocused: boolean
   /** Artboard whose on-canvas name label is being renamed inline. */
   renamingArtboardId: NodeId | null
   /** Path node the pen tool is currently building or editing. */
@@ -213,6 +235,8 @@ export const editorStore = createStore<EditorState>()(
     marqueeMode: readStoredMarqueeMode(),
     selectedGuide: null,
     editingTextId: null,
+    textSelection: null,
+    textEditingFocused: false,
     renamingArtboardId: null,
     penTargetId: null,
     gradientEditing: null,
@@ -330,6 +354,8 @@ export function setTool(tool: ToolId, keepEditing = false): void {
     // Leaving a vector tool ends whatever it was building.
     penTargetId: tool === 'pen' ? s.penTargetId : null,
     editingTextId: keepEditing ? s.editingTextId : null,
+    textSelection: keepEditing ? s.textSelection : null,
+    textEditingFocused: keepEditing ? s.textEditingFocused : false,
     // Both pointers keep the point overlay; every other tool drops it.
     nodeEditingId: tool === 'select' || tool === 'direct-select' ? s.nodeEditingId : null,
   })
@@ -496,6 +522,24 @@ export function dismissNotification(id: string): void {
 /** Force the overlay layer to repaint (drawing previews, pen rubber-band). */
 export function refreshOverlay(): void {
   editorStore.setState({ overlayTick: editorStore.getState().overlayTick + 1 })
+}
+
+/**
+ * Stop editing text, forgetting the selection with it.
+ *
+ * One function rather than a setEditor call at each site, because the two
+ * fields have to be cleared together: a stale selection with no editor would
+ * leave the inspector formatting characters nobody can see.
+ */
+export function endTextEditing(): void {
+  editorStore.setState({ editingTextId: null, textSelection: null, textEditingFocused: false })
+}
+
+/** Record which characters are selected inside the text being edited. */
+export function setTextSelection(nodeId: NodeId, start: number, end: number): void {
+  const current = editorStore.getState().textSelection
+  if (current && current.nodeId === nodeId && current.start === start && current.end === end) return
+  editorStore.setState({ textSelection: { nodeId, start, end } })
 }
 
 export function openDialog(dialog: Exclude<DialogId, null>): void {

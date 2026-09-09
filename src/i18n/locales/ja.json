@@ -237,5 +237,10 @@
   "prefs.transfer.count": "{total} 件中 {count} 件",
   "prefs.transfer.nothing": "このファイルには、このバージョンで使用できる項目がありません。",
   "prefs.transfer.canvasNote": "カンバス設定は開いているドキュメントを変更します。取り消しで元に戻せます。",
-  "prefs.transfer.export": "書き出し"
+  "prefs.transfer.export": "書き出し",
+  "text.formattingSelection": "{count} 文字を書式設定",
+  "text.clearFormatting": "クリア",
+  "label.fontFamily": "フォント",
+  "label.fontWeight": "ウェイト",
+  "label.mixed": "混在"
 }

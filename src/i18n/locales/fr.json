@@ -237,5 +237,10 @@
   "prefs.transfer.count": "{count} sur {total}",
   "prefs.transfer.nothing": "Ce fichier ne contient rien que cette version puisse utiliser.",
   "prefs.transfer.canvasNote": "Les réglages du plan de travail modifient le document ouvert. Une annulation les rétablit.",
-  "prefs.transfer.export": "Exporter"
+  "prefs.transfer.export": "Exporter",
+  "text.formattingSelection": "Mise en forme de {count} caractères",
+  "text.clearFormatting": "Effacer",
+  "label.fontFamily": "Police",
+  "label.fontWeight": "Graisse",
+  "label.mixed": "Multiple"
 }

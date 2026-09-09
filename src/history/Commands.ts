@@ -108,7 +108,10 @@ import {
   type RGBA,
   type TextNode,
   type TextSizing,
+  applyRunStyle,
+  normalizeRuns,
   shiftRuns,
+  type RunPatch,
 } from '../document/types'
 
 // ---------------------------------------------------------------------------
@@ -1044,6 +1047,78 @@ export function fitTextHeight(id: NodeId): boolean {
     const height = intrinsicTextSize(node.text, node.textStyle, node.transform.width).height
     if (Math.abs(height - node.transform.height) < 0.5) return false
     node.transform = { ...node.transform, height }
+    return undefined
+  })
+}
+
+/**
+ * Character-level properties: the ones that can differ within a paragraph.
+ *
+ * Alignment, line height, paragraph spacing and the resize option are
+ * properties of a BLOCK, not of a character — "these three words are
+ * right-aligned" is not a thing text can be — so they always apply to the whole
+ * object even while a range is selected.
+ */
+export const CHARACTER_STYLE_KEYS = [
+  'fontFamily', 'fontSize', 'fontWeight', 'fontStyle',
+  'letterSpacing', 'underline', 'strikethrough', 'transform',
+] as const satisfies readonly (keyof TextStyle)[]
+
+/** Whether a patch touches anything a range can carry on its own. */
+export function isCharacterStyle(patch: Partial<TextStyle>): boolean {
+  return Object.keys(patch).some((key) => (CHARACTER_STYLE_KEYS as readonly string[]).includes(key))
+}
+
+/**
+ * Style one range of characters inside a text object.
+ *
+ * The box is re-fitted afterwards for the same reason setTextStyle does it:
+ * making one word bigger changes where the text wraps and how tall it is, and
+ * an Auto Height box that did not grow would clip what it was just told to
+ * enlarge.
+ */
+export function setTextRunStyle(
+  id: NodeId,
+  from: number,
+  to: number,
+  patch: RunPatch,
+  coalesceKey?: string,
+): boolean {
+  if (to === from) return false
+  return transaction(
+    'Format text',
+    (draft) => {
+      const node = draft.nodes[id]
+      if (node?.type !== 'text') return false
+      const runs = applyRunStyle(node.runs, node.text.length, from, to, patch)
+      // Undefined is how "no runs at all" is stored, and assigning it would
+      // leave the key present with an undefined value in the saved JSON.
+      if (runs) node.runs = runs
+      else delete node.runs
+      refitTextNode(node)
+      return undefined
+    },
+    { coalesceKey },
+  )
+}
+
+/** Take every character-level override off a range, back to the object's own style. */
+export function clearTextRunStyle(id: NodeId, from: number, to: number): boolean {
+  if (to === from) return false
+  return transaction('Clear formatting', (draft) => {
+    const node = draft.nodes[id]
+    if (node?.type !== 'text' || !node.runs?.length) return false
+    // Cut the range out of every run: applyRunStyle with an empty patch would
+    // preserve what is already there, which is the opposite of clearing.
+    const kept: typeof node.runs = []
+    for (const run of node.runs) {
+      if (run.start < from) kept.push({ ...run, end: Math.min(run.end, from) })
+      if (run.end > to) kept.push({ ...run, start: Math.max(run.start, to) })
+    }
+    const runs = normalizeRuns(kept, node.text.length)
+    if (runs) node.runs = runs
+    else delete node.runs
+    refitTextNode(node)
     return undefined
   })
 }

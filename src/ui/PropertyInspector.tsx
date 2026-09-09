@@ -53,6 +53,9 @@ import {
   renameDocument,
   matchSize,
   setCornerRadiusAt,
+  clearTextRunStyle,
+  isCharacterStyle,
+  setTextRunStyle,
 } from '../history/Commands'
 import { setRepeatGridParams } from '../history/RepeatGridCommands'
 import { canImageTrace, openImageTrace } from '../history/TraceCommands'
@@ -120,6 +123,9 @@ import {
   type Style,
   type TextSizing,
   type TextTransform,
+  runsIn,
+  DEFAULT_TEXT_STYLE,
+  type TextStyle,
 } from '../document/types'
 
 export function PropertyInspector() {
@@ -1529,33 +1535,86 @@ function FamilyPreload({ family }: { family: string | null }) {
 }
 
 function TextSection({ nodes }: { nodes: DesignNode[] }) {
+  // Before the early return: a hook cannot be conditional, and this section
+  // only sometimes has text to describe.
+  const selection = useEditorStore((s) => s.textSelection)
   const texts = nodes.filter((n) => n.type === 'text')
   if (texts.length === 0) return null
 
-  const family = common(texts, (n) => (n.type === 'text' ? n.textStyle.fontFamily : ''))
-  const size = common(texts, (n) => (n.type === 'text' ? n.textStyle.fontSize : 0))
-  const weight = common(texts, (n) => (n.type === 'text' ? n.textStyle.fontWeight : 400))
-  const align = common(texts, (n) => (n.type === 'text' ? n.textStyle.align : 'left'))
-  const lineHeight = common(texts, (n) => (n.type === 'text' ? n.textStyle.lineHeight : 1.4))
-  const tracking = common(texts, (n) => (n.type === 'text' ? n.textStyle.letterSpacing : 0))
-  const italic = common(texts, (n) => (n.type === 'text' ? n.textStyle.fontStyle === 'italic' : false))
-  const sizing = common(texts, (n) => (n.type === 'text' ? n.textStyle.sizing : 'auto-width'))
-  const paragraphSpacing = common(texts, (n) => (n.type === 'text' ? n.textStyle.paragraphSpacing : 0))
-  const transform = common(texts, (n) => (n.type === 'text' ? n.textStyle.transform : 'none'))
+  // Formatting part of a text object rather than all of it, which is a
+  // different thing to be looking at: the controls describe the selected
+  // characters and change only those.
+  const single = texts.length === 1 ? texts[0]! : null
+  const range =
+    single?.type === 'text' &&
+    selection &&
+    selection.nodeId === single.id &&
+    selection.end > selection.start &&
+    selection.end <= single.text.length
+      ? selection
+      : null
+
+  // One list of styles either way, so every control below reads the same.
+  const styles: TextStyle[] =
+    range && single?.type === 'text'
+      ? runsIn(single, range.start, range.end).map((r) => r.style)
+      : texts.map((n) => (n.type === 'text' ? n.textStyle : DEFAULT_TEXT_STYLE))
+
+  /**
+   * Character properties go to the selected range; block properties go to the
+   * whole object even while a range is selected, because "these three words are
+   * centred" is not something text can be.
+   */
+  const applyStyle = (patch: Partial<TextStyle>, coalesceKey?: string) => {
+    if (range && isCharacterStyle(patch)) {
+      setTextRunStyle(range.nodeId, range.start, range.end, { style: patch }, coalesceKey)
+    } else {
+      setTextStyle(patch, coalesceKey)
+    }
+  }
+
+  const family = common(styles, (s) => s.fontFamily)
+  const size = common(styles, (s) => s.fontSize)
+  const weight = common(styles, (s) => s.fontWeight)
+  const align = common(styles, (s) => s.align)
+  const lineHeight = common(styles, (s) => s.lineHeight)
+  const tracking = common(styles, (s) => s.letterSpacing)
+  const italic = common(styles, (s) => s.fontStyle === 'italic')
+  const sizing = common(styles, (s) => s.sizing)
+  const paragraphSpacing = common(styles, (s) => s.paragraphSpacing)
+  const transform = common(styles, (s) => s.transform)
 
   const groups = fontsByCategory()
 
   return (
     <Section title={t('section.text')}>
+      {range && (
+        <div className="text-range-note">
+          <span>{t('text.formattingSelection', { count: range.end - range.start })}</span>
+          <button
+            type="button"
+            className="link-button"
+            // The textarea must not lose the selection this button acts on.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => clearTextRunStyle(range.nodeId, range.start, range.end)}
+          >
+            {t('text.clearFormatting')}
+          </button>
+        </div>
+      )}
       <FamilyPreload family={family} />
       <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
         <Select
-          value={family ?? ''}
-          options={groups.map((g) => ({
-            group: g.label,
-            options: g.fonts.map((f) => ({ value: f.family, label: f.family })),
-          }))}
-          onChange={(v) => setTextStyle({ fontFamily: v })}
+          value={family ?? MIXED}
+          options={[
+            ...(family === null ? [{ value: MIXED, label: t('label.mixed') }] : []),
+            ...groups.map((g) => ({
+              group: g.label,
+              options: g.fonts.map((f) => ({ value: f.family, label: f.family })),
+            })),
+          ]}
+          onChange={(v) => v !== MIXED && applyStyle({ fontFamily: v })}
+          title={t('label.fontFamily')}
         />
       </div>
       {family && !isBundledFont(family) && (
@@ -1570,22 +1629,28 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
           value={size}
           min={1}
           max={999}
-          onChange={(v, committing) => setTextStyle({ fontSize: v }, committing ? undefined : 'fsize')}
+          onChange={(v, committing) => applyStyle({ fontSize: v }, committing ? undefined : 'fsize')}
         />
         <Select
-          value={weight ?? 400}
-          options={[300, 400, 500, 600, 700].map((w) => ({
-            value: w,
-            label: WEIGHT_LABELS[w] ?? String(w),
-          }))}
-          onChange={(v) => setTextStyle({ fontWeight: nearestWeight(family ?? 'Inter', Number(v)) })}
+          value={weight === null ? MIXED : String(weight)}
+          options={[
+            ...(weight === null ? [{ value: MIXED, label: t('label.mixed') }] : []),
+            ...[300, 400, 500, 600, 700].map((w) => ({
+              value: String(w),
+              label: WEIGHT_LABELS[w] ?? String(w),
+            })),
+          ]}
+          onChange={(v) =>
+            v !== MIXED && applyStyle({ fontWeight: nearestWeight(family ?? 'Inter', Number(v)) })
+          }
+          title={t('label.fontWeight')}
         />
         <button
           type="button"
           className={`icon-button${italic ? ' active' : ''}`}
           style={{ fontStyle: 'italic', fontFamily: 'Georgia, serif' }}
           title="Italic"
-          onClick={() => setTextStyle({ fontStyle: italic ? 'normal' : 'italic' })}
+          onClick={() => applyStyle({ fontStyle: italic ? 'normal' : 'italic' })}
         >
           I
         </button>
@@ -1599,7 +1664,7 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
           max={4}
           step={0.1}
           scrubStep={0.01}
-          onChange={(v, committing) => setTextStyle({ lineHeight: v }, committing ? undefined : 'lh')}
+          onChange={(v, committing) => applyStyle({ lineHeight: v }, committing ? undefined : 'lh')}
         />
         <NumberField
           label="LS"
@@ -1607,14 +1672,14 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
           value={tracking}
           step={0.01}
           scrubStep={0.002}
-          onChange={(v, committing) => setTextStyle({ letterSpacing: v }, committing ? undefined : 'ls')}
+          onChange={(v, committing) => applyStyle({ letterSpacing: v }, committing ? undefined : 'ls')}
         />
       </div>
       <div className="field-row">
         <div className="icon-row">
-          <IconButton icon={<TextAlignLeftIcon />} label="Align left" active={align === 'left'} onClick={() => setTextStyle({ align: 'left' })} />
-          <IconButton icon={<TextAlignCenterIcon />} label="Align center" active={align === 'center'} onClick={() => setTextStyle({ align: 'center' })} />
-          <IconButton icon={<TextAlignRightIcon />} label="Align right" active={align === 'right'} onClick={() => setTextStyle({ align: 'right' })} />
+          <IconButton icon={<TextAlignLeftIcon />} label="Align left" active={align === 'left'} onClick={() => applyStyle({ align: 'left' })} />
+          <IconButton icon={<TextAlignCenterIcon />} label="Align center" active={align === 'center'} onClick={() => applyStyle({ align: 'center' })} />
+          <IconButton icon={<TextAlignRightIcon />} label="Align right" active={align === 'right'} onClick={() => applyStyle({ align: 'right' })} />
         </div>
       </div>
 
@@ -1632,7 +1697,7 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
               aria-pressed={sizing === option.value}
               data-testid={`sizing-${option.value}`}
               title={t(option.key)}
-              onClick={() => setTextStyle({ sizing: option.value })}
+              onClick={() => applyStyle({ sizing: option.value })}
             >
               {option.icon}
             </button>
@@ -1647,18 +1712,19 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
           value={paragraphSpacing}
           min={0}
           onChange={(v, committing) =>
-            setTextStyle({ paragraphSpacing: v }, committing ? undefined : 'para')
+            applyStyle({ paragraphSpacing: v }, committing ? undefined : 'para')
           }
         />
         <Select
-          value={transform ?? 'none'}
+          value={transform ?? MIXED}
           options={[
+            ...(transform === null ? [{ value: MIXED, label: t('label.mixed') }] : []),
             { value: 'none', label: t('label.transformNone') },
             { value: 'uppercase', label: 'AB' },
             { value: 'lowercase', label: 'ab' },
             { value: 'titlecase', label: 'Ab' },
           ]}
-          onChange={(v) => setTextStyle({ transform: v as TextTransform })}
+          onChange={(v) => v !== MIXED && applyStyle({ transform: v as TextTransform })}
           title={t('label.textTransform')}
         />
         <button
@@ -1713,6 +1779,17 @@ const BLEND_MODES: Array<Style['blendMode']> = [
   'color-dodge', 'color-burn', 'hard-light', 'soft-light',
   'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity',
 ]
+
+/**
+ * The value a dropdown shows when what it describes disagrees.
+ *
+ * A numeric field shows an empty box for a mixed selection; a native <select>
+ * has no such state and will happily display the first option instead, which
+ * is not "no answer" but a wrong one — two text objects at 300 and 700 both
+ * reading "Regular". A sentinel option is the honest version, and picking it
+ * does nothing.
+ */
+const MIXED = '\u0000mixed'
 
 const WEIGHT_LABELS: Record<number, string> = {
   300: 'Light', 400: 'Regular', 500: 'Medium', 600: 'Semibold', 700: 'Bold',

@@ -237,5 +237,10 @@
   "prefs.transfer.count": "{total} 项中的 {count} 项",
   "prefs.transfer.nothing": "此文件不包含此版本可用的任何内容。",
   "prefs.transfer.canvasNote": "画布设置会更改已打开的文档。撤销一次即可还原。",
-  "prefs.transfer.export": "导出"
+  "prefs.transfer.export": "导出",
+  "text.formattingSelection": "正在设置 {count} 个字符的格式",
+  "text.clearFormatting": "清除",
+  "label.fontFamily": "字体",
+  "label.fontWeight": "字重",
+  "label.mixed": "多种"
 }

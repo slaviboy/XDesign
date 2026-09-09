@@ -25,6 +25,13 @@
  * Editing writes through setText on every keystroke under one coalesce key, so
  * a whole typing burst collapses into a single undo entry instead of one per
  * character.
+ *
+ * The textarea also reports WHICH characters are selected, because formatting
+ * part of a text object is a conversation between two panels: you select a word
+ * here and reach for the size over there. Clicking the inspector blurs this
+ * element, so the selection is mirrored into the editor store on every change
+ * and the blur that lands on the inspector is deliberately not the end of
+ * editing.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -34,7 +41,7 @@ import { viewportMatrix } from './Viewport'
 import { setText } from '../history/Commands'
 import { fontStack } from '../text/FontRegistry'
 import { toHex } from '../document/color'
-import { setEditor } from '../state/EditorStore'
+import { endTextEditing, setEditor, setTextSelection } from '../state/EditorStore'
 import { useDocument, useEditorStore } from '../state/hooks'
 import type { CSSProperties } from 'react'
 import type { NodeId, TextStyle } from '../document/types'
@@ -59,6 +66,10 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
   const viewport = useEditorStore((s) => s.viewport)
   const ref = useRef<HTMLTextAreaElement>(null)
   const node = doc.nodes[nodeId]
+  // Local, and true from the first frame: the store cannot be the source of
+  // truth here because the element has to be focusable before it can report
+  // being focused, and it starts by focusing itself.
+  const [focused, setFocused] = useState(true)
   const [value, setValue] = useState(node?.type === 'text' ? node.text : '')
 
   const matrix = useMemo<Mat2D>(() => {
@@ -69,6 +80,7 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
+    setEditor({ textEditingFocused: true })
     el.focus()
     // Select everything on entry so typing replaces the placeholder, which is
     // what happens when a brand-new text box is created.
@@ -95,19 +107,40 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
       e.stopPropagation()
       if (e.key === 'Escape') {
         e.preventDefault()
-        setEditor({ editingTextId: null })
+        endTextEditing()
       }
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
-        setEditor({ editingTextId: null })
+        endTextEditing()
       }
     },
     [],
   )
 
   useEffect(() => {
-    if (node?.type !== 'text') setEditor({ editingTextId: null })
+    if (node?.type !== 'text') endTextEditing()
   }, [node])
+
+  const reportSelection = useCallback(() => {
+    const el = ref.current
+    if (el) setTextSelection(nodeId, el.selectionStart, el.selectionEnd)
+  }, [nodeId])
+
+  // `selectionchange` on the document rather than React's onSelect. React
+  // synthesises onSelect from its own heuristics and does not fire it for a
+  // programmatic setSelectionRange, which is exactly what the select-all on
+  // entry is — so the inspector would not learn about the selection it is
+  // about to be asked to format.
+  useEffect(() => {
+    const onSelectionChange = () => {
+      if (document.activeElement === ref.current) reportSelection()
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    return () => document.removeEventListener('selectionchange', onSelectionChange)
+  }, [reportSelection])
+
+  // Selecting everything on entry is itself a selection the inspector should see.
+  useLayoutEffect(reportSelection, [reportSelection])
 
   if (!node || node.type !== 'text') return null
   const ts = node.textStyle
@@ -122,9 +155,26 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
       className="text-editor"
       data-testid="text-editor"
       value={value}
-      onChange={(e) => commit(e.target.value)}
+      onChange={(e) => {
+        commit(e.target.value)
+        reportSelection()
+      }}
       onKeyDown={onKeyDown}
-      onBlur={() => setEditor({ editingTextId: null })}
+      onSelect={reportSelection}
+      onFocus={() => {
+        setFocused(true)
+        setEditor({ textEditingFocused: true })
+      }}
+      onBlur={(e) => {
+        setFocused(false)
+        setEditor({ textEditingFocused: false })
+        // Focus moving into the inspector is the user reaching for a control
+        // to format the selection with. Ending the edit there would drop both
+        // the selection and the editor before the control could be used, which
+        // is the one interaction this whole mechanism exists for.
+        if ((e.relatedTarget as HTMLElement | null)?.closest('.inspector')) return
+        endTextEditing()
+      }}
       spellCheck={false}
       style={{
         position: 'absolute',
@@ -141,10 +191,17 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
         lineHeight: ts.lineHeight,
         letterSpacing: `${ts.letterSpacing * ts.fontSize}px`,
         textAlign: ts.align,
-        color: fill,
+        // Blurred, the canvas draws this text properly formatted underneath —
+        // two renderings at once would show every glyph twice. The element
+        // stays in place and clickable rather than hidden, so clicking the
+        // text hands editing straight back to it. `visibility: hidden` would
+        // also make it unfocusable, which is a trap: it focuses itself on
+        // mount, and could never become visible again.
+        color: focused ? fill : 'transparent',
         background: 'transparent',
         border: 'none',
         outline: '1px solid var(--accent)',
+
         padding: 0,
         margin: 0,
         resize: 'none',
@@ -164,7 +221,7 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
         // which is what lets None give it back unchanged.
         textTransform: CSS_TRANSFORM[ts.transform],
         textDecoration: decoration || undefined,
-        caretColor: fill,
+        caretColor: focused ? fill : 'transparent',
       }}
     />
   )
