@@ -219,3 +219,53 @@ test('the Pen hands the object back to the pointers', async ({ page }) => {
   await selectTool(page, 'direct-select')
   await expect(anchors(page)).toHaveCount(2)
 })
+
+// ---------------------------------------------------------------------------
+// Selecting and moving points the way the documentation describes
+// ---------------------------------------------------------------------------
+
+test('a marquee over the points selects them, and Shift adds to that', async ({ page }) => {
+  await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 400, y: 320 })
+  await selectTool(page, 'direct-select')
+  await clickCanvas(page, { x: 300, y: 260 })
+  await expect(anchors(page)).toHaveCount(4)
+
+  // "To select multiple anchor points … marquee select the anchor points."
+  // A band over the two left corners, drawn from empty space beside them.
+  await dragOnCanvas(page, { x: 150, y: 160 }, { x: 250, y: 360 })
+  await expect(selectedAnchors(page)).toHaveCount(2)
+
+  // Shift adds the right-hand pair rather than starting again.
+  await dragOnCanvas(page, { x: 360, y: 160 }, { x: 450, y: 360 }, { modifiers: ['Shift'] })
+  await expect(selectedAnchors(page)).toHaveCount(4)
+
+  // And a band over nothing clears it, as a click on empty space does.
+  await dragOnCanvas(page, { x: 480, y: 400 }, { x: 560, y: 460 })
+  await expect(selectedAnchors(page)).toHaveCount(0)
+  // The points are still on screen: the marquee selects, it does not deselect
+  // the object out from under itself.
+  await expect(anchors(page)).toHaveCount(4)
+})
+
+test('the arrow keys nudge the selected points, not the whole object', async ({ page }) => {
+  await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 400, y: 320 })
+  await selectTool(page, 'direct-select')
+  await clickCanvas(page, { x: 300, y: 260 })
+  const before = await pathData(page)
+
+  // "Nudge the selected anchor points using your keyboard." One corner only,
+  // so the shape changes rather than moving.
+  await dragOnCanvas(page, { x: 150, y: 160 }, { x: 250, y: 240 })
+  await expect(selectedAnchors(page)).toHaveCount(1)
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ArrowRight')
+
+  // The corner alone moved: the three others are where they were, which is
+  // what tells this apart from the whole object sliding right.
+  expect(before).toBe('M0 0 L333.3333 0 L333.3333 200 L0 200 Z')
+  expect(await pathData(page)).toBe('M2 0 L333.3333 0 L333.3333 200 L0 200 L2 0 Z')
+
+  // Shift takes the larger step.
+  await page.keyboard.press('Shift+ArrowRight')
+  expect(await pathData(page)).toBe('M12 0 L333.3333 0 L333.3333 200 L0 200 L12 0 Z')
+})

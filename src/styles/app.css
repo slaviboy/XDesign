@@ -274,9 +274,14 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .snap-guide.center { stroke-dasharray: 4 3; }
 .snap-guide.guide { stroke: var(--guide); }
 
+/* Adobe's convention: hollow means "not the one you are working on", filled
+   means it is. The pen's instructions lean on it — "position the Pen tool over
+   the first (hollow) anchor point" is how you are told to close a path. */
 .anchor-point { fill: var(--handle-fill); stroke: var(--accent); stroke-width: 1; }
 .anchor-point.selected { fill: var(--accent); }
-.anchor-point.first { fill: var(--magenta); }
+/* The ends of a path the pen is only hovering. Drawn like an anchor because it
+   is one, classed apart because it belongs to nothing that is selected. */
+.pen-end-hint { fill: var(--handle-fill); stroke: var(--accent); stroke-width: 1; }
 .bezier-handle { fill: var(--handle-fill); stroke: var(--accent); stroke-width: 1; }
 .handle-arm { stroke: var(--accent); stroke-width: 1; opacity: 0.6; }
 

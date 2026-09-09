@@ -1259,6 +1259,7 @@ function dropFromSelection(affected: readonly NodeId[]): void {
   if (selection.length !== state.selection.length) {
     patch.selection = selection
     patch.selectedPoints = []
+    patch.selectedSegments = []
   }
   // The point editor and the entered group are two more ways to be holding on
   // to something that has just become untouchable.

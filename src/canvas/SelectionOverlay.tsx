@@ -40,6 +40,7 @@ import {
   localMatrix,
   worldMatrix,
 } from '../document/SceneGraph'
+import { AnchorDot, HandleArm, HandleDot } from './overlayMarks'
 import { docToScreen } from './Viewport'
 import { intrinsicTextSize } from '../text/TextLayout'
 import { fitTextHeight } from '../history/Commands'
@@ -897,17 +898,11 @@ function PathPointOverlay({ viewport, tick }: { viewport: Viewport; tick: number
           )
           return (
             <g key={`${si}-${i}`}>
-              {hIn && <line className="handle-arm" x1={a.x} y1={a.y} x2={hIn.x} y2={hIn.y} />}
-              {hOut && <line className="handle-arm" x1={a.x} y1={a.y} x2={hOut.x} y2={hOut.y} />}
-              {hIn && <circle className="bezier-handle" cx={hIn.x} cy={hIn.y} r={3.5} />}
-              {hOut && <circle className="bezier-handle" cx={hOut.x} cy={hOut.y} r={3.5} />}
-              <rect
-                className={selected ? 'anchor-point selected' : 'anchor-point'}
-                x={a.x - 3.5}
-                y={a.y - 3.5}
-                width={7}
-                height={7}
-              />
+              {hIn && <HandleArm from={a} to={hIn} />}
+              {hOut && <HandleArm from={a} to={hOut} />}
+              {hIn && <HandleDot x={hIn.x} y={hIn.y} />}
+              {hOut && <HandleDot x={hOut.x} y={hOut.y} />}
+              <AnchorDot x={a.x} y={a.y} selected={selected} />
             </g>
           )
         }),

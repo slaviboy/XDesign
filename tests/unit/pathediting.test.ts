@@ -182,12 +182,20 @@ describe('path point editing', () => {
     expect(pathEditOpenEndAt(ev(20, 20), ctx)).toEqual({ subpath: 0, index: 0, kind: 'anchor' })
   })
 
-  it('reports nothing in the middle of a path, or on a closed one', () => {
+  it('reports nothing in the middle of a path', () => {
     openPath('M0 0 L100 0 L100 100')
     // A middle anchor is not an end: the pen moves it, it does not draw on.
     expect(pathEditOpenEndAt(ev(100, 0), ctx)).toBeNull()
+    expect(pathEditOpenEndAt(ev(50, 50), ctx)).toBeNull()
+  })
+
+  it('a closed ring offers its start point, which is where it reopens', () => {
+    // "Extending a closed path reopens the path and then puts the pen tool in
+    // drawing mode for that path." A ring has no ends, so the point it reopens
+    // at is the one it starts from.
     openPath('M0 0 L100 0 L100 100 Z')
-    expect(pathEditOpenEndAt(ev(0, 0), ctx)).toBeNull()
+    expect(pathEditOpenEndAt(ev(0, 0), ctx)).toEqual({ subpath: 0, index: 0, kind: 'anchor' })
+    expect(pathEditOpenEndAt(ev(100, 0), ctx)).toBeNull()
   })
 
   it('inserts a point on the outline only when the caller asks for it', () => {

@@ -152,7 +152,16 @@ test('Escape ends the open path rather than throwing it away', async ({ page }) 
 
   await expect(nodesOfType(page, 'path')).toHaveCount(1)
   expect((await pathD(page))!).not.toMatch(/Z\s*$/)
-  // And it returns to the selection tool, as XD does.
+  // "To toggle between drawing mode and edit mode, press the Esc key." So the
+  // pen keeps the tool and the path's anchors stay on screen; it does NOT jump
+  // to the pointer, which is what this used to assert.
+  await expect(page.locator('[data-tool="pen"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.anchor-point')).toHaveCount(3)
+
+  // A second Escape leaves point editing, a third leaves the tool.
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.anchor-point')).toHaveCount(0)
+  await page.keyboard.press('Escape')
   await expect(page.locator('[data-tool="select"]')).toHaveAttribute('aria-pressed', 'true')
 })
 
@@ -519,4 +528,104 @@ test('a drag in curvature mode places a point rather than pulling handles', asyn
   await click(page, 400, 300)
   await page.keyboard.press('Enter')
   expect(await pathD(page)).toBe('M0 0 L333.3333 0')
+})
+
+// ---------------------------------------------------------------------------
+// The rest of what the documentation describes
+// ---------------------------------------------------------------------------
+
+test('hovering a path with the pen shows handles over its start and end', async ({ page }) => {
+  await click(page, 200, 200)
+  await click(page, 320, 200)
+  await click(page, 320, 320)
+  await page.keyboard.press('Enter')
+  await selectTool(page, 'select')
+  await click(page, 600, 150)
+  await selectTool(page, 'pen')
+
+  // "all paths on the artboard under the mouse display handles over their
+  // start and end point" — two of them, and they are not anchors of anything
+  // selected, so they do not count as the path's points.
+  await expect(page.locator('.pen-end-hint')).toHaveCount(0)
+  const on = await pt(page, 320, 260)
+  await page.mouse.move(on.x, on.y)
+  await expect(page.locator('.pen-end-hint')).toHaveCount(2)
+  await expect(page.locator('.anchor-point')).toHaveCount(0)
+
+  const away = await pt(page, 640, 480)
+  await page.mouse.move(away.x, away.y)
+  await expect(page.locator('.pen-end-hint')).toHaveCount(0)
+})
+
+test('a closed path is reopened by clicking one of its points', async ({ page }) => {
+  await click(page, 200, 200)
+  await click(page, 320, 200)
+  await click(page, 320, 320)
+  await click(page, 200, 200)
+  expect((await pathD(page))!).toMatch(/Z\s*$/)
+
+  await selectTool(page, 'select')
+  await click(page, 260, 200)
+  await selectTool(page, 'pen')
+
+  // "Extending a closed path reopens the path and then puts the pen tool in
+  // drawing mode for that path." A ring's start and end are the same point, so
+  // it gets the one handle, and that is what reopens it.
+  const start = await pt(page, 200, 200)
+  await page.mouse.move(start.x, start.y)
+  await expect(page.locator('.pen-end-hint')).toHaveCount(1)
+  await click(page, 200, 200)
+  await expect(page.locator('.pen-preview')).toHaveCount(1)
+  await click(page, 120, 120)
+  await page.keyboard.press('Enter')
+
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+  expect((await pathD(page))!).not.toMatch(/Z\s*$/)
+})
+
+test('an anchor lines up with the anchors around it, and Cmd lets go', async ({ page }) => {
+  // A first path whose corner sits at a known place, to line up against.
+  await click(page, 200, 200)
+  await click(page, 200, 320)
+  await page.keyboard.press('Enter')
+  await selectTool(page, 'pen')
+
+  // Second path, whose second anchor is placed a few pixels off that column.
+  await click(page, 400, 420)
+  const near = await pt(page, 204, 420)
+  await page.mouse.move(near.x, near.y)
+  await expect(page.locator('.snap-guide')).not.toHaveCount(0)
+  await page.mouse.click(near.x, near.y)
+  await page.keyboard.press('Enter')
+
+  // Snapped onto the column exactly, rather than four pixels beside it.
+  const all = await nodesOfType(page, 'path').locator('path').evaluateAll((els) =>
+    els.map((el) => el.getAttribute('d')),
+  )
+  // The path is rebased against its own bounds, so the snapped anchor is the
+  // origin and the first one sits 533.33 - 200 away from it.
+  expect(all.some((d) => d === 'M333.3333 0 L0 0')).toBe(true)
+})
+
+test('Cmd suppresses anchor snapping while placing a point', async ({ page }) => {
+  await click(page, 200, 200)
+  await click(page, 200, 320)
+  await page.keyboard.press('Enter')
+  await selectTool(page, 'pen')
+
+  await click(page, 400, 420)
+  const near = await pt(page, 204, 420)
+  await page.keyboard.down('ControlOrMeta')
+  await page.mouse.move(near.x, near.y)
+  await expect(page.locator('.snap-guide')).toHaveCount(0)
+  await page.mouse.click(near.x, near.y)
+  await page.keyboard.up('ControlOrMeta')
+  await page.keyboard.press('Enter')
+
+  const all = await nodesOfType(page, 'path').locator('path').evaluateAll((els) =>
+    els.map((el) => el.getAttribute('d')),
+  )
+  // Left where it was put: 4px at 60% zoom is 6.67 document units, so the gap
+  // is 6.67 shorter than the snapped one above.
+  expect(all.some((d) => d === 'M326.6666 0 L0 0')).toBe(true)
 })

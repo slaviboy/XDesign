@@ -27,7 +27,8 @@ import { penTool, getPenPreview } from '@/tools/PenTool'
 import { isMirrored, isSmooth } from '@/geometry/PathPoints'
 import { createDocument } from '@/document/NodeFactory'
 import { replaceDocument, getDoc } from '@/state/DocumentStore'
-import { setTool } from '@/state/EditorStore'
+import { setEditor, setTool } from '@/state/EditorStore'
+import { endPathEditing } from '@/tools/PathEditing'
 import type { CanvasPointerEvent, ToolContext } from '@/tools/types'
 import type { PathNode } from '@/document/types'
 
@@ -76,6 +77,13 @@ beforeEach(() => {
   // The pen holds its in-progress path in module state, so it has to be torn
   // down between tests or each one inherits the last one's points.
   penTool.onDeactivate?.(ctx)
+  // Point editing outlives the tool on purpose — `nodeEditingId` is what the
+  // pen and the two pointers hand back and forth — and in the app the Canvas
+  // subscriber closes it. There is no Canvas here, so the harness does it, or
+  // a test that ends in edit mode leaves the next one pointing at a node that
+  // no longer exists.
+  setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
+  endPathEditing()
   replaceDocument(createDocument('Pen', false))
   setTool('pen')
 })
@@ -112,6 +120,75 @@ describe('pen tool', () => {
     const d = committed()!.d
     // First segment is a line, second is a curve.
     expect(d).toMatch(/L.*C/s)
+  })
+
+  // Adobe: "Position the Pen tool over the selected endpoint … click the anchor
+  // point, and drag the direction line that appears."
+  it('draws a straight line followed by a curve, the way the docs describe it', () => {
+    click(100, 100)
+    click(200, 100)
+    // Both corners, so the segment between them is straight.
+    expect(building().points[1]!.outX).toBeNull()
+
+    // Drag the direction line out of the endpoint. No point is added by it.
+    dragOut(200, 100, 260, 60)
+    expect(building().points).toHaveLength(2)
+    expect(building().points[1]!.outX).not.toBeNull()
+    // The incoming side stays absent, so the segment already drawn stays a line.
+    // Mirroring here would bend it under the pointer as you set the next slope.
+    expect(building().points[1]!.inX).toBeNull()
+
+    click(320, 140)
+    penTool.onKeyDown?.(key('Enter'), ctx)
+    const d = committed()!.d
+    expect(d).toMatch(/L.*C/s)
+  })
+
+  // Adobe: "you can switch the type of a segment that you are about to add,
+  // from curved to straight by clicking on the point that is currently the last
+  // point of the path."
+  it('a plain click on the last anchor retracts its direction line', () => {
+    dragOut(100, 100, 160, 100)
+    dragOut(220, 160, 280, 160)
+    expect(building().points[1]!.outX).not.toBeNull()
+    expect(building().points).toHaveLength(2)
+
+    click(220, 160)
+    expect(building().points[1]!.outX).toBeNull()
+    expect(building().points[1]!.inX).not.toBeNull()
+    // And it added nothing. This used to drop a second anchor on top of the
+    // first, leaving a zero-length segment behind.
+    expect(building().points).toHaveLength(2)
+  })
+
+  // Adobe: "press and hold Alt/Option and drag the direction line toward its
+  // opposing end … This process converts the smooth point to a corner point by
+  // splitting the direction lines."
+  it('dragging the direction line off a smooth last anchor splits it', () => {
+    dragOut(100, 100, 160, 100)
+    dragOut(220, 160, 280, 160)
+    const before = { x: building().points[1]!.inX, y: building().points[1]!.inY }
+
+    dragOut(220, 160, 220, 240)
+    const tip = building().points[1]!
+    // The outgoing side now points somewhere else entirely; the incoming side
+    // is untouched, which is what makes the joint a cusp.
+    expect(tip.outY).toBeGreaterThan(tip.y)
+    expect(tip.inX).toBeCloseTo(before.x!, 6)
+    expect(tip.inY).toBeCloseTo(before.y!, 6)
+    expect(isSmooth(tip)).toBe(true)
+    expect(isMirrored(tip)).toBe(false)
+  })
+
+  it('the nearer end wins when a press is in reach of both', () => {
+    // A two-point path short enough that one press is near the head and the
+    // tail at once. Testing them in a fixed order gave every such press to the
+    // tail, so the path could not be closed.
+    click(100, 100)
+    click(112, 100)
+    click(100, 100)
+    // Closed on the first point rather than retracting the second.
+    expect(committed()!.d).toMatch(/Z\s*$/)
   })
 
   it('draws a curve followed by a straight line (Alt retracts the handle)', () => {

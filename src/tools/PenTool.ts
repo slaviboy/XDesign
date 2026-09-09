@@ -43,6 +43,7 @@ import {
   pathToSubpaths,
   cornerPoint,
   moveHandle,
+  movePoint,
   reversePoints,
   smoothPoint,
   subpathToPath,
@@ -77,10 +78,11 @@ import {
   pathEditPointerUp,
   updateInsertPreview,
 } from './PathEditing'
-import { snapAngle } from './snapHelpers'
+import { buildAnchorSnapContext, snapAngle, snapPoint, type SnapContext } from './snapHelpers'
 import { DEFAULT_STROKE } from '../document/types'
 import type { Vec2 } from '../geometry/Matrix'
 import type { DesignDocument, NodeId } from '../document/types'
+import type { SnapGuide } from '../state/EditorStore'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
 
 interface PenState {
@@ -123,8 +125,43 @@ interface PenState {
   endArm: { id: NodeId; at: Vec2; press: CanvasPointerEvent } | null
   /** True once an armed press has moved far enough to be a point drag. */
   armDragging: boolean
+  /**
+   * A press on the anchor just placed, with nothing decided yet.
+   *
+   * Adobe gives this one spot two jobs, told apart only by whether the pointer
+   * moves. Released where it went down it retracts the outgoing direction line,
+   * so the next segment leaves straight — "draw curves followed by straight
+   * lines". Dragged, it pulls that direction line out again and sets the slope
+   * of the curve to come — "draw straight lines followed by curves", and, when
+   * the anchor already has an incoming curve, the cusp in "draw two curved
+   * segments connected by a corner". Neither can be committed on the way down.
+   */
+  tipArm: { at: Vec2; index: number; move?: boolean } | null
+  /** True once a tip press has moved far enough to be a direction-line drag. */
+  tipDragging: boolean
   /** Whether the model differs from what is in the document. */
   dirty: boolean
+  /**
+   * The ends of the path under the pointer, in document space.
+   *
+   * Adobe: "When you select the pen tool, all paths on the artboard under the
+   * mouse display handles over their start and end point. To continue drawing
+   * the path from that point, click one of the handles." Clicking one already
+   * resumes the path; these are the handles that say so.
+   */
+  endHints: Vec2[]
+  /** The node those hints were computed for, so hovering costs one pass. */
+  endHintId: NodeId | null
+  /**
+   * Anchors the point being placed can line up with, and the key they were
+   * collected for.
+   *
+   * Rebuilt when the document or the view changes rather than on every pointer
+   * move — the candidate list means parsing every visible path, and the answer
+   * only goes stale when one of those two does.
+   */
+  snap: SnapContext | null
+  snapKey: string
   /**
    * The node's OTHER subpaths, in document space.
    *
@@ -159,10 +196,16 @@ const pen: PenState = {
   mergeIds: [],
   endArm: null,
   armDragging: false,
+  tipArm: null,
+  tipDragging: false,
   dirty: false,
   otherSubs: [],
   origin: null,
   committing: false,
+  endHints: [],
+  endHintId: null,
+  snap: null,
+  snapKey: '',
   step: 0,
   pendingLabel: 'Draw path',
   curvature: false,
@@ -178,6 +221,43 @@ const HANDLE_DEAD_PX = 2
  * what makes evenly spaced clicks trace a circle almost exactly.
  */
 const CURVATURE_STRENGTH = 1 / 3
+
+/** The start and end handles drawn over the path under the pointer. */
+export function getPenEndHints(): readonly Vec2[] {
+  return pen.endHints
+}
+
+/**
+ * Work out the ends of the path under the pointer.
+ *
+ * One hit test per move, which is the cost the two pointer tools already pay
+ * for their hover outline, and the subpath parsing only happens when the node
+ * under the pointer actually changes.
+ */
+function updateEndHints(e: CanvasPointerEvent, ctx: ToolContext): void {
+  const doc = ctx.doc()
+  const hit = hitTest(doc, e.doc, { tolerance: ctx.tolerance() })
+  const id = hit && isPointEditable(doc.nodes[hit]) && !isEffectivelyLocked(doc, hit) ? hit : null
+  if (id === pen.endHintId) return
+
+  pen.endHintId = id
+  pen.endHints = []
+  const outline = id ? editableOutline(doc.nodes[id]) : null
+  if (id && outline) {
+    const world = worldMatrix(doc, id)
+    for (const sub of pathToSubpaths(outline)) {
+      if (sub.points.length < 2) continue
+      const head = sub.points[0]!
+      pen.endHints.push(applyToPoint(world, { x: head.x, y: head.y }))
+      // A ring's start and end are the same point, and it is the one that
+      // reopens the path, so it gets the one handle.
+      if (sub.closed) continue
+      const tail = sub.points[sub.points.length - 1]!
+      pen.endHints.push(applyToPoint(world, { x: tail.x, y: tail.y }))
+    }
+  }
+  refreshOverlay()
+}
 
 export function getPenPreview(): { sub: PenSubpath; rubber: PenSubpath | null } | null {
   if (!pen.building) return null
@@ -230,10 +310,17 @@ function resetPen(): void {
   pen.mergeIds = []
   pen.endArm = null
   pen.armDragging = false
+  pen.tipArm = null
+  pen.tipDragging = false
   pen.dirty = false
   pen.otherSubs = []
   pen.origin = null
   pen.committing = false
+  pen.snap = null
+  pen.snapKey = ''
+  pen.endHints = []
+  pen.endHintId = null
+  if (editorStore.getState().snapGuides.length) setEditor({ snapGuides: [] })
   // `curvature` deliberately survives: it is a mode the user chose, not state
   // belonging to one path.
 }
@@ -258,7 +345,7 @@ function openEndAt(
 
   const world = worldMatrix(doc, id)
   for (const sub of pathToSubpaths(outline)) {
-    if (sub.closed || sub.points.length < 2) continue
+    if (sub.points.length < 2) continue
     const toDoc = (p: PenPoint): PenPoint => {
       const a = applyToPoint(world, { x: p.x, y: p.y })
       const i = p.inX === null || p.inY === null ? null : applyToPoint(world, { x: p.inX, y: p.inY })
@@ -276,6 +363,18 @@ function openEndAt(
     const atTail = Math.hypot(tail.x - at.x, tail.y - at.y) * zoom <= CLOSE_PX
     const atHead = !atTail && Math.hypot(head.x - at.x, head.y - at.y) * zoom <= CLOSE_PX
     if (!atTail && !atHead) continue
+
+    // "Extending a closed path reopens the path and then puts the pen tool in
+    // drawing mode for that path." A ring has no ends, so the anchor grabbed
+    // BECOMES the end: the ring is rotated to start there and the closing
+    // segment is dropped, which is what reopening it means.
+    if (sub.closed) {
+      // Rotated so the point that was CLICKED ends up last, because that is
+      // where drawing carries on from. The closing segment simply stops being
+      // emitted, which is what reopening a ring amounts to.
+      const rotated = atHead ? [...points.slice(1), points[0]!] : points
+      return { points: rotated, atHead: false }
+    }
     return { points, atHead }
   }
   return null
@@ -323,6 +422,44 @@ function joinTargetAt(ctx: ToolContext, at: Vec2): { id: NodeId; points: PenPoin
   return null
 }
 
+/**
+ * Line an anchor up with the anchors around it.
+ *
+ * Adobe: "While placing a new anchor point or dragging an existing anchor
+ * point, snap lines appear when an anchor is vertically or horizontally near
+ * another anchor point. Hold down the Cmd/Ctrl key to disable anchor point
+ * snapping."
+ *
+ * Shift is excluded as well, and not because the docs say so: Shift already
+ * constrains the anchor to a 45-degree ray from the last one, and a snap would
+ * pull it straight back off that ray. Whichever constraint the user asked for
+ * out loud is the one that wins.
+ */
+function snapAnchor(e: CanvasPointerEvent, ctx: ToolContext, at: Vec2): Vec2 {
+  if (e.primaryModifier || e.shiftKey) {
+    showSnapGuides([])
+    return at
+  }
+  const editor = editorStore.getState()
+  const doc = ctx.doc()
+  const viewport = ctx.viewport()
+  const key = `${doc.modifiedAt}:${viewport.zoom}:${viewport.x}:${viewport.y}:${editor.snapEnabled}`
+  if (!pen.snap || pen.snapKey !== key) {
+    pen.snap = buildAnchorSnapContext(doc, viewport, editor.canvasSize, editor.snapEnabled)
+    pen.snapKey = key
+  }
+  const snap = snapPoint(at, pen.snap)
+  showSnapGuides(snap.lines)
+  return { x: at.x + snap.dx, y: at.y + snap.dy }
+}
+
+/** Publish the guide lines, skipping the write when nothing would change. */
+function showSnapGuides(lines: SnapGuide[]): void {
+  const current = editorStore.getState().snapGuides
+  if (current.length === 0 && lines.length === 0) return
+  setEditor({ snapGuides: lines })
+}
+
 /** Set the pointer's cursor, only when it actually changes. */
 function setHoverCursor(cursor: string | null): void {
   if (editorStore.getState().hoverCursor !== cursor) setEditor({ hoverCursor: cursor })
@@ -337,6 +474,8 @@ function setHoverCursor(cursor: string | null): void {
  */
 function enterDrawing(): void {
   setHoverCursor(null)
+  pen.endHints = []
+  pen.endHintId = null
   if (editorStore.getState().nodeEditingId) {
     setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
     endPathEditing()
@@ -611,11 +750,12 @@ export const penTool: Tool = {
       // drawing a second one with both overlays on screen.
       enterDrawing()
       pen.step++
-      pen.origin = corner(e.doc.x, e.doc.y)
+      const start = snapAnchor(e, ctx, e.doc)
+      pen.origin = corner(start.x, start.y)
       pen.building = { points: [{ ...pen.origin }], closed: false }
       pen.pendingLabel = 'Draw path'
       pen.draggingHandle = !pen.curvature
-      pen.dragStart = e.doc
+      pen.dragStart = start
       refreshOverlay()
       return
     }
@@ -626,25 +766,41 @@ export const penTool: Tool = {
     const last = points[points.length - 1]!
     pen.step++
 
-    // Alt on the LAST anchor retracts its outgoing handle, so the next segment
-    // leaves as a straight line — XD's "draw curves followed by straight lines".
-    // Checked before the close test because on a two-point path both can match.
-    if (e.altKey && Math.hypot(e.doc.x - last.x, e.doc.y - last.y) * zoom <= CLOSE_PX) {
-      clearHandle(pen.building, points.length - 1, 'out')
+    const toFirst = Math.hypot(e.doc.x - first.x, e.doc.y - first.y) * zoom
+    const toLast = Math.hypot(e.doc.x - last.x, e.doc.y - last.y) * zoom
+
+    // The two ends of an unfinished path both answer to a press, and on a short
+    // one both can be in reach at once. Whichever is NEARER wins; testing them
+    // in a fixed order quietly gave the tail every ambiguous press.
+    if (toLast <= CLOSE_PX && (points.length < 2 || toLast <= toFirst)) {
+      // Decided on release. See PenState.tipArm: a click retracts the outgoing
+      // direction line, a drag pulls it back out.
+      pen.tipArm = { at: e.doc, index: points.length - 1 }
+      pen.tipDragging = false
       pen.draggingHandle = false
       pen.dragStart = null
-      pen.dirty = true
-      pen.pendingLabel = 'Retract handle'
-      refreshOverlay()
       return
     }
 
     // Closing: press near the first point. Committed on pointerup, so a drag in
     // between can shape the closing curve.
-    if (points.length >= 2 && Math.hypot(e.doc.x - first.x, e.doc.y - first.y) * zoom <= CLOSE_PX) {
+    //
+    // Adobe: "To select and drag the start point without closing the path, hold
+    // down the Cmd/Ctrl key." So the modifier turns the close target back into
+    // an ordinary point, and the press falls through to the drag below.
+    if (points.length >= 2 && toFirst <= CLOSE_PX && !e.primaryModifier) {
       pen.closing = true
       pen.draggingHandle = !pen.curvature
       pen.dragStart = e.doc
+      return
+    }
+
+    // Cmd/Ctrl on the first point: move it rather than closing on it.
+    if (points.length >= 2 && toFirst <= CLOSE_PX && e.primaryModifier) {
+      pen.tipArm = { at: e.doc, index: 0, move: true }
+      pen.tipDragging = false
+      pen.draggingHandle = false
+      pen.dragStart = null
       return
     }
 
@@ -671,7 +827,7 @@ export const penTool: Tool = {
       return
     }
 
-    const at = e.shiftKey ? snapAngle(last, e.doc, 45) : e.doc
+    const at = e.shiftKey ? snapAngle(last, e.doc, 45) : snapAnchor(e, ctx, e.doc)
     points.push(corner(at.x, at.y))
     // In curvature mode the anchors alone describe the path, so there are no
     // handles to pull and a drag from here would only fight the fairing.
@@ -698,8 +854,48 @@ export const penTool: Tool = {
 
     if (editorStore.getState().nodeEditingId && pathEditPointerMove(e, ctx)) return
 
+    // A press on the anchor just placed, now travelling: it is the direction
+    // line being pulled out. Only the OUTGOING side is written, ever.
+    //
+    // That is what both of Adobe's procedures need, and mirroring would break
+    // each of them. After a straight segment the incoming side is absent and
+    // has to stay absent, or the segment already drawn bends as you drag. After
+    // a curve the incoming side holds the slope that curve arrives on, and
+    // leaving it where it is IS the documented cusp. So Alt, which elsewhere
+    // means "do not mirror", has nothing left to do here — it is accepted and
+    // changes nothing.
+    if (pen.tipArm && pen.building) {
+      const arm = pen.tipArm
+      const to = arm.move
+        ? snapAnchor(e, ctx, e.doc)
+        : e.shiftKey
+          ? snapAngle(arm.at, e.doc, 15)
+          : e.doc
+      if (Math.hypot(to.x - arm.at.x, to.y - arm.at.y) * ctx.viewport().zoom > HANDLE_DEAD_PX) {
+        pen.tipDragging = true
+        if (arm.move) {
+          // Cmd/Ctrl on the first point: the anchor itself moves, handles and all.
+          const p = pen.building.points[arm.index]
+          if (p) movePoint(pen.building, arm.index, to.x - p.x, to.y - p.y)
+        } else {
+          moveHandle(pen.building, arm.index, 'out', to, false)
+        }
+        pen.dirty = true
+      }
+      pen.hover = e.doc
+      refreshOverlay()
+      return
+    }
+
     const anchor = lastAnchor()
-    pen.hover = e.shiftKey && anchor && !pen.draggingHandle ? snapAngle(anchor, e.doc, 45) : e.doc
+    // The preview is snapped the same way the click will be, so the guide lines
+    // appear BEFORE the anchor is committed rather than explaining it after.
+    pen.hover =
+      pen.draggingHandle || !pen.building
+        ? e.doc
+        : e.shiftKey && anchor
+          ? snapAngle(anchor, e.doc, 45)
+          : snapAnchor(e, ctx, e.doc)
 
     if (pen.draggingHandle && pen.building && pen.dragStart) {
       // While closing, the handle being pulled belongs to the FIRST point.
@@ -729,6 +925,7 @@ export const penTool: Tool = {
       // Idle over a path being edited: show where a click would drop an anchor,
       // and say which of the two things a press would do.
       updateInsertPreview(e, ctx)
+      updateEndHints(e, ctx)
       setHoverCursor(pathEditGrabAt(e, ctx) ? 'move' : null)
     }
     refreshOverlay()
@@ -747,6 +944,27 @@ export const penTool: Tool = {
       }
     }
     pen.armDragging = false
+
+    // The tip press decides here. Never moved: retract the outgoing direction
+    // line, so the next segment leaves straight. Moved: the drag already wrote
+    // it, and there is nothing left to do but record the step.
+    const tip = pen.tipArm
+    pen.tipArm = null
+    if (tip && pen.building) {
+      if (tip.move) {
+        pen.pendingLabel = 'Move point'
+      } else if (!pen.tipDragging) {
+        clearHandle(pen.building, tip.index, 'out')
+        pen.dirty = true
+        pen.pendingLabel = 'Retract handle'
+      } else {
+        pen.pendingLabel = 'Set direction line'
+      }
+      pen.tipDragging = false
+      commitBuilding(pen.pendingLabel, false)
+      refreshOverlay()
+      return
+    }
 
     if (editorStore.getState().nodeEditingId && pathEditPointerUp()) return
     pen.draggingHandle = false
@@ -785,10 +1003,17 @@ export const penTool: Tool = {
     }
     if (e.key === 'Escape') {
       if (pen.building) {
-        // XD ends the open path and returns to Select. Nothing is lost — the
-        // whole path is one transaction, so Cmd+Z removes it in a single step.
+        // Adobe: "To leave the path open, click Esc" and "To toggle between
+        // drawing mode and edit mode, press the Esc key." So this stops drawing
+        // and hands the finished path to the point editor — the pen stays the
+        // tool, and its anchors stay on screen. Escape again closes the editor
+        // (pathEditKeyDown, above), and a third leaves for the pointer.
         finishPath(false)
-        setTool('select')
+        const id = editorStore.getState().selection[0]
+        if (id && isPointEditable(getDoc().nodes[id])) {
+          setEditor({ nodeEditingId: id, selectedPoints: [], selectedSegments: [] })
+          beginPathEditing(id)
+        }
         return true
       }
       setTool('select')
@@ -832,6 +1057,7 @@ export const penTool: Tool = {
   onDeactivate(): void {
     clearInsertPreview()
     setHoverCursor(null)
+    showSnapGuides([])
     // Leaving the tool mid-path commits what has been drawn rather than losing it.
     if (pen.building && pen.building.points.length >= 2) finishPath(false)
     else resetPen()

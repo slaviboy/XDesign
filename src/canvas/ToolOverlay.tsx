@@ -33,11 +33,12 @@ import {
 } from '../geometry/ShapeGeometry'
 import { transformPath } from '../geometry/PathUtils'
 import { subpathToPath } from '../geometry/PathPoints'
+import { AnchorDot, HandleArm, HandleDot } from './overlayMarks'
 import {
   POLYGON_DEFAULT_SIDES, POLYGON_DEFAULT_STAR_RATIO,
 } from '../document/NodeFactory'
 import { getDrawPreview } from '../tools/ShapeTools'
-import { getPenPreview } from '../tools/PenTool'
+import { getPenEndHints, getPenPreview } from '../tools/PenTool'
 import { getInsertPreview } from '../tools/PathEditing'
 import { getPencilPreview } from '../tools/PencilTool'
 import { getArtboardPreview } from '../tools/ArtboardTool'
@@ -61,6 +62,7 @@ export const ToolOverlay = memo(function ToolOverlay() {
   const shape = getDrawPreview()
   const pen = getPenPreview()
   const insertAt = getInsertPreview()
+  const endHints = getPenEndHints()
   const pencil = getPencilPreview()
   const artboard = getArtboardPreview()
   const textBox = getTextDragPreview()
@@ -96,19 +98,30 @@ export const ToolOverlay = memo(function ToolOverlay() {
             const hOut = p.outX !== null && p.outY !== null ? docToScreen(viewport, { x: p.outX, y: p.outY }) : null
             return (
               <g key={i}>
-                {hIn && <line className="handle-arm" x1={s.x} y1={s.y} x2={hIn.x} y2={hIn.y} />}
-                {hOut && <line className="handle-arm" x1={s.x} y1={s.y} x2={hOut.x} y2={hOut.y} />}
-                {hIn && <circle className="bezier-handle" cx={hIn.x} cy={hIn.y} r={3.5} />}
-                {hOut && <circle className="bezier-handle" cx={hOut.x} cy={hOut.y} r={3.5} />}
-                <rect
-                  className={i === 0 ? 'anchor-point first' : 'anchor-point'}
-                  x={s.x - 3.5}
-                  y={s.y - 3.5}
-                  width={7}
-                  height={7}
-                />
+                {hIn && <HandleArm from={s} to={hIn} />}
+                {hOut && <HandleArm from={s} to={hOut} />}
+                {hIn && <HandleDot x={hIn.x} y={hIn.y} />}
+                {hOut && <HandleDot x={hOut.x} y={hOut.y} />}
+                {/* Filled is "the point you are working on", which while drawing
+                    is the one just placed. Everything else is hollow — including
+                    the first anchor, which is what the pen's own instructions
+                    tell you to look for when you go to close the path. */}
+                <AnchorDot x={s.x} y={s.y} selected={i === pen.sub.points.length - 1} />
               </g>
             )
+          })}
+        </g>
+      )}
+
+      {/* The start and end of the path under the pointer: "all paths on the
+          artboard under the mouse display handles over their start and end
+          point. To continue drawing the path from that point, click one of the
+          handles." Hollow, because neither is the point being worked on. */}
+      {!pen && endHints.length > 0 && (
+        <g className="pen-end-hints">
+          {endHints.map((p, i) => {
+            const s = docToScreen(viewport, p)
+            return <AnchorDot key={i} x={s.x} y={s.y} className="pen-end-hint" />
           })}
         </g>
       )}

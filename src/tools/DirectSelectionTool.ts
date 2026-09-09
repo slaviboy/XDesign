@@ -42,9 +42,17 @@ import {
   pathEditPointerDown,
   pathEditPointerMove,
   pathEditPointerUp,
+  pathEditSelectInBox,
 } from './PathEditing'
+import { boundsFromCorners } from '../geometry/Bounds'
 import { clearSelection, editorStore, setEditor, setSelection } from '../state/EditorStore'
+import type { Vec2 } from '../geometry/Matrix'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
+
+/** Where a rubber band over the points began, in document space. */
+let marqueeStart: Vec2 | null = null
+/** Whether that band adds to the point selection rather than replacing it. */
+let marqueeAdd = false
 
 export const directSelectionTool: Tool = {
   id: 'direct-select',
@@ -79,6 +87,15 @@ export const directSelectionTool: Tool = {
     // *entering* it is the whole point of this tool.
     const hit = hitTest(doc, e.doc, { tolerance: ctx.tolerance(), deep: true })
     if (!hit) {
+      // Adobe: "To select multiple anchor points … marquee select the anchor
+      // points." A press on empty space with points on screen is that marquee,
+      // not an instruction to throw the points away.
+      if (editorStore.getState().nodeEditingId) {
+        marqueeStart = e.doc
+        marqueeAdd = e.shiftKey
+        setEditor({ marquee: { x: e.doc.x, y: e.doc.y, width: 0, height: 0 } })
+        return
+      }
       clearSelection()
       return
     }
@@ -100,6 +117,10 @@ export const directSelectionTool: Tool = {
   },
 
   onPointerMove(e: CanvasPointerEvent, ctx: ToolContext): void {
+    if (marqueeStart) {
+      setEditor({ marquee: boundsFromCorners(marqueeStart.x, marqueeStart.y, e.doc.x, e.doc.y) })
+      return
+    }
     if (editorStore.getState().nodeEditingId && pathEditPointerMove(e, ctx)) return
 
     const doc = ctx.doc()
@@ -108,6 +129,16 @@ export const directSelectionTool: Tool = {
   },
 
   onPointerUp(): void {
+    if (marqueeStart) {
+      const box = editorStore.getState().marquee
+      // A press that went nowhere is a click on empty space, and that clears
+      // the point selection rather than selecting nothing at all.
+      if (box && (box.width > 1 || box.height > 1)) pathEditSelectInBox(box, marqueeAdd)
+      else if (!marqueeAdd) setEditor({ selectedPoints: [], selectedSegments: [] })
+      marqueeStart = null
+      setEditor({ marquee: null })
+      return
+    }
     pathEditPointerUp()
   },
 
@@ -120,6 +151,8 @@ export const directSelectionTool: Tool = {
   },
 
   onDeactivate(): void {
+    marqueeStart = null
+    setEditor({ marquee: null })
     // Point editing is NOT ended here: `nodeEditingId` owns its lifetime and the
     // Canvas subscriber closes it when setTool clears that. Ending it here would
     // stop the two pointers handing the points back and forth.

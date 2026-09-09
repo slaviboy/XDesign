@@ -73,7 +73,8 @@ test('the anchor dots move with the point too', async ({ page }) => {
   await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 400, y: 360 })
   await enterPoints(page, { x: 300, y: 280 })
 
-  const dotX = () => page.locator('.anchor-point').first().getAttribute('x')
+  // Anchors are circles, so the centre is what moves.
+  const dotX = () => page.locator('.anchor-point').first().getAttribute('cx')
   const before = await dotX()
 
   const corner = await pt(page, 200, 200)

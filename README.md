@@ -31,11 +31,15 @@ is no separate shape. Corner Count 3 is a triangle, Star Ratio below 100% is a s
 both are reversible: turning a star back into a triangle is two field edits, not a
 different object. The Star Ratio also has an on-canvas handle (Shift snaps to 10%).
 
-**Pen** — every procedure Adobe documents. Click for corners, drag for curves, `Alt` while
-dragging to split the direction lines (two curves meeting at a cusp), `Alt`-click the last
-anchor to retract its handle (a curve followed by a straight line), `Shift` to constrain to
-45° placing and 15° dragging. Click the first point to close, or drag from it to shape the
-closing curve. `Enter`, `Escape` or a double-click ends an open path.
+**Pen** — every procedure Adobe documents, gesture for gesture. Click for corners, drag for
+curves, `Alt` while dragging to split the direction lines. A press on the anchor just placed
+is two gestures told apart by the release: clicked it retracts the outgoing direction line (a
+curve followed by a straight line), dragged it pulls that line back out (a straight line
+followed by a curve). `Shift` constrains to 45° placing and 15° dragging; `Cmd`/`Ctrl` drags
+the first point instead of closing on it, and suppresses anchor snapping. Anchors line up with
+the anchors around them, with a guide to say so. Hovering a path shows handles over its start
+and end — clicking one carries it on, and on a closed path it reopens the ring. `Enter` or a
+double-click ends an open path; `Escape` steps back from drawing to editing to neither.
 
 **Two pointers** — the filled arrow selects and moves whole objects; the hollow one
 (**Direct Selection**, `D`) goes straight to the leaf and shows its points. A single click on
@@ -1312,10 +1316,13 @@ which is what lets two opposite edges of a rectangle be pulled apart in one gest
 an already-selected member keeps the whole set, so a collection can be picked up by any one
 of the things in it.
 
-Rounding and straightening are one gesture and its opposite: double-click rounds a corner, a
-plain click on a rounded point straightens it. Deciding on pointer-UP rather than pointer-DOWN
-is what keeps the second from firing every time a point is picked up to be moved — a press
-that turns into a drag is a move, and only a press that goes nowhere is a click.
+Rounding and straightening are one gesture and its opposite, and it is the SAME gesture both
+ways: double-click. Straightening used to be a single click, decided on pointer-up, which fired
+on the way out of any press that landed on a rounded point and went nowhere — so selecting a
+point to look at it flattened the curve running through it.
+
+Points are selected by clicking, by `Shift`-clicking, or by dragging a band over them, and the
+arrow keys nudge the selection rather than the object that holds it.
 
 ### A control point sitting on its anchor is not a handle
 

@@ -30,7 +30,9 @@ import {
   type SnapCandidate,
   type SnapResult,
 } from '../geometry/Snapping'
-import { createMatrixCache, geometryBounds, worldGuides } from '../document/SceneGraph'
+import { createMatrixCache, geometryBounds, nodePathData, worldGuides } from '../document/SceneGraph'
+import { pathToSubpaths } from '../geometry/PathPoints'
+import { applyToPoint } from '../geometry/Matrix'
 import { isContainer } from '../document/types'
 import { visibleDocBounds } from '../canvas/Viewport'
 import type { Bounds } from '../geometry/Bounds'
@@ -124,6 +126,107 @@ export function collectGuideCandidates(doc: DesignDocument): SnapCandidate[] {
     out.push(...candidatesFromGuides(guides, geometryBounds(doc, artboardId, cache)))
   }
   return out
+}
+
+/**
+ * Node kinds whose anchor points can be snapped to.
+ *
+ * The same allow-list PathEditing.editableOutline uses, spelled out again
+ * rather than imported: PathEditing will import THIS module for anchor
+ * snapping, and the cycle would be real.
+ */
+const POINT_EDITABLE = new Set(['path', 'rect', 'ellipse', 'polygon', 'line'])
+
+/** Never collect more than this; a traced image can carry thousands of anchors. */
+const MAX_ANCHOR_CANDIDATES = 4000
+
+/**
+ * Every anchor point on screen, as snap candidates in world space.
+ *
+ * Adobe: "snap lines appear when an anchor is vertically or horizontally near
+ * another anchor point." That is a POINT-to-POINT relationship, which is why
+ * this exists alongside collectSnapCandidates — that one emits the edges and
+ * centres of bounding BOXES, and an anchor lining up with the middle of a
+ * neighbour's box is not what the pen is being asked about.
+ *
+ * Viewport-culled and capped, and collected once per gesture rather than per
+ * pointer move, so the path parsing here is paid for once.
+ */
+export function collectAnchorCandidates(
+  doc: DesignDocument,
+  viewport: Viewport,
+  canvasSize: { width: number; height: number },
+  skip?: NodeId,
+): SnapCandidate[] {
+  const view = visibleDocBounds(viewport, canvasSize, 100)
+  const cache = createMatrixCache()
+  const out: SnapCandidate[] = []
+
+  const visit = (id: NodeId, depth: number): void => {
+    if (out.length >= MAX_ANCHOR_CANDIDATES) return
+    const node = doc.nodes[id]
+    if (!node || !node.visible) return
+    // The node being edited supplies its own candidates, minus the points that
+    // are moving — otherwise a dragged anchor snaps to where it just was.
+    if (id === skip) return
+
+    const b = geometryBounds(doc, id, cache)
+    if (b.x > view.x + view.width || b.x + b.width < view.x) return
+    if (b.y > view.y + view.height || b.y + b.height < view.y) return
+
+    if (POINT_EDITABLE.has(node.type)) {
+      const d = nodePathData(node)
+      if (d) {
+        const world = cache.world(doc, id)
+        for (const sub of pathToSubpaths(d)) {
+          for (const p of sub.points) {
+            if (out.length >= MAX_ANCHOR_CANDIDATES) return
+            const w = applyToPoint(world, { x: p.x, y: p.y })
+            // `from`/`to` collapse to the anchor itself: a point has no extent,
+            // and computeSnap spans the guide line between it and the mover.
+            out.push({ axis: 'x', position: w.x, kind: 'edge', from: w.y, to: w.y })
+            out.push({ axis: 'y', position: w.y, kind: 'edge', from: w.x, to: w.x })
+          }
+        }
+      }
+    }
+
+    if (isContainer(node) && depth < 3) for (const child of node.children) visit(child, depth + 1)
+  }
+
+  const root = doc.nodes[doc.rootId]
+  if (isContainer(root)) for (const child of root.children) visit(child, 0)
+  return out
+}
+
+/**
+ * Snap a single POINT rather than a box.
+ *
+ * computeSnap already does the right thing with a zero-size box — its edge
+ * scan collapses to three copies of the same coordinate per axis — so this is
+ * only about the call sites reading as what they are.
+ */
+export function snapPoint(p: Vec2, ctx: SnapContext): SnapResult {
+  return resolveSnap({ x: p.x, y: p.y, width: 0, height: 0 }, ctx)
+}
+
+/** A context that snaps to anchor points alone, for the pen and point editing. */
+export function buildAnchorSnapContext(
+  doc: DesignDocument,
+  viewport: Viewport,
+  canvasSize: { width: number; height: number },
+  enabled: boolean,
+  skip?: NodeId,
+): SnapContext {
+  return {
+    candidates: enabled ? collectAnchorCandidates(doc, viewport, canvasSize, skip) : [],
+    thresholdDoc: SNAP_THRESHOLD_PX / (viewport.zoom || 1),
+    // Grid snapping is deliberately not folded in: the section this implements
+    // describes anchors lining up with anchors, and nothing else.
+    gridSize: doc.settings.gridSize,
+    snapToGridEnabled: false,
+    useCandidates: enabled,
+  }
 }
 
 export interface SnapContext {

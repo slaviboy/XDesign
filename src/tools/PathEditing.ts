@@ -47,9 +47,11 @@ import { convertNodeToPath } from '../document/DocumentModel'
 import { liveTransform } from '../canvas/LiveTransform'
 import { geomKey } from '../canvas/liveKeys'
 import { breakHistoryCoalescing, transaction, getDoc } from '../state/DocumentStore'
+import { buildAnchorSnapContext, snapPoint, type SnapContext } from './snapHelpers'
 import { hasStyle } from '../document/types'
 import { editorStore, refreshOverlay, setEditor } from '../state/EditorStore'
-import type { PointRef } from '../state/EditorStore'
+import type { PointRef, SnapGuide } from '../state/EditorStore'
+import type { Bounds } from '../geometry/Bounds'
 import type { DesignNode, NodeId } from '../document/types'
 import type { CanvasPointerEvent, ToolContext } from './types'
 
@@ -65,6 +67,19 @@ interface EditState {
   changed: boolean
   /** True while a LiveTransform override is open, so it is closed exactly once. */
   live: boolean
+  /** Anchors the dragged point can line up with; built once per gesture. */
+  snap: SnapContext | null
+  /**
+   * Where the dragged anchor and the pointer were when the drag began.
+   *
+   * Snapping has to be judged against where the pointer ACTUALLY is, not
+   * against where the last frame left the point. Accumulating deltas from a
+   * snapped position makes the snap sticky: each frame's delta is small, the
+   * point lands back inside the snap radius, and it is pulled to the same guide
+   * again — so the anchor never escapes the first thing it touches.
+   */
+  dragOrigin: Vec2 | null
+  dragStart: Vec2 | null
 }
 
 const edit: EditState = {
@@ -75,6 +90,9 @@ const edit: EditState = {
   lastLocal: null,
   changed: false,
   live: false,
+  snap: null,
+  dragOrigin: null,
+  dragStart: null,
 }
 
 /**
@@ -110,6 +128,49 @@ function endLive(commit: boolean): void {
 
 /** Screen-pixel radius for grabbing a point or handle. */
 const GRAB_PX = 7
+
+/** Document units an arrow key moves a selected point; Shift takes the larger. */
+const NUDGE_SMALL = 1
+const NUDGE_LARGE = 10
+
+/**
+ * Collect what a dragged anchor may line up with.
+ *
+ * The edited node is skipped by the world collector and re-added here WITHOUT
+ * the points that are about to move: a moving anchor whose own old position is
+ * a candidate snaps straight back to where it started and refuses to leave.
+ */
+function buildEditSnap(ctx: ToolContext): void {
+  const editor = editorStore.getState()
+  const enabled = editor.snapEnabled
+  const context = buildAnchorSnapContext(
+    getDoc(),
+    ctx.viewport(),
+    editor.canvasSize,
+    enabled,
+    edit.nodeId ?? undefined,
+  )
+  if (enabled) {
+    const moving = movingPoints()
+    edit.subs.forEach((sub, si) => {
+      const skip = moving.get(si)
+      sub.points.forEach((p, i) => {
+        if (skip?.has(i)) return
+        const w = applyToPoint(edit.world, { x: p.x, y: p.y })
+        context.candidates.push({ axis: 'x', position: w.x, kind: 'edge', from: w.y, to: w.y })
+        context.candidates.push({ axis: 'y', position: w.y, kind: 'edge', from: w.x, to: w.x })
+      })
+    })
+  }
+  edit.snap = context
+}
+
+/** Publish the guide lines, skipping the write when nothing would change. */
+function showSnapGuides(lines: SnapGuide[]): void {
+  const current = editorStore.getState().snapGuides
+  if (current.length === 0 && lines.length === 0) return
+  setEditor({ snapGuides: lines })
+}
 
 /**
  * The outline to edit, or null for a node that has no editable points.
@@ -170,7 +231,12 @@ export function beginPathEditing(nodeId: NodeId): boolean {
 
 export function endPathEditing(): void {
   insertPreview = null
+  // Below the guard, deliberately. The Canvas calls this on every editor-store
+  // change with no node being edited, so clearing above it would wipe the pen's
+  // snap guides the instant it published them.
   if (!edit.nodeId) return
+  edit.snap = null
+  showSnapGuides([])
   endLive(false)
   edit.nodeId = null
   edit.subs = []
@@ -338,6 +404,12 @@ export function pathEditPointerDown(
 
     edit.dragging = grab
     edit.lastLocal = local
+    if (grab.kind === 'anchor') {
+      const p = edit.subs[grab.subpath]?.points[grab.index]
+      edit.dragOrigin = p ? { x: p.x, y: p.y } : null
+      edit.dragStart = local
+      buildEditSnap(ctx)
+    }
     beginLive()
     refreshOverlay()
     return true
@@ -358,6 +430,8 @@ export function pathEditPointerDown(
           // gesture: commitPath can reload edit.subs, which would drop the ref.
           edit.dragging = { subpath: near.subpath, index: inserted, kind: 'anchor' }
           edit.lastLocal = local
+          edit.dragOrigin = null
+          edit.dragStart = null
           commitPath('Insert point')
           beginLive()
           setEditor({
@@ -388,14 +462,22 @@ export function pathEditPointerDown(
     // Dragged by its first point, whose delta every moving point follows.
     edit.dragging = { subpath: segment.subpath, index: segment.index, kind: 'anchor' }
     edit.lastLocal = local
+    {
+      const p = edit.subs[segment.subpath]?.points[segment.index]
+      edit.dragOrigin = p ? { x: p.x, y: p.y } : null
+      edit.dragStart = local
+    }
+    buildEditSnap(ctx)
     beginLive()
     refreshOverlay()
     return true
   }
 
   // Empty space inside the shape: drop the point selection rather than keeping
-  // a highlight the next drag would move.
-  if (editor.selectedPoints.length || editor.selectedSegments.length) {
+  // a highlight the next drag would move. Shift is exempt — it means "add to
+  // what I have", and a Shift-marquee that began by clearing the selection it
+  // was about to extend would have nothing to extend.
+  if (!e.shiftKey && (editor.selectedPoints.length || editor.selectedSegments.length)) {
     setEditor({ selectedPoints: [], selectedSegments: [] })
     refreshOverlay()
   }
@@ -421,10 +503,36 @@ export function pathEditPointerMove(e: CanvasPointerEvent, _ctx: ToolContext): b
   const sub = edit.subs[edit.dragging.subpath]
   if (!sub) return false
 
-  const dx = local.x - edit.lastLocal.x
-  const dy = local.y - edit.lastLocal.y
+  let dx = local.x - edit.lastLocal.x
+  let dy = local.y - edit.lastLocal.y
 
   if (edit.dragging.kind === 'anchor') {
+    // Adobe: "While placing a new anchor point or dragging an existing anchor
+    // point, snap lines appear when an anchor is vertically or horizontally
+    // near another anchor point. Hold down the Cmd/Ctrl key to disable anchor
+    // point snapping." Snapping is decided in WORLD space and brought back
+    // through the node's matrix, so it stays true on a rotated or scaled node.
+    const dragged = sub.points[edit.dragging.index]
+    if (dragged && edit.snap && edit.dragOrigin && edit.dragStart && !e.primaryModifier) {
+      // Measured from where the drag STARTED, so a snap that catches early does
+      // not hold the anchor for the rest of the gesture.
+      const raw = {
+        x: edit.dragOrigin.x + (local.x - edit.dragStart.x),
+        y: edit.dragOrigin.y + (local.y - edit.dragStart.y),
+      }
+      const world = applyToPoint(edit.world, raw)
+      const snap = snapPoint(world, edit.snap)
+      const target =
+        snap.dx !== 0 || snap.dy !== 0
+          ? applyToPoint(invert(edit.world), { x: world.x + snap.dx, y: world.y + snap.dy })
+          : raw
+      dx = target.x - dragged.x
+      dy = target.y - dragged.y
+      showSnapGuides(snap.lines)
+    } else {
+      showSnapGuides([])
+    }
+
     // Everything selected moves by the same delta, so several points or
     // several edges keep their shape relative to one another. The dragged
     // point is included by construction: pressing it selected it.
@@ -458,6 +566,10 @@ export function pathEditPointerUp(): boolean {
   if (edit.changed) commitPath('Edit path')
   edit.dragging = null
   edit.lastLocal = null
+  edit.snap = null
+  edit.dragOrigin = null
+  edit.dragStart = null
+  showSnapGuides([])
   // One gesture, one undo step. The coalesce key exists so that the insert and
   // the drag that follows it in the SAME press merge; without this break the
   // next drag merges into them too, and three separate moves come back in one.
@@ -468,11 +580,39 @@ export function pathEditPointerUp(): boolean {
   return true
 }
 
+const NUDGE_KEYS: Record<string, Vec2> = {
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+}
+
 export function pathEditKeyDown(e: KeyboardEvent): boolean {
   if (!edit.nodeId) return false
 
+  // Adobe: "Nudge the selected anchor points using your keyboard." Taken before
+  // the global handler sees it, which would otherwise move the whole object —
+  // the points are what is selected, so the points are what should move.
+  const step = NUDGE_KEYS[e.key]
+  if (step) {
+    const moving = movingPoints()
+    if (moving.size === 0) return false
+    // Document units into the node's own, so a nudge is the same distance on
+    // screen however the node is scaled.
+    const scale = localScale()
+    const size = (e.shiftKey ? NUDGE_LARGE : NUDGE_SMALL) * scale
+    for (const [subpath, indices] of moving) {
+      const target = edit.subs[subpath]
+      if (!target) continue
+      for (const index of indices) movePoint(target, index, step.x * size, step.y * size)
+    }
+    edit.changed = true
+    commitPath('Nudge point')
+    return true
+  }
+
   if (e.key === 'Escape') {
-    setEditor({ nodeEditingId: null, selectedPoints: [] })
+    setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
     endPathEditing()
     return true
   }
@@ -512,11 +652,59 @@ export function pathEditKeyDown(e: KeyboardEvent): boolean {
     if (removed) {
       edit.changed = true
       commitPath('Delete point')
-      setEditor({ selectedPoints: [] })
+      setEditor({ selectedPoints: [], selectedSegments: [] })
     }
     return true
   }
   return false
+}
+
+/**
+ * Select every anchor inside a rubber band.
+ *
+ * Adobe: "To select multiple anchor points, hold Shift and select the anchor
+ * points, or marquee select the anchor points." Enclose-versus-touch is
+ * deliberately not consulted the way it is for objects: a point has no area,
+ * so the two modes cannot tell it apart.
+ *
+ * @param additive keep what was already selected, as Shift does elsewhere.
+ */
+export function pathEditSelectInBox(box: Bounds, additive: boolean): void {
+  if (!edit.nodeId) return
+  const toLocalBox = invert(edit.world)
+  const corners = [
+    applyToPoint(toLocalBox, { x: box.x, y: box.y }),
+    applyToPoint(toLocalBox, { x: box.x + box.width, y: box.y }),
+    applyToPoint(toLocalBox, { x: box.x, y: box.y + box.height }),
+    applyToPoint(toLocalBox, { x: box.x + box.width, y: box.y + box.height }),
+  ]
+  // The box is axis-aligned in DOCUMENT space; under a rotated node its local
+  // image is not, so the local test uses the bounding box of the four mapped
+  // corners rather than pretending the rectangle survived the transform.
+  const xs = corners.map((p) => p.x)
+  const ys = corners.map((p) => p.y)
+  const left = Math.min(...xs)
+  const right = Math.max(...xs)
+  const top = Math.min(...ys)
+  const bottom = Math.max(...ys)
+
+  const found: PointRef[] = []
+  edit.subs.forEach((sub, si) => {
+    sub.points.forEach((p, i) => {
+      if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) {
+        found.push({ subpath: si, index: i, kind: 'anchor' })
+      }
+    })
+  })
+
+  const merged = additive ? [...editorStore.getState().selectedPoints] : []
+  for (const ref of found) {
+    if (!merged.some((p) => samePoint(p, ref))) merged.push(ref)
+  }
+  // A fresh marquee replaces the segment selection too; an additive one leaves
+  // it alone, because Shift is asking to ADD rather than to start again.
+  setEditor(additive ? { selectedPoints: merged } : { selectedPoints: merged, selectedSegments: [] })
+  refreshOverlay()
 }
 
 /**
@@ -559,8 +747,10 @@ export function pathEditOpenEndAt(e: CanvasPointerEvent, ctx: ToolContext): Poin
 
   for (let si = 0; si < edit.subs.length; si++) {
     const sub = edit.subs[si]!
-    if (sub.closed || sub.points.length < 2) continue
-    const last = sub.points.length - 1
+    if (sub.points.length < 2) continue
+    // A ring has no ends, but "extending a closed path reopens the path", and
+    // the point it reopens at is the one the pen is over — its start.
+    const last = sub.closed ? 0 : sub.points.length - 1
     for (const index of [last, 0]) {
       const p = sub.points[index]!
       if (Math.hypot(p.x - local.x, p.y - local.y) <= tolLocal) {
