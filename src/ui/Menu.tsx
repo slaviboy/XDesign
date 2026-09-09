@@ -42,6 +42,12 @@ export interface MenuItemSpec {
   checked?: boolean
   onSelect?: () => void
   items?: MenuItemSpec[]
+  /**
+   * A stable handle for tests. Menu labels are translated, and the position of
+   * an item changes whenever a neighbour is added, so neither is something a
+   * test can hold on to.
+   */
+  testId?: string
 }
 
 export function Menu({
@@ -102,7 +108,13 @@ export function Menu({
               onPointerEnter={() => setOpenSub(i)}
               onPointerLeave={() => setOpenSub((cur) => (cur === i ? null : cur))}
             >
-              <button type="button" className="menu-item" disabled={item.disabled} role="menuitem">
+              <button
+                type="button"
+                className="menu-item"
+                data-testid={item.testId}
+                disabled={item.disabled}
+                role="menuitem"
+              >
                 <span>{item.label}</span>
                 <ChevronRightIcon className="menu-submenu-arrow" />
               </button>
@@ -117,6 +129,7 @@ export function Menu({
             key={i}
             type="button"
             className="menu-item"
+            data-testid={item.testId}
             role="menuitem"
             disabled={item.disabled}
             onClick={() => {
@@ -152,6 +165,7 @@ function SubMenu({ items, onClose }: { items: MenuItemSpec[]; onClose: () => voi
             key={i}
             type="button"
             className="menu-item"
+            data-testid={item.testId}
             disabled={item.disabled}
             onClick={() => {
               item.onSelect?.()

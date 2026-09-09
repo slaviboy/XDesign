@@ -60,7 +60,7 @@ async function pullGuide(
 /** Open Preferences from the application menu. */
 async function openPreferences(page: Page) {
   await page.locator('[data-testid="app-menu"]').click()
-  await page.locator('.menu-item', { hasText: 'Preferences' }).click()
+  await page.locator('[data-testid="menu-preferences"]').click()
 }
 
 async function setGuideDrag(page: Page, mode: 'line' | 'handle') {

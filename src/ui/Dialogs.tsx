@@ -28,7 +28,9 @@ import { closeDialog, setEditor, setMarqueeMode, setViewport, type MarqueeMode }
 import { useDocument, useEditorStore } from '../state/hooks'
 import { getStorageEstimate, clearRecent } from '../persistence/IndexedDbStore'
 import { supportsFileSystemAccess } from '../persistence/FileSystem'
-import { ALT_LABEL, MOD_LABEL, shortcutGroups } from '../shortcuts/bindings'
+import { ALT_LABEL, MOD_LABEL } from '../shortcuts/bindings'
+import { ShortcutEditor } from './ShortcutEditor'
+import { isShortcutRecording } from '../shortcuts/recording'
 import { LANGUAGES, getLanguage, setLanguage, t, type LanguageCode } from '../i18n'
 import { canSpellCheck, isSpellCheckEnabled, setSpellCheckEnabled } from '../text/spellcheck'
 import { useLanguage } from '../state/hooks-i18n'
@@ -58,7 +60,10 @@ function DialogShell({
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose() }
+      // While a shortcut is being recorded, Escape belongs to the recorder:
+      // it cancels the recording, and closing the dialog as well would take
+      // the thing being edited off screen. See shortcuts/recording.ts.
+      if (e.key === 'Escape' && !isShortcutRecording()) { e.stopPropagation(); onClose() }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
@@ -483,26 +488,15 @@ function formatBytes(n: number): string {
 // ---------------------------------------------------------------------------
 
 export function ShortcutsDialog() {
+  void useLanguage()
   return (
     <DialogShell
-      title="Keyboard Shortcuts"
-      width={520}
+      title={t('shortcuts.title')}
+      width={560}
       onClose={closeDialog}
       footer={<button type="button" className="button primary" onClick={closeDialog}>{t('prefs.done')}</button>}
     >
-      <div className="shortcut-grid">
-        {shortcutGroups().map((group) => (
-          <div key={group.group} style={{ display: 'contents' }}>
-            <div className="shortcut-group-title">{group.group}</div>
-            {group.items.map((item) => (
-              <div key={item.keys + item.label} style={{ display: 'contents' }}>
-                <span>{item.label}</span>
-                <span className="kbd">{item.keys}</span>
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
+      <ShortcutEditor />
     </DialogShell>
   )
 }

@@ -27,12 +27,18 @@ import { createDocument } from '../document/NodeFactory'
 import { documentStore, getDoc, markSaved, replaceDocument, pruneUnusedAssets } from '../state/DocumentStore'
 import { clearSelection, notify, readDefaultGrid, setEditor, setViewport } from '../state/EditorStore'
 import {
+  downloadBytes,
   DocumentFormatError,
   openDocument,
+  pickFileViaInput,
   pickFilesViaInput,
   saveDocument,
   type SaveTarget,
 } from '../persistence/FileSystem'
+import {
+  applyPreferences, collectPreferences, parsePreferences, PreferencesFormatError,
+  PREFERENCES_EXTENSION, serializePreferences,
+} from '../persistence/Preferences'
 import { flush, markDocumentSaved } from '../persistence/Autosave'
 import { importFiles } from '../images/ImageImporter'
 import { preloadFontsFor } from '../text/FontRegistry'
@@ -174,3 +180,58 @@ export function setSaveTarget(target: SaveTarget): void {
 }
 
 export { setEditor }
+
+// ---------------------------------------------------------------------------
+// Preferences
+// ---------------------------------------------------------------------------
+
+/**
+ * Write this machine's preferences out as a file.
+ *
+ * A plain, pretty-printed JSON document rather than anything packed: it is
+ * small, it is meant to be readable, and somebody will inevitably want to edit
+ * one by hand or check it into a dotfiles repository.
+ */
+export function exportPreferencesFlow(): void {
+  const file = collectPreferences(new Date().toISOString())
+  const bytes = new TextEncoder().encode(serializePreferences(file))
+  const stamp = file.exported?.slice(0, 10) ?? 'preferences'
+  downloadBytes(bytes, `XDesign ${stamp}${PREFERENCES_EXTENSION}`)
+  notify('success', 'Preferences exported.', undefined, 2500)
+}
+
+/**
+ * Read a preferences file and apply what it holds.
+ *
+ * The report names what changed rather than saying "imported", because the
+ * settings this touches are spread across four dialogs and a menu — and because
+ * the canvas half of them is a document edit, which the user is entitled to
+ * know about before reaching for undo.
+ */
+export async function importPreferencesFlow(): Promise<void> {
+  const file = await pickFileViaInput(`${PREFERENCES_EXTENSION},application/json`)
+  if (!file) return
+
+  try {
+    const summary = applyPreferences(parsePreferences(await file.text()))
+    if (summary.applied.length === 0) {
+      notify('warn', 'That preferences file had nothing this version can use.')
+      return
+    }
+    notify(
+      'success',
+      `Preferences imported: ${summary.applied.join(', ')}.`,
+      summary.changedDocument
+        ? 'The canvas settings changed this document, which one undo reverses.'
+        : undefined,
+      6000,
+    )
+  } catch (error) {
+    notify(
+      'error',
+      error instanceof PreferencesFormatError
+        ? error.message
+        : 'That preferences file could not be read.',
+    )
+  }
+}

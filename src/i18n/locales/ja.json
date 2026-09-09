@@ -207,5 +207,16 @@
   "trace.trace": "トレース",
   "trace.tracing": "トレース中…",
   "trace.cancel": "キャンセル",
-  "section.image": "画像"
+  "section.image": "画像",
+  "shortcuts.title": "キーボードショートカット",
+  "shortcuts.hint": "ショートカットをダブルクリックして変更し、使いたいキーを押してください。Escape で取り消します。",
+  "shortcuts.pressKeys": "キーを押してください…",
+  "shortcuts.doubleClickToChange": "ダブルクリックで変更",
+  "shortcuts.resetAll": "すべてリセット",
+  "shortcuts.resetOne": "{keys} にリセット",
+  "shortcuts.clearOne": "このショートカットを削除",
+  "shortcuts.none": "なし",
+  "shortcuts.displaced": "{name} は {keys} を失い、ショートカットがなくなりました。",
+  "menu.exportPreferences": "環境設定を書き出し…",
+  "menu.importPreferences": "環境設定を読み込み…"
 }

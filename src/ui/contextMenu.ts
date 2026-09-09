@@ -41,12 +41,10 @@ import { editorStore, openDialog } from '../state/EditorStore'
 import { isMaskGroup, isShape, type DesignDocument, type NodeId } from '../document/types'
 import { artboardIds, blockedNodesAt, geometryBounds } from '../document/SceneGraph'
 import { containsPoint } from '../geometry/Bounds'
-import { MOD_LABEL } from '../shortcuts/bindings'
+import { shortcutLabel } from '../shortcuts/keymap'
 import { t } from '../i18n'
 import type { MenuItemSpec } from './Menu'
 import type { Vec2 } from '../geometry/Matrix'
-
-const MOD = MOD_LABEL
 
 /**
  * The artboards a Guides command should act on.
@@ -90,7 +88,7 @@ function guidesSubmenu(doc: DesignDocument, targets: readonly NodeId[]): MenuIte
       },
       {
         label: t('menu.lockAllGuides'),
-        shortcut: `⇧${MOD};`,
+        shortcut: shortcutLabel('view.lockGuides'),
         checked: locked,
         disabled: targets.length === 0,
         onSelect: () => setGuidesLocked(targets, !locked),
@@ -154,34 +152,34 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
 
   if (!has) {
     return [
-      { label: t('menu.paste'), shortcut: `${MOD}V`, onSelect: () => void pasteFromSystem({ at }) },
+      { label: t('menu.paste'), shortcut: shortcutLabel('edit.paste'), onSelect: () => void pasteFromSystem({ at }) },
       { kind: 'separator' },
-      { label: t('menu.selectAll'), shortcut: `${MOD}A`, onSelect: () => import('../history/Commands').then((m) => m.selectAll()) },
+      { label: t('menu.selectAll'), shortcut: shortcutLabel('edit.selectAll'), onSelect: () => import('../history/Commands').then((m) => m.selectAll()) },
       { label: t('menu.newArtboard'), onSelect: () => openDialog('artboard-preset') },
       ...(guideBoards.length ? [guidesSubmenu(doc, guideBoards)] : []),
       ...unblockItems(doc, at, selection),
       { kind: 'separator' },
-      { label: t('menu.export'), shortcut: `${MOD}E`, onSelect: () => openDialog('export') },
+      { label: t('menu.export'), shortcut: shortcutLabel('file.export'), onSelect: () => openDialog('export') },
     ]
   }
 
   return [
-    { label: t('menu.cut'), shortcut: `${MOD}X`, onSelect: () => cutSelection() },
-    { label: t('menu.copy'), shortcut: `${MOD}C`, onSelect: () => copySelection() },
-    { label: t('menu.paste'), shortcut: `${MOD}V`, onSelect: () => void pasteFromSystem({ at }) },
-    { label: t('menu.duplicate'), shortcut: `${MOD}D`, onSelect: () => duplicateInPlace() },
-    { label: t('menu.delete'), shortcut: 'Del', onSelect: () => deleteSelection() },
+    { label: t('menu.cut'), shortcut: shortcutLabel('edit.cut'), onSelect: () => cutSelection() },
+    { label: t('menu.copy'), shortcut: shortcutLabel('edit.copy'), onSelect: () => copySelection() },
+    { label: t('menu.paste'), shortcut: shortcutLabel('edit.paste'), onSelect: () => void pasteFromSystem({ at }) },
+    { label: t('menu.duplicate'), shortcut: shortcutLabel('edit.duplicate'), onSelect: () => duplicateInPlace() },
+    { label: t('menu.delete'), shortcut: shortcutLabel('edit.delete'), onSelect: () => deleteSelection() },
     { kind: 'separator' },
-    { label: t('menu.group'), shortcut: `${MOD}G`, disabled: !multiple, onSelect: () => groupSelection() },
+    { label: t('menu.group'), shortcut: shortcutLabel('arrange.group'), disabled: !multiple, onSelect: () => groupSelection() },
     {
       label: t('menu.ungroup'),
-      shortcut: `⇧${MOD}G`,
+      shortcut: shortcutLabel('arrange.ungroup'),
       disabled: !nodes.some((n) => n!.type === 'group'),
       onSelect: () => ungroupSelection(),
     },
     {
       label: t('menu.maskWithShape'),
-      shortcut: `⇧${MOD}M`,
+      shortcut: shortcutLabel('arrange.mask'),
       disabled: !canMaskSelection(),
       onSelect: () => maskWithShape(),
     },
@@ -194,7 +192,7 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
     },
     {
       label: t('menu.outlineStroke'),
-      shortcut: `⇧${MOD}O`,
+      shortcut: shortcutLabel('arrange.outlineStroke'),
       disabled: !canOutlineStrokeSelection(),
       onSelect: () => outlineStrokeSelection(),
     },
@@ -211,10 +209,10 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
       kind: 'submenu',
       label: t('menu.arrange'),
       items: [
-        { label: t('menu.bringToFront'), shortcut: `⇧${MOD}]`, onSelect: () => orderCommand('front') },
-        { label: t('menu.bringForward'), shortcut: `${MOD}]`, onSelect: () => orderCommand('forward') },
-        { label: t('menu.sendBackward'), shortcut: `${MOD}[`, onSelect: () => orderCommand('backward') },
-        { label: t('menu.sendToBack'), shortcut: `⇧${MOD}[`, onSelect: () => orderCommand('back') },
+        { label: t('menu.bringToFront'), shortcut: shortcutLabel('arrange.front'), onSelect: () => orderCommand('front') },
+        { label: t('menu.bringForward'), shortcut: shortcutLabel('arrange.forward'), onSelect: () => orderCommand('forward') },
+        { label: t('menu.sendBackward'), shortcut: shortcutLabel('arrange.backward'), onSelect: () => orderCommand('backward') },
+        { label: t('menu.sendToBack'), shortcut: shortcutLabel('arrange.back'), onSelect: () => orderCommand('back') },
       ],
     },
     {
@@ -257,12 +255,12 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
     { kind: 'separator' },
     {
       label: allLocked ? 'Unlock' : 'Lock',
-      shortcut: `${MOD}L`,
+      shortcut: shortcutLabel('arrange.lock'),
       onSelect: () => setLocked(selection, !allLocked),
     },
     {
       label: allHidden ? 'Show' : 'Hide',
-      shortcut: `⇧${MOD}H`,
+      shortcut: shortcutLabel('arrange.hide'),
       onSelect: () => setVisibility(selection, allHidden),
     },
     { kind: 'separator' },
@@ -271,6 +269,6 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
       checked: allMarked,
       onSelect: () => setMarkedForExport(selection, !allMarked),
     },
-    { label: 'Export Selection…', shortcut: `${MOD}E`, onSelect: () => openDialog('export') },
+    { label: 'Export Selection…', shortcut: shortcutLabel('file.export'), onSelect: () => openDialog('export') },
   ]
 }

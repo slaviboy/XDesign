@@ -237,6 +237,21 @@ as the original rather than re-imported as flattened markup.
 **Export** — SVG, PNG and JPEG, of a selection, an artboard, the whole document, or every
 layer marked for export, at 0.1×–10× scale.
 
+**Keyboard shortcuts you can change** — every command in the Shortcuts dialog is
+rebindable. Double-click one, and the field starts listening: it shows the modifiers as you
+hold them, the whole chord once a key joins them, and commits when you let go. A changed
+shortcut grows a reset control that puts back exactly what it shipped with, and Reset All
+puts back everything. Binding a chord that is already taken moves it, says which command
+lost it, and leaves that one visibly unbound rather than firing two things off one key.
+Menus and tooltips print whatever a command is currently bound to, so a rebinding is
+visible everywhere the app mentions it.
+
+**Take your settings with you** — Export Preferences writes a small, readable JSON file
+holding the interface language, the theme, spell check, marquee mode, the default artboard
+grid, the canvas settings, and the whole keymap. Import it on another machine and you have
+your editor. Chords are stored by meaning rather than by symbol — `Mod+S`, never `⌘S` — so a
+Mac's shortcuts arrive intact on Windows and read as Ctrl+S there.
+
 **Files** — a self-contained `.xdesign` document you can copy to another machine and open
 with every vector and every pixel intact. Plus autosave and crash recovery.
 
@@ -1165,6 +1180,45 @@ to render at all while a view that replaces it is showing, and the traced paths 
 the viewport's own space over the hole where it was. Turning Preview off puts the picture
 back untouched, which is what the checkbox promises.
 
+### A shortcut you can change has to exist first
+
+The shortcuts used to be two things that did not know about each other: a `switch` in the
+key handler that did the work, and a hand-written array that the dialog displayed. Nothing
+could be rebound, because there was no binding to rebind — only code. And the two could
+drift, which they had: the dialog advertised ⇧⌘' for snapping, while the handler compared
+against a character that key combination does not produce, so it did nothing at all.
+
+Now a command is a record — an id, a default chord, a function — and the handler, the
+dialog and the keymap all read the same records. The id is the part that never changes:
+labels are translated and chords belong to the user, but `file.save` is what an exported
+preferences file refers to, and what it will still mean in five versions' time.
+
+### A chord is a position, not a character
+
+`e.key` reports what a keystroke PRODUCES, and that is not what a shortcut is about.
+Shift+' produces `"`; Shift+1 produces `!`. Any handler comparing `e.key` against `'` with a
+shift test is comparing against something that can never arrive — which is exactly the bug
+above. So the key name comes from `e.code`, the physical position, for digits and
+punctuation. Letters are the exception and come from `e.key`, because a letter's identity is
+the letter rather than where the layout happens to put it.
+
+The stored form is platform-neutral for the same reason. `Mod` is one idea — the command
+modifier — that renders as ⌘ on a Mac and Ctrl elsewhere. Storing the rendered symbol would
+make an exported keymap useless on the other kind of machine, which is most of the point of
+being able to export one.
+
+### The keymap stores only what you changed
+
+A file recording every binding would freeze the defaults at the moment it was written: add a
+command later, or improve a default, and every existing user is stuck with the old map
+forever. Storing only the differences means a shortcut nobody touched keeps following the
+application, and it is what makes "reset" a deletion rather than a write.
+
+One chord runs one command. Binding a taken chord unbinds the command that held it, rather
+than leaving two things on one key and picking between them by array order — and the dialog
+says which one it displaced, because a shortcut that silently stops working is worse than
+one that visibly has none.
+
 ### `.xdesign` is a zip
 
 A ZIP holding `document.json` plus the raw bytes of every image under `assets/`. Base64
@@ -1222,8 +1276,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 589 unit tests (Vitest)
-npm run test:e2e   # 316 end-to-end tests (Playwright, real Chromium)
+npm test           # 633 unit tests (Vitest)
+npm run test:e2e   # 325 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

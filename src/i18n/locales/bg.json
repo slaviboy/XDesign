@@ -207,5 +207,16 @@
   "trace.trace": "Трасиране",
   "trace.tracing": "Трасиране…",
   "trace.cancel": "Отказ",
-  "section.image": "Изображение"
+  "section.image": "Изображение",
+  "shortcuts.title": "Клавишни комбинации",
+  "shortcuts.hint": "Щракнете двукратно върху комбинация, за да я промените, след което натиснете желаните клавиши. Escape отказва.",
+  "shortcuts.pressKeys": "Натиснете клавиши…",
+  "shortcuts.doubleClickToChange": "Двукратно щракване за промяна",
+  "shortcuts.resetAll": "Възстанови всички",
+  "shortcuts.resetOne": "Възстанови на {keys}",
+  "shortcuts.clearOne": "Премахване на тази комбинация",
+  "shortcuts.none": "Няма",
+  "shortcuts.displaced": "{name} загуби {keys} и вече няма комбинация.",
+  "menu.exportPreferences": "Експортиране на настройки…",
+  "menu.importPreferences": "Импортиране на настройки…"
 }

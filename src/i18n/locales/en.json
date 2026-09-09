@@ -207,5 +207,16 @@
   "trace.trace": "Trace",
   "trace.tracing": "Tracing…",
   "trace.cancel": "Cancel",
-  "section.image": "Image"
+  "section.image": "Image",
+  "shortcuts.title": "Keyboard Shortcuts",
+  "shortcuts.hint": "Double-click a shortcut to change it, then press the keys you want. Escape cancels.",
+  "shortcuts.pressKeys": "Press keys…",
+  "shortcuts.doubleClickToChange": "Double-click to change",
+  "shortcuts.resetAll": "Reset All",
+  "shortcuts.resetOne": "Reset to {keys}",
+  "shortcuts.clearOne": "Remove this shortcut",
+  "shortcuts.none": "None",
+  "shortcuts.displaced": "{name} lost {keys} and now has no shortcut.",
+  "menu.exportPreferences": "Export Preferences…",
+  "menu.importPreferences": "Import Preferences…"
 }

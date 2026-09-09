@@ -207,5 +207,16 @@
   "trace.trace": "Vectoriser",
   "trace.tracing": "Vectorisation…",
   "trace.cancel": "Annuler",
-  "section.image": "Image"
+  "section.image": "Image",
+  "shortcuts.title": "Raccourcis clavier",
+  "shortcuts.hint": "Double-cliquez sur un raccourci pour le modifier, puis appuyez sur les touches voulues. Échap annule.",
+  "shortcuts.pressKeys": "Appuyez sur les touches…",
+  "shortcuts.doubleClickToChange": "Double-cliquez pour modifier",
+  "shortcuts.resetAll": "Tout réinitialiser",
+  "shortcuts.resetOne": "Réinitialiser sur {keys}",
+  "shortcuts.clearOne": "Supprimer ce raccourci",
+  "shortcuts.none": "Aucun",
+  "shortcuts.displaced": "{name} a perdu {keys} et n’a plus de raccourci.",
+  "menu.exportPreferences": "Exporter les préférences…",
+  "menu.importPreferences": "Importer les préférences…"
 }

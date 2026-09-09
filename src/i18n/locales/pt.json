@@ -207,5 +207,16 @@
   "trace.trace": "Vetorizar",
   "trace.tracing": "Vetorizando…",
   "trace.cancel": "Cancelar",
-  "section.image": "Imagem"
+  "section.image": "Imagem",
+  "shortcuts.title": "Atalhos de teclado",
+  "shortcuts.hint": "Clique duas vezes num atalho para o alterar e prima as teclas pretendidas. Escape cancela.",
+  "shortcuts.pressKeys": "Prima as teclas…",
+  "shortcuts.doubleClickToChange": "Clique duas vezes para alterar",
+  "shortcuts.resetAll": "Repor tudo",
+  "shortcuts.resetOne": "Repor para {keys}",
+  "shortcuts.clearOne": "Remover este atalho",
+  "shortcuts.none": "Nenhum",
+  "shortcuts.displaced": "{name} perdeu {keys} e ficou sem atalho.",
+  "menu.exportPreferences": "Exportar preferências…",
+  "menu.importPreferences": "Importar preferências…"
 }

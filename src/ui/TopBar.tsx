@@ -29,7 +29,8 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import {
-  importFilesFlow, newDocument, openDocumentFlow, saveDocumentFlow,
+  exportPreferencesFlow, importFilesFlow, importPreferencesFlow, newDocument,
+  openDocumentFlow, saveDocumentFlow,
 } from '../app/fileOperations'
 import { importTextIntoSelection } from '../app/textImport'
 import { redo, undo } from '../state/DocumentStore'
@@ -48,7 +49,8 @@ import { useDocumentStore, useEditorStore } from '../state/hooks'
 import { artboardIds } from '../document/SceneGraph'
 import { t } from '../i18n'
 import { useLanguage } from '../state/hooks-i18n'
-import { MOD_LABEL } from '../shortcuts/bindings'
+import { shortcutLabel } from '../shortcuts/keymap'
+import { useKeymap } from '../shortcuts/useKeymap'
 import { MenuHost, useMenuState, type MenuItemSpec } from './Menu'
 import {
   getResolvedTheme,
@@ -61,9 +63,10 @@ import {
 import { Tooltip } from './primitives'
 import { MenuIcon, PlayIcon, GridIcon, MagnetIcon, SunIcon, MoonIcon, MonitorIcon } from './icons'
 
-const MOD = MOD_LABEL
-
 export const TopBar = memo(function TopBar() {
+  // Every menu prints the chord its command is bound to, so a rebinding has to
+  // redraw the bar that shows it.
+  void useKeymap()
   const name = useDocumentStore((s) => s.doc.name)
   const dirty = useDocumentStore((s) => s.dirty)
   const history = useDocumentStore((s) => s.history)
@@ -93,39 +96,39 @@ export const TopBar = memo(function TopBar() {
   const buildMenu = useCallback((): MenuItemSpec[] => {
     const hasSelection = selectionCount > 0
     return [
-      { label: t('menu.new'), shortcut: `${MOD}N`, onSelect: newDocument },
-      { label: t('menu.open'), shortcut: `${MOD}O`, onSelect: () => void openDocumentFlow() },
-      { label: t('menu.save'), shortcut: `${MOD}S`, onSelect: () => void saveDocumentFlow(false) },
-      { label: t('menu.saveAs'), shortcut: `⇧${MOD}S`, onSelect: () => void saveDocumentFlow(true) },
+      { label: t('menu.new'), shortcut: shortcutLabel('file.new'), onSelect: newDocument },
+      { label: t('menu.open'), shortcut: shortcutLabel('file.open'), onSelect: () => void openDocumentFlow() },
+      { label: t('menu.save'), shortcut: shortcutLabel('file.save'), onSelect: () => void saveDocumentFlow(false) },
+      { label: t('menu.saveAs'), shortcut: shortcutLabel('file.saveAs'), onSelect: () => void saveDocumentFlow(true) },
       { kind: 'separator' },
-      { label: t('menu.import'), shortcut: `⇧${MOD}I`, onSelect: () => void importFilesFlow() },
+      { label: t('menu.import'), shortcut: shortcutLabel('file.import'), onSelect: () => void importFilesFlow() },
       // Adobe's "Import text from text files". It is here as well as on the
       // Text panel because the panel only exists once a text object is
       // selected, and importing a file is how you make the first one.
       { label: t('menu.importText'), onSelect: () => void importTextIntoSelection() },
-      { label: t('menu.export'), shortcut: `${MOD}E`, onSelect: () => openDialog('export') },
+      { label: t('menu.export'), shortcut: shortcutLabel('file.export'), onSelect: () => openDialog('export') },
       { kind: 'separator' },
-      { label: t('menu.undo'), shortcut: `${MOD}Z`, disabled: !history.canUndo, onSelect: () => undo() },
-      { label: t('menu.redo'), shortcut: `⇧${MOD}Z`, disabled: !history.canRedo, onSelect: () => redo() },
+      { label: t('menu.undo'), shortcut: shortcutLabel('edit.undo'), disabled: !history.canUndo, onSelect: () => undo() },
+      { label: t('menu.redo'), shortcut: shortcutLabel('edit.redo'), disabled: !history.canRedo, onSelect: () => redo() },
       { kind: 'separator' },
-      { label: t('menu.cut'), shortcut: `${MOD}X`, disabled: !hasSelection, onSelect: () => cutSelection() },
-      { label: t('menu.copy'), shortcut: `${MOD}C`, disabled: !hasSelection, onSelect: () => copySelection() },
-      { label: t('menu.paste'), shortcut: `${MOD}V`, onSelect: () => void pasteFromSystem() },
-      { label: t('menu.duplicate'), shortcut: `${MOD}D`, disabled: !hasSelection, onSelect: () => duplicateInPlace() },
+      { label: t('menu.cut'), shortcut: shortcutLabel('edit.cut'), disabled: !hasSelection, onSelect: () => cutSelection() },
+      { label: t('menu.copy'), shortcut: shortcutLabel('edit.copy'), disabled: !hasSelection, onSelect: () => copySelection() },
+      { label: t('menu.paste'), shortcut: shortcutLabel('edit.paste'), onSelect: () => void pasteFromSystem() },
+      { label: t('menu.duplicate'), shortcut: shortcutLabel('edit.duplicate'), disabled: !hasSelection, onSelect: () => duplicateInPlace() },
       { label: t('menu.delete'), shortcut: 'Del', disabled: !hasSelection, onSelect: () => deleteSelection() },
-      { label: t('menu.selectAll'), shortcut: `${MOD}A`, onSelect: selectAll },
+      { label: t('menu.selectAll'), shortcut: shortcutLabel('edit.selectAll'), onSelect: selectAll },
       { kind: 'separator' },
       {
         kind: 'submenu', label: t('menu.arrange'),
         items: [
-          { label: t('menu.group'), shortcut: `${MOD}G`, disabled: selectionCount < 2, onSelect: () => groupSelection() },
-          { label: t('menu.ungroup'), shortcut: `⇧${MOD}G`, disabled: !hasSelection, onSelect: () => ungroupSelection() },
+          { label: t('menu.group'), shortcut: shortcutLabel('arrange.group'), disabled: selectionCount < 2, onSelect: () => groupSelection() },
+          { label: t('menu.ungroup'), shortcut: shortcutLabel('arrange.ungroup'), disabled: !hasSelection, onSelect: () => ungroupSelection() },
           { kind: 'separator' },
           // Adobe's own placement: Object > Mask With Shape, with Ungroup Mask
           // as the way back.
           {
             label: t('menu.maskWithShape'),
-            shortcut: `⇧${MOD}M`,
+            shortcut: shortcutLabel('arrange.mask'),
             disabled: selectionCount < 2,
             onSelect: () => maskWithShape(),
           },
@@ -137,17 +140,17 @@ export const TopBar = memo(function TopBar() {
             items: [
               {
                 label: t('menu.outlineStroke'),
-                shortcut: `⇧${MOD}O`,
+                shortcut: shortcutLabel('arrange.outlineStroke'),
                 disabled: !hasSelection,
                 onSelect: () => outlineStrokeSelection(),
               },
             ],
           },
           { kind: 'separator' },
-          { label: t('menu.bringToFront'), shortcut: `⇧${MOD}]`, disabled: !hasSelection, onSelect: () => orderCommand('front') },
-          { label: t('menu.bringForward'), shortcut: `${MOD}]`, disabled: !hasSelection, onSelect: () => orderCommand('forward') },
-          { label: t('menu.sendBackward'), shortcut: `${MOD}[`, disabled: !hasSelection, onSelect: () => orderCommand('backward') },
-          { label: t('menu.sendToBack'), shortcut: `⇧${MOD}[`, disabled: !hasSelection, onSelect: () => orderCommand('back') },
+          { label: t('menu.bringToFront'), shortcut: shortcutLabel('arrange.front'), disabled: !hasSelection, onSelect: () => orderCommand('front') },
+          { label: t('menu.bringForward'), shortcut: shortcutLabel('arrange.forward'), disabled: !hasSelection, onSelect: () => orderCommand('forward') },
+          { label: t('menu.sendBackward'), shortcut: shortcutLabel('arrange.backward'), disabled: !hasSelection, onSelect: () => orderCommand('backward') },
+          { label: t('menu.sendToBack'), shortcut: shortcutLabel('arrange.back'), disabled: !hasSelection, onSelect: () => orderCommand('back') },
           { kind: 'separator' },
           { label: t('menu.flipHorizontal'), disabled: !hasSelection, onSelect: () => flipSelection('h') },
           { label: t('menu.flipVertical'), disabled: !hasSelection, onSelect: () => flipSelection('v') },
@@ -170,17 +173,17 @@ export const TopBar = memo(function TopBar() {
       {
         kind: 'submenu', label: t('menu.view'),
         items: [
-          { label: t('menu.zoomToFit'), shortcut: `${MOD}0`, onSelect: zoomToFit },
-          { label: t('menu.zoomTo100'), shortcut: `${MOD}1`, onSelect: () => zoomTo(1) },
-          { label: t('menu.zoomToSelection'), shortcut: `${MOD}2`, disabled: !hasSelection, onSelect: zoomToSelection },
+          { label: t('menu.zoomToFit'), shortcut: shortcutLabel('view.zoomFit'), onSelect: zoomToFit },
+          { label: t('menu.zoomTo100'), shortcut: shortcutLabel('view.zoom100'), onSelect: () => zoomTo(1) },
+          { label: t('menu.zoomToSelection'), shortcut: shortcutLabel('view.zoomSelection'), disabled: !hasSelection, onSelect: zoomToSelection },
           { kind: 'separator' },
           // Adobe keeps Image Trace on the Object menu; this build has no
           // Object menu, and View is where the panel that opens here lives.
           { label: t('menu.imageTrace'), disabled: !canImageTrace(), onSelect: () => openImageTrace() },
           { kind: 'separator' },
-          { label: t('menu.showGrid'), shortcut: `${MOD}'`, checked: gridVisible, onSelect: () => updateSettings({ gridVisible: !gridVisible }) },
-          { label: t('menu.showGuides'), shortcut: `${MOD};`, checked: guidesVisible, onSelect: () => updateSettings({ guidesVisible: !guidesVisible }) },
-          { label: t('menu.snapping'), shortcut: `⇧${MOD}'`, checked: snapEnabled, onSelect: () => setEditor({ snapEnabled: !snapEnabled }) },
+          { label: t('menu.showGrid'), shortcut: shortcutLabel('view.toggleGrid'), checked: gridVisible, onSelect: () => updateSettings({ gridVisible: !gridVisible }) },
+          { label: t('menu.showGuides'), shortcut: shortcutLabel('view.toggleGuides'), checked: guidesVisible, onSelect: () => updateSettings({ guidesVisible: !guidesVisible }) },
+          { label: t('menu.snapping'), shortcut: shortcutLabel('view.toggleSnapping'), checked: snapEnabled, onSelect: () => setEditor({ snapEnabled: !snapEnabled }) },
           { kind: 'separator' },
           // Adobe's Guides commands. With nothing selected they apply to every
           // artboard, which is what "Lock All Guides" means on a document.
@@ -194,7 +197,7 @@ export const TopBar = memo(function TopBar() {
               { label: t('menu.removeAllGuides'), disabled: !guideBoards.length, onSelect: () => clearGuides(guideBoards) },
               {
                 label: t('menu.lockAllGuides'),
-                shortcut: `⇧${MOD};`,
+                shortcut: shortcutLabel('view.lockGuides'),
                 checked: guidesLocked,
                 disabled: !guideBoards.length,
                 onSelect: () => setGuidesLocked(guideBoards, !guidesLocked),
@@ -214,9 +217,20 @@ export const TopBar = memo(function TopBar() {
         ],
       },
       { kind: 'separator' },
-      { label: t('menu.preferences'), onSelect: () => openDialog('preferences') },
-      { label: t('menu.keyboardShortcuts'), shortcut: `${MOD}/`, onSelect: () => openDialog('shortcuts') },
-      { label: t('menu.about'), onSelect: () => openDialog('about') },
+      { label: t('menu.preferences'), testId: 'menu-preferences', onSelect: () => openDialog('preferences') },
+      {
+        label: t('menu.keyboardShortcuts'),
+        shortcut: shortcutLabel('view.shortcuts'),
+        testId: 'menu-shortcuts',
+        onSelect: () => openDialog('shortcuts'),
+      },
+      { kind: 'separator' },
+      // Flat rather than a submenu: every language this ships in would have
+      // called that submenu the same word as Preferences directly above it.
+      { label: t('menu.exportPreferences'), testId: 'menu-export-prefs', onSelect: () => exportPreferencesFlow() },
+      { label: t('menu.importPreferences'), testId: 'menu-import-prefs', onSelect: () => void importPreferencesFlow() },
+      { kind: 'separator' },
+      { label: t('menu.about'), testId: 'menu-about', onSelect: () => openDialog('about') },
     ]
   }, [
     gridVisible, guidesVisible, guideBoards, guidesLocked, languageTick,
@@ -271,7 +285,7 @@ export const TopBar = memo(function TopBar() {
 
       <div className="topbar-right">
         <ThemeToggle />
-        <Tooltip label="Show grid" shortcut={`${MOD}'`}>
+        <Tooltip label="Show grid" shortcut={shortcutLabel('view.toggleGrid')}>
           <button
             type="button"
             className={`icon-button${gridVisible ? ' active' : ''}`}
@@ -281,7 +295,7 @@ export const TopBar = memo(function TopBar() {
             <GridIcon />
           </button>
         </Tooltip>
-        <Tooltip label="Snapping" shortcut={`⇧${MOD};`}>
+        <Tooltip label="Snapping" shortcut={shortcutLabel('view.toggleSnapping')}>
           <button
             type="button"
             className={`icon-button${snapEnabled ? ' active' : ''}`}
@@ -291,7 +305,7 @@ export const TopBar = memo(function TopBar() {
             <MagnetIcon />
           </button>
         </Tooltip>
-        <Tooltip label="Preview — fit artwork to the window" shortcut={`${MOD}0`}>
+        <Tooltip label="Preview — fit artwork to the window" shortcut={shortcutLabel('view.zoomFit')}>
           <button type="button" className="icon-button" aria-label="Preview" onClick={zoomToFit}>
             <PlayIcon />
           </button>
@@ -382,8 +396,8 @@ function ZoomControl() {
   const [draft, setDraft] = useState<string | null>(null)
 
   const items: MenuItemSpec[] = [
-    { label: t('menu.zoomToFit'), shortcut: `${MOD}0`, onSelect: zoomToFit },
-    { label: t('menu.zoomToSelection'), shortcut: `${MOD}2`, onSelect: zoomToSelection },
+    { label: t('menu.zoomToFit'), shortcut: shortcutLabel('view.zoomFit'), onSelect: zoomToFit },
+    { label: t('menu.zoomToSelection'), shortcut: shortcutLabel('view.zoomSelection'), onSelect: zoomToSelection },
     { kind: 'separator' },
     ...[0.1, 0.25, 0.5, 0.75, 1, 2, 4, 8].map((z) => ({
       label: `${Math.round(z * 100)}%`,

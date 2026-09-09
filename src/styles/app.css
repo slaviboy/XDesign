@@ -737,6 +737,96 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 }
 .shortcut-grid > .shortcut-group-title:first-child { margin-top: 0; }
 
+/* The shortcut a row is bound to, and the two controls that change it. The
+   keys column is a fixed width so the reset buttons line up down the dialog
+   rather than jittering with the length of each chord. */
+.shortcut-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shortcut-keys {
+  display: grid;
+  grid-template-columns: 1fr 18px;
+  align-items: center;
+  gap: 4px;
+  min-width: 132px;
+}
+.kbd-button {
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  width: 100%;
+}
+.kbd-button:hover { border-color: var(--border-strong); }
+.kbd-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Recording: the field is the only thing on screen listening to the keyboard,
+   and it has to look like it. */
+.kbd-button.recording {
+  border-color: var(--accent);
+  background: var(--bg-selected);
+  color: var(--accent);
+  animation: shortcut-pulse 1.1s ease-in-out infinite;
+}
+@keyframes shortcut-pulse {
+  50% { border-color: var(--border); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbd-button.recording { animation: none; }
+}
+
+.kbd-button.unbound { color: var(--text-faint); font-style: italic; }
+.kbd-static { display: inline-block; width: 100%; }
+
+/* Reset sits where the clear button was, so a row never changes width when it
+   goes from customised to default. */
+.shortcut-reset,
+.shortcut-clear {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  border-radius: 3px;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+.shortcut-reset { color: var(--accent); }
+.shortcut-reset:hover,
+.shortcut-clear:hover { background: var(--bg-hover); color: var(--text); }
+/* The clear button is faint until the row is hovered: every row has one, and
+   forty visible crosses read as forty errors. */
+.shortcut-clear { opacity: 0; }
+.shortcut-keys:hover .shortcut-clear,
+.shortcut-clear:focus-visible { opacity: 1; }
+
+.shortcut-hint {
+  margin: 0 0 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.shortcut-message {
+  margin: 0 0 10px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  background: var(--bg-selected);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.shortcut-footer-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
 /* ------------------------------------------------------------- notifications */
 
 .notifications {

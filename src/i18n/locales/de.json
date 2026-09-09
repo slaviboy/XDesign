@@ -207,5 +207,16 @@
   "trace.trace": "Nachzeichnen",
   "trace.tracing": "Wird nachgezeichnet…",
   "trace.cancel": "Abbrechen",
-  "section.image": "Bild"
+  "section.image": "Bild",
+  "shortcuts.title": "Tastaturbefehle",
+  "shortcuts.hint": "Doppelklicken Sie auf einen Tastaturbefehl, um ihn zu ändern, und drücken Sie dann die gewünschten Tasten. Escape bricht ab.",
+  "shortcuts.pressKeys": "Tasten drücken…",
+  "shortcuts.doubleClickToChange": "Zum Ändern doppelklicken",
+  "shortcuts.resetAll": "Alle zurücksetzen",
+  "shortcuts.resetOne": "Auf {keys} zurücksetzen",
+  "shortcuts.clearOne": "Diesen Tastaturbefehl entfernen",
+  "shortcuts.none": "Keiner",
+  "shortcuts.displaced": "{name} hat {keys} verloren und hat jetzt keinen Tastaturbefehl.",
+  "menu.exportPreferences": "Einstellungen exportieren…",
+  "menu.importPreferences": "Einstellungen importieren…"
 }

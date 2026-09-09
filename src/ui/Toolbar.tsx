@@ -26,6 +26,8 @@
 import { memo, type ReactNode } from 'react'
 import { TOOLBAR_LAYOUT, getTool } from '../tools/ToolRegistry'
 import { setTool, type ToolId } from '../state/EditorStore'
+import { shortcutLabel } from '../shortcuts/keymap'
+import { useKeymap } from '../shortcuts/useKeymap'
 import { useEditorStore } from '../state/hooks'
 import { Tooltip } from './primitives'
 import { t, type MessageKey } from '../i18n'
@@ -84,6 +86,7 @@ const TOOL_KEYS: Record<ToolId, MessageKey> = {
 export const Toolbar = memo(function Toolbar() {
   const active = useEditorStore((s) => s.tool)
   void useLanguage()
+  void useKeymap()
 
   return (
     <div className="toolbar" role="toolbar" aria-label="Tools">
@@ -92,7 +95,7 @@ export const Toolbar = memo(function Toolbar() {
         const tool = getTool(entry)
         const label = t(TOOL_KEYS[entry])
         return (
-          <Tooltip key={entry} label={label} shortcut={tool.shortcut}>
+          <Tooltip key={entry} label={label} shortcut={shortcutLabel(`tool.${entry}`) || tool.shortcut}>
             <button
               type="button"
               className={`tool-button${active === entry ? ' active' : ''}`}

@@ -207,5 +207,16 @@
   "trace.trace": "Calcar",
   "trace.tracing": "Calcando…",
   "trace.cancel": "Cancelar",
-  "section.image": "Imagen"
+  "section.image": "Imagen",
+  "shortcuts.title": "Atajos de teclado",
+  "shortcuts.hint": "Haga doble clic en un atajo para cambiarlo y pulse las teclas que desee. Escape cancela.",
+  "shortcuts.pressKeys": "Pulse las teclas…",
+  "shortcuts.doubleClickToChange": "Doble clic para cambiar",
+  "shortcuts.resetAll": "Restablecer todo",
+  "shortcuts.resetOne": "Restablecer a {keys}",
+  "shortcuts.clearOne": "Quitar este atajo",
+  "shortcuts.none": "Ninguno",
+  "shortcuts.displaced": "{name} ha perdido {keys} y ahora no tiene atajo.",
+  "menu.exportPreferences": "Exportar preferencias…",
+  "menu.importPreferences": "Importar preferencias…"
 }

@@ -67,7 +67,7 @@ function tspans(page: Page) {
 /** Turn spell check on from Preferences and wait for the dictionaries. */
 async function enableSpellCheck(page: Page): Promise<void> {
   await page.locator('[data-testid="app-menu"]').click()
-  await page.locator('.menu-item', { hasText: 'Preferences' }).click()
+  await page.locator('[data-testid="menu-preferences"]').click()
   const prefs = page.locator('.dialog')
   await prefs.locator('.checkbox-row', { hasText: 'Check spelling' }).locator('input').check()
   await prefs.locator('button', { hasText: 'Done' }).click()
@@ -386,7 +386,7 @@ test('spell check underlines only the misspelled words', async ({ page }) => {
   await makeText(page, 'the quik brown fox jumpps over', { x: 240, y: 300 })
 
   await page.locator('[data-testid="app-menu"]').click()
-  await page.locator('.menu-item', { hasText: 'Preferences' }).click()
+  await page.locator('[data-testid="menu-preferences"]').click()
   const prefs = page.locator('.dialog')
   await expect(prefs).toBeVisible()
   await prefs.locator('.checkbox-row', { hasText: 'Check spelling' }).locator('input').check()

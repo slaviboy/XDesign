@@ -207,5 +207,16 @@
   "trace.trace": "描摹",
   "trace.tracing": "正在描摹…",
   "trace.cancel": "取消",
-  "section.image": "图像"
+  "section.image": "图像",
+  "shortcuts.title": "键盘快捷键",
+  "shortcuts.hint": "双击快捷键即可更改，然后按下所需的按键。按 Escape 取消。",
+  "shortcuts.pressKeys": "请按键…",
+  "shortcuts.doubleClickToChange": "双击以更改",
+  "shortcuts.resetAll": "全部重置",
+  "shortcuts.resetOne": "重置为 {keys}",
+  "shortcuts.clearOne": "移除此快捷键",
+  "shortcuts.none": "无",
+  "shortcuts.displaced": "{name} 失去了 {keys}，现在没有快捷键。",
+  "menu.exportPreferences": "导出首选项…",
+  "menu.importPreferences": "导入首选项…"
 }

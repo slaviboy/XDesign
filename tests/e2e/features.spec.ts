@@ -955,7 +955,7 @@ async function marquee(
 
 async function setMarqueeMode(page: import('@playwright/test').Page, mode: 'enclose' | 'touch') {
   await page.locator('[data-testid="app-menu"]').click()
-  await page.locator('.menu-item', { hasText: 'Preferences' }).click()
+  await page.locator('[data-testid="menu-preferences"]').click()
   await page.locator('.dialog select[title^="What a drag-selection"]').selectOption(mode)
   await page.locator('.dialog button', { hasText: 'Done' }).click()
 }
@@ -1034,7 +1034,7 @@ test('the marquee mode outlives the tab', async ({ page }) => {
 test('every preference explains itself behind an (i)', async ({ page }) => {
   await openApp(page)
   await page.locator('[data-testid="app-menu"]').click()
-  await page.locator('.menu-item', { hasText: 'Preferences' }).click()
+  await page.locator('[data-testid="menu-preferences"]').click()
 
   // One button per setting, and nothing explained until asked.
   const buttons = page.locator('.dialog .info-button')
@@ -1422,8 +1422,8 @@ test('the drop message shrinks to a chip where there is no room for it', async (
 async function setLanguage(page: import('@playwright/test').Page, code: string) {
   await page.locator('[data-testid="app-menu"]').click()
   // The menu item is itself translated, so it is found by position rather than
-  // by text: Preferences is the third from the bottom, above Shortcuts/About.
-  await page.locator('.menu-item').nth(-3).click()
+  // by text: the menu is in whatever language was chosen last.
+  await page.locator('[data-testid="menu-preferences"]').click()
   await page.locator('.dialog select').first().selectOption(code)
   await page.locator('.dialog button').last().click()
 }
@@ -1463,7 +1463,7 @@ test('the language outlives the tab', async ({ page }) => {
 test('the language menu names each language in itself', async ({ page }) => {
   await openApp(page)
   await page.locator('[data-testid="app-menu"]').click()
-  await page.locator('.menu-item').nth(-3).click()
+  await page.locator('[data-testid="menu-preferences"]').click()
 
   const options = await page.locator('.dialog select').first().locator('option').allTextContents()
   // The one menu that cannot be translated: someone looking for their own
