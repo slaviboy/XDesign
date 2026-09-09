@@ -242,5 +242,8 @@
   "text.clearFormatting": "Изчистване",
   "label.fontFamily": "Шрифт",
   "label.fontWeight": "Плътност",
-  "label.mixed": "Смесено"
+  "label.mixed": "Смесено",
+  "label.toolHighlight": "Активен инструмент",
+  "prefs.toolHighlightFill": "Запълнен фон",
+  "prefs.toolHighlightTint": "Оцветена икона"
 }

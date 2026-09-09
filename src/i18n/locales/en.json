@@ -242,5 +242,8 @@
   "text.clearFormatting": "Clear",
   "label.fontFamily": "Font",
   "label.fontWeight": "Weight",
-  "label.mixed": "Mixed"
+  "label.mixed": "Mixed",
+  "label.toolHighlight": "Active tool",
+  "prefs.toolHighlightFill": "Filled background",
+  "prefs.toolHighlightTint": "Coloured icon"
 }

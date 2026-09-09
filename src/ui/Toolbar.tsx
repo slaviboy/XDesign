@@ -85,11 +85,12 @@ const TOOL_KEYS: Record<ToolId, MessageKey> = {
 
 export const Toolbar = memo(function Toolbar() {
   const active = useEditorStore((s) => s.tool)
+  const highlight = useEditorStore((s) => s.toolHighlight)
   void useLanguage()
   void useKeymap()
 
   return (
-    <div className="toolbar" role="toolbar" aria-label="Tools">
+    <div className={`toolbar highlight-${highlight}`} role="toolbar" aria-label="Tools">
       {TOOLBAR_LAYOUT.map((entry, i) => {
         if (entry === 'separator') return <div key={`sep${i}`} className="tool-separator" />
         const tool = getTool(entry)

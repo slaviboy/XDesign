@@ -161,6 +161,16 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .tool-button.active { background: var(--accent); color: var(--accent-contrast); }
 .tool-button svg { display: block; pointer-events: none; }
 
+/* The quieter of the two ways to mark the active tool: the icon takes the
+   accent colour and nothing else changes, so every button keeps the same shape
+   whether or not it is the one in use. `background: none` rather than a
+   transparent override, so the hover state below can still put one back. */
+.toolbar.highlight-tint .tool-button.active {
+  background: none;
+  color: var(--tool-active-tint);
+}
+.toolbar.highlight-tint .tool-button.active:hover { background: var(--bg-hover); }
+
 .tool-separator {
   width: 24px;
   height: 1px;

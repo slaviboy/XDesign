@@ -242,5 +242,8 @@
   "text.clearFormatting": "Limpar",
   "label.fontFamily": "Tipo de letra",
   "label.fontWeight": "Espessura",
-  "label.mixed": "Variado"
+  "label.mixed": "Variado",
+  "label.toolHighlight": "Ferramenta ativa",
+  "prefs.toolHighlightFill": "Fundo preenchido",
+  "prefs.toolHighlightTint": "Ícone colorido"
 }

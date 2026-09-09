@@ -242,5 +242,8 @@
   "text.clearFormatting": "Borrar",
   "label.fontFamily": "Fuente",
   "label.fontWeight": "Grosor",
-  "label.mixed": "Variado"
+  "label.mixed": "Variado",
+  "label.toolHighlight": "Herramienta activa",
+  "prefs.toolHighlightFill": "Fondo relleno",
+  "prefs.toolHighlightTint": "Icono coloreado"
 }

@@ -34,7 +34,9 @@ import {
 } from '@/persistence/Preferences'
 import { createDocument } from '@/document/NodeFactory'
 import { getDoc, replaceDocument } from '@/state/DocumentStore'
-import { editorStore, setMarqueeMode, readDefaultGrid, saveDefaultGrid } from '@/state/EditorStore'
+import {
+  editorStore, setMarqueeMode, setToolHighlight, readDefaultGrid, saveDefaultGrid,
+} from '@/state/EditorStore'
 import { getThemePreference, setThemePreference } from '@/state/theme'
 import { getLanguage, setLanguage } from '@/i18n'
 import { isSpellCheckEnabled, setSpellCheckEnabled } from '@/text/spellcheck'
@@ -58,6 +60,7 @@ beforeEach(() => {
   setThemePreference('system')
   setLanguage('en')
   setMarqueeMode('touch')
+  setToolHighlight('fill')
   setSpellCheckEnabled(true)
 })
 
@@ -73,6 +76,7 @@ describe('collecting', () => {
     setThemePreference('dark')
     setLanguage('de')
     setMarqueeMode('enclose')
+    setToolHighlight('tint')
     setSpellCheckEnabled(false)
     saveDefaultGrid(grid(12))
     setBinding('file.save', 'Mod+K')
@@ -82,6 +86,7 @@ describe('collecting', () => {
     expect(file.theme).toBe('dark')
     expect(file.language).toBe('de')
     expect(file.marqueeMode).toBe('enclose')
+    expect(file.toolHighlight).toBe('tint')
     expect(file.spellCheck).toBe(false)
     expect(file.defaultGrid).toEqual(grid(12))
     expect(file.shortcuts).toEqual({ 'file.save': 'Mod+K' })
@@ -140,6 +145,7 @@ describe('applying', () => {
       theme: 'dark',
       spellCheck: false,
       marqueeMode: 'enclose',
+      toolHighlight: 'tint',
       defaultGrid: grid(16),
       shortcuts: { 'file.save': 'Mod+K' },
       canvas: { gridSize: 32, snapToObjects: false },
@@ -149,6 +155,7 @@ describe('applying', () => {
     expect(getThemePreference()).toBe('dark')
     expect(isSpellCheckEnabled()).toBe(false)
     expect(editorStore.getState().marqueeMode).toBe('enclose')
+    expect(editorStore.getState().toolHighlight).toBe('tint')
     expect(readDefaultGrid()).toEqual(grid(16))
     expect(chordFor('file.save')).toBe('Mod+K')
     expect(getDoc().settings.gridSize).toBe(32)

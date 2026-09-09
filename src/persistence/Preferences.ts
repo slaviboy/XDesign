@@ -46,7 +46,8 @@ import { getThemePreference, setThemePreference, type ThemePreference } from '..
 import { getLanguage, setLanguage, LANGUAGES, type LanguageCode } from '../i18n'
 import { isSpellCheckEnabled, setSpellCheckEnabled } from '../text/spellcheck'
 import {
-  editorStore, readDefaultGrid, saveDefaultGrid, setMarqueeMode, type MarqueeMode,
+  editorStore, readDefaultGrid, saveDefaultGrid, setMarqueeMode, setToolHighlight,
+  type MarqueeMode, type ToolHighlight,
 } from '../state/EditorStore'
 import { applyKeymapOverrides, keymapOverrides, type KeymapOverrides } from '../shortcuts/keymap'
 import { getDoc } from '../state/DocumentStore'
@@ -77,6 +78,7 @@ export interface PreferencesFile {
   theme?: ThemePreference
   spellCheck?: boolean
   marqueeMode?: MarqueeMode
+  toolHighlight?: ToolHighlight
   defaultGrid?: ArtboardGrid | null
   shortcuts?: KeymapOverrides
   canvas?: CanvasPreferences
@@ -96,12 +98,14 @@ export type PreferenceSection =
   | 'theme'
   | 'spellCheck'
   | 'marqueeMode'
+  | 'toolHighlight'
   | 'defaultGrid'
   | 'shortcuts'
   | 'canvas'
 
 export const PREFERENCE_SECTIONS: readonly PreferenceSection[] = [
-  'language', 'theme', 'spellCheck', 'marqueeMode', 'defaultGrid', 'shortcuts', 'canvas',
+  'language', 'theme', 'spellCheck', 'marqueeMode', 'toolHighlight', 'defaultGrid',
+  'shortcuts', 'canvas',
 ]
 
 /** Which sections a parsed file has something to say about. */
@@ -111,6 +115,7 @@ export function sectionsInFile(file: PreferencesFile): PreferenceSection[] {
   if (isTheme(file.theme)) present.push('theme')
   if (typeof file.spellCheck === 'boolean') present.push('spellCheck')
   if (file.marqueeMode === 'touch' || file.marqueeMode === 'enclose') present.push('marqueeMode')
+  if (file.toolHighlight === 'fill' || file.toolHighlight === 'tint') present.push('toolHighlight')
   // A file that deliberately carries "no default grid" is still saying
   // something about the default grid, so null counts as present.
   if (file.defaultGrid === null || isArtboardGrid(file.defaultGrid)) present.push('defaultGrid')
@@ -148,6 +153,7 @@ export function collectPreferences(
   if (wanted.has('theme')) file.theme = getThemePreference()
   if (wanted.has('spellCheck')) file.spellCheck = isSpellCheckEnabled()
   if (wanted.has('marqueeMode')) file.marqueeMode = editorStore.getState().marqueeMode
+  if (wanted.has('toolHighlight')) file.toolHighlight = editorStore.getState().toolHighlight
   if (wanted.has('defaultGrid')) file.defaultGrid = readDefaultGrid()
   if (wanted.has('shortcuts')) file.shortcuts = keymapOverrides()
   if (wanted.has('canvas')) {
@@ -223,6 +229,10 @@ export function applyPreferences(
   if (wanted.has('marqueeMode') && (file.marqueeMode === 'touch' || file.marqueeMode === 'enclose')) {
     setMarqueeMode(file.marqueeMode)
     applied.push('marquee mode')
+  }
+  if (wanted.has('toolHighlight') && (file.toolHighlight === 'fill' || file.toolHighlight === 'tint')) {
+    setToolHighlight(file.toolHighlight)
+    applied.push('active tool')
   }
   if (wanted.has('defaultGrid') && isArtboardGrid(file.defaultGrid)) {
     saveDefaultGrid(file.defaultGrid)

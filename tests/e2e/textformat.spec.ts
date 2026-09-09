@@ -46,6 +46,12 @@ async function selectRange(page: import('@playwright/test').Page, from: number, 
     },
     { from, to },
   )
+  // The selection reaches the store through `selectionchange`, which is a task
+  // of its own — so wait for the panel to agree before doing anything that
+  // reads it back. Without this every later step is racing the browser.
+  const note = page.locator('.text-range-note')
+  if (to > from) await expect(note).toBeVisible()
+  else await expect(note).toHaveCount(0)
 }
 
 /** The Text section's weight dropdown. */

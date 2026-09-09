@@ -76,6 +76,30 @@ function readStoredMarqueeMode(): MarqueeMode {
   }
 }
 
+/**
+ * How the toolbar shows which tool is active.
+ *
+ * 'fill'   a filled chip behind the icon, which is unmistakable and is what
+ *          this app has always done.
+ * 'tint'   the icon itself takes the accent colour and nothing else changes,
+ *          which is quieter and keeps the rail's rhythm — every button stays
+ *          the same shape whether or not it is the one in use.
+ *
+ * A preference about the person rather than the artwork, so it lives in
+ * localStorage beside the theme and travels in an exported preferences file.
+ */
+export type ToolHighlight = 'fill' | 'tint'
+
+export const TOOL_HIGHLIGHT_STORAGE_KEY = 'xdesign.toolHighlight'
+
+function readStoredToolHighlight(): ToolHighlight {
+  try {
+    return localStorage.getItem(TOOL_HIGHLIGHT_STORAGE_KEY) === 'tint' ? 'tint' : 'fill'
+  } catch {
+    return 'fill'
+  }
+}
+
 export interface Viewport {
   /** Screen-space translation of the document origin, in CSS pixels. */
   x: number
@@ -129,6 +153,8 @@ export interface EditorState {
   measureTo: NodeId | null
   /** How much of an object a marquee must cover to select it. */
   marqueeMode: MarqueeMode
+  /** How the toolbar marks the active tool. See ToolHighlight. */
+  toolHighlight: ToolHighlight
   /**
    * The selected guide, if any.
    *
@@ -240,6 +266,7 @@ export const editorStore = createStore<EditorState>()(
     editingContext: null,
     measureTo: null,
     marqueeMode: readStoredMarqueeMode(),
+    toolHighlight: readStoredToolHighlight(),
     selectedGuide: null,
     editingTextId: null,
     textSelection: null,
@@ -309,6 +336,15 @@ export function setMarqueeMode(mode: MarqueeMode): void {
   editorStore.setState({ marqueeMode: mode })
   try {
     localStorage.setItem(MARQUEE_MODE_STORAGE_KEY, mode)
+  } catch {
+    // Storage blocked: the choice still applies for this session.
+  }
+}
+
+export function setToolHighlight(mode: ToolHighlight): void {
+  editorStore.setState({ toolHighlight: mode })
+  try {
+    localStorage.setItem(TOOL_HIGHLIGHT_STORAGE_KEY, mode)
   } catch {
     // Storage blocked: the choice still applies for this session.
   }

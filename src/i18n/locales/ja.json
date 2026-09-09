@@ -242,5 +242,8 @@
   "text.clearFormatting": "クリア",
   "label.fontFamily": "フォント",
   "label.fontWeight": "ウェイト",
-  "label.mixed": "混在"
+  "label.mixed": "混在",
+  "label.toolHighlight": "使用中のツール",
+  "prefs.toolHighlightFill": "背景を塗る",
+  "prefs.toolHighlightTint": "アイコンに色"
 }

@@ -242,5 +242,8 @@
   "text.clearFormatting": "Effacer",
   "label.fontFamily": "Police",
   "label.fontWeight": "Graisse",
-  "label.mixed": "Multiple"
+  "label.mixed": "Multiple",
+  "label.toolHighlight": "Outil actif",
+  "prefs.toolHighlightFill": "Fond plein",
+  "prefs.toolHighlightTint": "Icône colorée"
 }

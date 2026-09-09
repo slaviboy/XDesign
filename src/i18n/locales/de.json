@@ -242,5 +242,8 @@
   "text.clearFormatting": "Zurücksetzen",
   "label.fontFamily": "Schrift",
   "label.fontWeight": "Schriftschnitt",
-  "label.mixed": "Gemischt"
+  "label.mixed": "Gemischt",
+  "label.toolHighlight": "Aktives Werkzeug",
+  "prefs.toolHighlightFill": "Gefüllter Hintergrund",
+  "prefs.toolHighlightTint": "Eingefärbtes Symbol"
 }

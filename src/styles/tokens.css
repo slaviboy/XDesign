@@ -67,6 +67,10 @@
 
   /* Selection / interaction — a single blue, used sparingly */
   --accent: #1473e6;
+  /* The tint the toolbar uses when the active tool is marked by colour rather
+     than by a chip behind it. Lighter than --accent on purpose: it carries the
+     whole signal on its own, with no filled ground to sit against. */
+  --tool-active-tint: #4492e5;
   --accent-hover: #0d66d0;
   --accent-contrast: #ffffff;
 
@@ -175,6 +179,8 @@
    * against the panel.
    */
   --accent: #1473e6;
+  /* Same tint in both themes: it is a colour chosen to read on either ground, and a rail whose active tool changed hue with the theme would be describing the theme rather than the tool. */
+  --tool-active-tint: #4492e5;
   /*
    * Hover DEEPENS rather than lightens, in dark mode as well as light. The
    * instinct is to lighten on a dark ground, but the accent is a fill under

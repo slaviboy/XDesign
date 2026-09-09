@@ -1031,6 +1031,30 @@ test('the marquee mode outlives the tab', async ({ page }) => {
 
 // ------------------------------------------------------ preference notes --
 
+test('the toolbar can mark the active tool by colour instead of a chip', async ({ page }) => {
+  await openApp(page)
+  const active = page.locator('.tool-button.active')
+  // The default: a filled chip behind the icon.
+  await expect(page.locator('.toolbar')).toHaveClass(/highlight-fill/)
+  const filled = await active.evaluate((el) => getComputedStyle(el).backgroundColor)
+  expect(filled).not.toBe('rgba(0, 0, 0, 0)')
+
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-preferences"]').click()
+  await page.locator('.dialog-row', { hasText: 'Active tool' }).locator('select').selectOption('tint')
+  await page.locator('.dialog button').last().click()
+
+  // The chip is gone and the icon carries the signal on its own.
+  await expect(page.locator('.toolbar')).toHaveClass(/highlight-tint/)
+  await page.mouse.move(700, 400)
+  expect(await active.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
+  expect(await active.evaluate((el) => getComputedStyle(el).color)).toBe('rgb(68, 146, 229)')
+
+  // And it is a preference, so it outlives the tab.
+  await page.reload()
+  await expect(page.locator('.toolbar')).toHaveClass(/highlight-tint/)
+})
+
 test('every preference explains itself behind an (i)', async ({ page }) => {
   await openApp(page)
   await page.locator('[data-testid="app-menu"]').click()
@@ -1038,7 +1062,7 @@ test('every preference explains itself behind an (i)', async ({ page }) => {
 
   // One button per setting, and nothing explained until asked.
   const buttons = page.locator('.dialog .info-button')
-  await expect(buttons).toHaveCount(11)
+  await expect(buttons).toHaveCount(12)
   await expect(page.locator('.dialog .pref-note')).toHaveCount(0)
 
   const snap = page.locator('[data-testid="info-snap-objects"]')

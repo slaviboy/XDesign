@@ -24,7 +24,10 @@ import { ARTBOARD_PRESETS, createDocument } from '../document/NodeFactory'
 import { updateSettings } from '../history/Commands'
 import { createArtboardCommand } from '../history/Commands'
 import { replaceDocument } from '../state/DocumentStore'
-import { closeDialog, setEditor, setMarqueeMode, setViewport, type MarqueeMode } from '../state/EditorStore'
+import {
+  closeDialog, setEditor, setMarqueeMode, setToolHighlight, setViewport,
+  type MarqueeMode, type ToolHighlight,
+} from '../state/EditorStore'
 import { useDocument, useEditorStore } from '../state/hooks'
 import { getStorageEstimate, clearRecent } from '../persistence/IndexedDbStore'
 import { supportsFileSystemAccess } from '../persistence/FileSystem'
@@ -180,6 +183,7 @@ export function PreferencesDialog() {
   const doc = useDocument()
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const marqueeMode = useEditorStore((s) => s.marqueeMode)
+  const toolHighlight = useEditorStore((s) => s.toolHighlight)
   const [guideColorAt, setGuideColorAt] = useState<{ x: number; y: number } | null>(null)
   // Re-renders the dialog when the language changes, so the choice takes effect
   // in the panel you made it in.
@@ -349,6 +353,24 @@ export function PreferencesDialog() {
             ]}
             onChange={(v) => setMarqueeMode(v as MarqueeMode)}
             title="What a drag-selection has to cover before an object counts as selected"
+          />
+        </div>
+      </PreferenceRow>
+
+      <PreferenceRow
+        name="tool-highlight"
+        info="How the toolbar marks the tool you are using. A filled chip behind the icon is unmistakable; tinting the icon alone is quieter and keeps every button the same shape whether or not it is the one in use. It changes nothing but the toolbar."
+      >
+        <div className="dialog-row">
+          <label>{t('label.toolHighlight')}</label>
+          <Select
+            value={toolHighlight}
+            options={[
+              { value: 'fill', label: t('prefs.toolHighlightFill') },
+              { value: 'tint', label: t('prefs.toolHighlightTint') },
+            ]}
+            onChange={(v) => setToolHighlight(v as ToolHighlight)}
+            title="How the toolbar marks the active tool"
           />
         </div>
       </PreferenceRow>

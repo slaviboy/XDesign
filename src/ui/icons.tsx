@@ -73,34 +73,31 @@ function ToolIcon({ size = 20, children, ...rest }: IconProps) {
 
 /* ------------------------------------------------------------------ tools */
 
-/** Classic pointer: filled, with the notched tail that reads as a cursor. */
+/**
+ * The pointer, as one shape used twice.
+ *
+ * Both cursors are the same four-point arrow, and the only difference between
+ * them is whether it is filled. That is the distinction Illustrator draws
+ * between selecting an object and selecting its points, and keeping it to fill
+ * alone is what makes the pair read as a pair — two outlines differing in some
+ * detail of their geometry would just look like two arrows.
+ */
+const POINTER_PATH = 'M5.27 2.5L5.27 21.5L10.824 15.838L18.73 15.648Z'
+
+/** Selecting whole objects: solid. */
 export const CursorIcon = (p: IconProps) => (
   <ToolIcon {...p}>
-    <path
-      d="M5.5 2.4v16.9l4.3-4.2 2.7 6.2 2.6-1.1-2.7-6.1h6.1z"
-      fill="currentColor"
-      strokeWidth={1.1}
-      strokeLinejoin="round"
-    />
+    <path d={POINTER_PATH} fill="currentColor" strokeWidth={1.1} strokeLinejoin="round" />
   </ToolIcon>
 )
 /**
- * The hollow counterpart, for Direct Selection.
- *
- * Same outline as the pointer above with no body at all — the wrapper strokes it
- * in currentColor and nothing fills it, so whatever is behind shows through. That
- * is the distinction Illustrator draws between selecting an object and selecting
- * its points, and it survives the active state: on the blue the solid arrow goes
- * solid white while this one stays an outline with blue inside.
+ * Selecting points: hollow. Nothing fills it, so whatever is behind shows
+ * through — including the active state, where the solid arrow goes white and
+ * this one stays an outline with the highlight inside it.
  */
 export const DirectCursorIcon = (p: IconProps) => (
   <ToolIcon {...p}>
-    <path
-      d="M5.5 2.4v16.9l4.3-4.2 2.7 6.2 2.6-1.1-2.7-6.1h6.1z"
-      fill="none"
-      strokeWidth={1.4}
-      strokeLinejoin="round"
-    />
+    <path d={POINTER_PATH} fill="none" strokeWidth={1.4} strokeLinejoin="round" />
   </ToolIcon>
 )
 
@@ -130,19 +127,13 @@ export const LineIcon = (p: IconProps) => (
 /**
  * Fountain-pen nib, angled the way a pen is held.
  *
- * Drawn upright and rotated into place, because a nib is a symmetrical shape
- * about its own axis and describing it that way is the only version anyone can
- * read afterwards — the rotated coordinates are not something to hand-edit.
- * The slit runs from the vent to the tip, which is what makes it a nib rather
- * than a leaf.
+ * Filled with a hole rather than stroked: the nib's outline and its slit are
+ * one shape, and the counter between them is what gives the tip its taper. Even-odd
+ * so the inner subpath cuts the hole whichever way round it happens to be wound.
  */
 export const PenIcon = (p: IconProps) => (
-  <ToolIcon {...p}>
-    <g transform="rotate(-45 12 12)">
-      <path d="M9.6 6.2h4.8a1.7 1.7 0 011.7 1.7v5.7L12 19.2l-4.1-5.6V7.9a1.7 1.7 0 011.7-1.7z" />
-      <path d="M12 13.6v5.6" />
-      <circle cx="12" cy="10.4" r="1.1" />
-    </g>
+  <ToolIcon {...p} fill="currentColor" stroke="none">
+    <path fillRule="evenodd" d="M15.875 2.221L13.151 4.894L5.622 8.934L2.2 19.603L4.281 21.779L15.002 18.262L19.146 10.795L21.8 8.338L15.875 2.221ZM6.877 9.923L13.592 6.511L17.61 10.309L14.015 16.888L5.168 19.877C5.168 19.877 8.243 16.351 10.496 14.292C10.594 14.202 12.153 14.192 12.153 14.192L12.769 12.502L11.252 11.04L9.608 11.589C9.608 11.589 9.447 13.037 9.357 13.134C7.307 15.378 4.019 18.766 4.019 18.766L6.877 9.923Z" />
   </ToolIcon>
 )
 export const PencilIcon = (p: IconProps) => (
