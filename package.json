@@ -4,6 +4,12 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Offline-first vector design editor. No account, no server, no network.",
+  "license": "Apache-2.0",
+  "author": "Stanislav Georgiev (https://github.com/slaviboy)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/slaviboy/XDesign.git"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b --noEmit && vite build",
