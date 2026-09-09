@@ -38,6 +38,15 @@ export interface TextLine {
   /** Baseline offset from the top of the text box. */
   baseline: number
   /**
+   * Character range this line covers, into the node's own string.
+   *
+   * What lets a caret be placed: the editor knows an index and needs a point,
+   * and only the layout knows which line an index landed on. Absent on lines
+   * built before this existed, so readers should treat it as optional.
+   */
+  start?: number
+  end?: number
+  /**
    * The differently-styled pieces of this line, left to right.
    *
    * Absent for uniform text, which is the overwhelmingly common case and which
@@ -169,14 +178,21 @@ export function layoutText(
   // Extra space accumulated from the paragraph breaks passed so far.
   const offsets: number[] = []
   let accumulated = 0
+  // Character position in the whole string, so each line can say which slice of
+  // it it drew. Wrapping consumes exactly the characters of the lines it
+  // returns, so walking their lengths tracks it without re-searching the text.
+  let paragraphStart = 0
   paragraphs.forEach((paragraph, i) => {
     const lines = wrapping
       ? wrapParagraph(paragraph, style, maxWidth!)
       : [{ text: paragraph, width: measureText(paragraph, style), baseline: 0 }]
+    locateLines(lines, paragraph, paragraphStart)
     for (const line of lines) {
       out.push(line)
       offsets.push(accumulated)
     }
+    // +1 for the newline the split consumed.
+    paragraphStart += paragraph.length + 1
     if (i < paragraphs.length - 1) accumulated += paragraphGap
   })
 
@@ -240,7 +256,10 @@ function layoutRich(
       ? wrapRangesRich(paragraph, start, styleAt, maxWidth!)
       : [{ from: start, to: start + paragraph.length }]
     for (const range of ranges) {
-      lines.push(buildRichLine(transformed, range.from, range.to, styleAt))
+      const line = buildRichLine(transformed, range.from, range.to, styleAt)
+      line.start = range.from
+      line.end = range.to
+      lines.push(line)
       gaps.push(accumulated)
     }
     if (i < paragraphs.length - 1) accumulated += paragraphGap
@@ -385,6 +404,27 @@ function wrapRangesRich(
   }
   out.push({ from: lineStart, to: end })
   return out
+}
+
+/**
+ * Give each wrapped line the character range it drew.
+ *
+ * Found by scanning rather than counted while wrapping, because wrapping
+ * DISCARDS characters: the space a line broke at belongs to neither side, so
+ * the lines' lengths do not add up to the paragraph's. The lines appear in the
+ * paragraph in order, so one forward scan places them all, and a line whose
+ * text cannot be found (which would mean the wrapper rewrote it) falls back to
+ * where the scan had reached rather than throwing the mapping out.
+ */
+function locateLines(lines: TextLine[], paragraph: string, offset: number): void {
+  let search = 0
+  for (const line of lines) {
+    const at = line.text === '' ? search : paragraph.indexOf(line.text, search)
+    const start = at < 0 ? search : at
+    line.start = offset + start
+    line.end = line.start + line.text.length
+    search = start + line.text.length
+  }
 }
 
 function wrapParagraph(paragraph: string, style: TextStyle, maxWidth: number): TextLine[] {

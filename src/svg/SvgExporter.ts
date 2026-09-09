@@ -666,7 +666,13 @@ function styleAttrs(
     parts.push(` stroke="${sp.value}"`)
     const so = sp.opacity * style.strokeOpacity
     if (so < 1) parts.push(` stroke-opacity="${round(so, 3)}"`)
-    parts.push(` stroke-width="${round(stroke.width, p)}"`)
+    // Text draws its stroke behind the glyphs, so an outer stroke is asked for
+    // at double width and shows exactly half of that outside the letter. The
+    // canvas does the same; an export that differed would be the one place the
+    // artwork changed on its way out.
+    const width = isText && stroke.align === 'outer' ? stroke.width * 2 : stroke.width
+    parts.push(` stroke-width="${round(width, p)}"`)
+    if (isText) parts.push(' paint-order="stroke"')
     if (stroke.cap !== 'butt') parts.push(` stroke-linecap="${stroke.cap}"`)
     if (stroke.join !== 'miter') parts.push(` stroke-linejoin="${stroke.join}"`)
     if (stroke.join === 'miter' && stroke.miterLimit !== 4) {

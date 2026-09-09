@@ -193,3 +193,91 @@ test('one undo takes the formatting back off', async ({ page }) => {
   await expect(nodesOfType(page, 'text')).toHaveCount(1)
   expect((await drawnWeights(page)).some((d) => d.weight === '700')).toBe(false)
 })
+
+test('colour applies to the selected characters, not the whole object', async ({ page }) => {
+  await typeText(page, 'You can adjust')
+  await selectRange(page, 0, 3)
+
+  // The Fill swatch opens the picker; the hex field is the quickest way in.
+  await page.locator('.section', { hasText: 'FILL' }).locator('.swatch').first().click()
+  const hex = page.locator('.popover .field', { has: page.locator('.field-label:text-is("#")') })
+    .locator('input')
+  await hex.fill('FF0000')
+  await hex.press('Enter')
+  await page.keyboard.press('Escape')
+
+  const fills = await page.locator('.document-layer [data-node-type="text"] tspan').evaluateAll(
+    (nodes) => nodes.map((n) => ({ text: n.textContent, fill: n.getAttribute('fill') })),
+  )
+  const red = fills.filter((f) => (f.fill ?? '').toLowerCase() === '#ff0000')
+  expect(red.map((f) => f.text).join('')).toBe('You')
+  // And the rest is untouched — the object's own fill still applies to it.
+  expect(fills.filter((f) => (f.fill ?? '').toLowerCase() !== '#ff0000').map((f) => f.text).join(''))
+    .toBe(' can adjust')
+})
+
+test('re-entering a formatted text keeps its formatting on screen', async ({ page }) => {
+  await typeText(page, 'You can adjust')
+  await selectRange(page, 0, 3)
+  await setWeight(page, '700')
+  await page.locator(CANVAS).click({ position: { x: 500, y: 400 } })
+
+  // Double-click back in. The formatting has to survive: a textarea has one
+  // font, so this is the case where the canvas must keep drawing.
+  await page.locator('.document-layer [data-node-type="text"]').first().dblclick()
+  await expect(page.locator('[data-testid="text-editor"]')).toHaveCount(1)
+
+  const drawn = await drawnWeights(page)
+  expect(drawn.filter((d) => d.weight === '700').map((d) => d.text).join('')).toBe('You')
+
+  // And the caret is drawn from the real layout rather than the textarea's.
+  await expect(page.locator('.text-edit-overlay')).toHaveCount(1)
+})
+
+test('typing into formatted text keeps it formatted as it goes', async ({ page }) => {
+  await typeText(page, 'You can adjust')
+  await selectRange(page, 0, 3)
+  await setWeight(page, '700')
+
+  // Put the caret at the very end and keep typing.
+  await selectRange(page, 14, 14)
+  await page.locator('[data-testid="text-editor"]').focus()
+  await page.keyboard.type(' more')
+
+  const drawn = await drawnWeights(page)
+  expect(drawn.map((d) => d.text).join('')).toBe('You can adjust more')
+  // Still bold, still only the first word, without leaving the editor.
+  expect(drawn.filter((d) => d.weight === '700').map((d) => d.text).join('')).toBe('You')
+})
+
+test('the selection is drawn over the glyphs it covers', async ({ page }) => {
+  await typeText(page, 'You can adjust')
+  await selectRange(page, 0, 3)
+  await setWeight(page, '700')
+
+  await page.locator('[data-testid="text-editor"]').focus()
+  await selectRange(page, 0, 7)
+  const rects = page.locator('.text-edit-overlay .text-selection-rect')
+  await expect(rects).toHaveCount(1)
+
+  // It covers the bold word and the plain one after it, so it is wider than
+  // the bold word alone — which is what measuring per run buys.
+  const wide = await rects.first().evaluate((el) => (el as SVGRectElement).width.baseVal.value)
+  await selectRange(page, 0, 3)
+  const narrow = await rects.first().evaluate((el) => (el as SVGRectElement).width.baseVal.value)
+  expect(wide).toBeGreaterThan(narrow)
+})
+
+test('a text stroke is drawn behind the glyphs, not over them', async ({ page }) => {
+  await typeText(page, 'firend')
+  await page.locator(CANVAS).click({ position: { x: 500, y: 400 } })
+  await page.locator('.document-layer [data-node-type="text"]').first().click()
+
+  // Give it a stroke through the inspector.
+  await page.locator('.section', { hasText: 'Stroke' }).locator('.paint-toggle, input[type="checkbox"]').first().click()
+
+  const text = page.locator('.document-layer [data-node-type="text"] text').first()
+  // paint-order stroke: the fill is painted over the stroke, so only the half
+  // of it outside the letter shows. Painted the other way it eats the glyph.
+  await expect(text).toHaveAttribute('paint-order', 'stroke')
+})

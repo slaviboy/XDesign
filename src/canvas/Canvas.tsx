@@ -43,6 +43,7 @@ import {
 import { DocumentLayer } from './NodeRenderer'
 import { SelectionOverlay } from './SelectionOverlay'
 import { TracePreviewLayer } from './TracePreview'
+import { TextEditOverlay } from './TextEditOverlay'
 import { GridOverlay } from './GridOverlay'
 import { ImportIcon } from '../ui/icons'
 import { t } from '../i18n'
@@ -373,6 +374,9 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
           {/* The Image Trace preview sits directly on the artwork it replaces,
               above the document and below the guides. */}
           <TracePreviewLayer />
+          {/* The caret and highlight for rich text, above the glyphs they
+              describe and below the guides. */}
+          <TextEditOverlay />
           {/* Above the artwork: a guide is chrome and has to stay visible. */}
           <ArtboardGuides />
         </g>

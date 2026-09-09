@@ -239,11 +239,12 @@ layer marked for export, at 0.1×–10× scale.
 
 **Format text, or part of it** — click into a text object, select a word or a few
 characters, and the Text panel describes those characters instead of the whole object: font,
-size, weight, italic, tracking, case. Everything else stays where it belongs — alignment,
-line height and paragraph spacing are properties of a block, so they keep applying to the
-whole object even while a range is selected, because "these three words are centred" is not
-something text can be. Where the selection disagrees, the panel says Mixed rather than
-showing you the first option as though it were the answer.
+size, weight, italic, tracking, case, and colour. Everything else stays where it belongs —
+alignment, line height and paragraph spacing are properties of a block, so they keep applying
+to the whole object even while a range is selected, because "these three words are centred"
+is not something text can be. Where the selection disagrees, the panel says Mixed rather than
+showing you the first option as though it were the answer. Formatted text stays formatted
+while you edit it, caret and all.
 
 **Keyboard shortcuts you can change** — every command in the Shortcuts dialog is
 rebindable. Double-click one, and the field starts listening: it shows the modifiers as you
@@ -1192,6 +1193,33 @@ to render at all while a view that replaces it is showing, and the traced paths 
 the viewport's own space over the hole where it was. Turning Preview off puts the picture
 back untouched, which is what the checkbox promises.
 
+### For rich text the textarea stops drawing and becomes an input sink
+
+A `<textarea>` has one font. Editing a text object with style runs inside one lays every
+character out at the same size, so the caret lands where the plain version WOULD have put it,
+drifting further with each word drawn larger — and the formatting is invisible the whole time
+you are editing it, which is when you most want to see it.
+
+So text carrying runs takes a different path, the same split the layout engine already makes
+between uniform and rich. The textarea goes fully transparent and keeps only the jobs it is
+genuinely good at — the keyboard, the clipboard, the selection offsets, IME — while the
+canvas draws the glyphs and `TextGeometry` places the caret and the highlight from the same
+layout that drew them. They cannot disagree, because there is one layout. Pointer clicks are
+mapped through that layout too: `offsetX`/`offsetY` on the textarea are already in the node's
+local space, since CSS transforms do not affect them.
+
+Uniform text keeps the native textarea untouched, caret and all. It is better at it than
+anything drawn by hand, and nothing about ordinary text should pay for rich text existing.
+
+### A text stroke is painted behind the glyphs
+
+Over them, which is what SVG does by default, half of every stroke eats into the letterform:
+on a stem no thicker than the stroke the fill disappears completely, counters close up, and
+neighbouring letters grow into each other. Behind the fill the same stroke shows only the
+half that falls outside the glyph — which is what an outlined letter is supposed to look
+like, and what Adobe does, where Stroke sits below Fill in a type object's appearance. An
+outer stroke is then asked for at double width so the full width lands outside.
+
 ### Formatting a selection is a conversation between two panels
 
 You select a word on the canvas and reach for a control in the inspector — and clicking the
@@ -1322,8 +1350,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 664 unit tests (Vitest)
-npm run test:e2e   # 337 end-to-end tests (Playwright, real Chromium)
+npm test           # 672 unit tests (Vitest)
+npm run test:e2e   # 342 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

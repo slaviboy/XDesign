@@ -338,7 +338,12 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
   // longer what is being looked at, and it cannot show mixed styling anyway. So
   // it hides and this takes over, which is what makes formatting a selection
   // visible while you are formatting it.
-  const editing = useEditorStore((s) => s.editingTextId === node.id && s.textEditingFocused)
+  // Rich text is never hidden: a textarea has one font and cannot show it, so
+  // this is the only rendering of it there is, focused or not.
+  const rich = !!node.runs?.length
+  const editing = useEditorStore(
+    (s) => !rich && s.editingTextId === node.id && s.textEditingFocused,
+  )
   const fill = paintToAttrs(node.style.fill, node.id, 'fill')
   const stroke = paintToAttrs(node.style.stroke.paint, node.id, 'stroke')
   const hasStroke = node.style.stroke.paint.type !== 'none' && node.style.stroke.width > 0
@@ -415,7 +420,17 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
           fill={fill.value}
           fillOpacity={fill.opacity * node.style.fillOpacity}
           stroke={hasStroke ? stroke.value : 'none'}
-          strokeWidth={hasStroke ? node.style.stroke.width : undefined}
+          strokeOpacity={hasStroke ? stroke.opacity * node.style.strokeOpacity : undefined}
+          strokeWidth={hasStroke ? textStrokeWidth(node.style.stroke) : undefined}
+          strokeLinejoin={hasStroke ? node.style.stroke.join : undefined}
+          // The stroke goes UNDER the glyphs. Painted over them, as SVG does by
+          // default, half of it eats into the letterforms: on a stem no thicker
+          // than the stroke the fill disappears entirely, counters close up, and
+          // adjacent letters grow into each other. Behind the fill, the same
+          // stroke shows only the half that is outside the glyph, which is what
+          // an outlined letter is supposed to look like — and what Adobe does,
+          // where Stroke sits below Fill in a type object's appearance.
+          paintOrder={hasStroke ? 'stroke' : undefined}
           style={{ whiteSpace: 'pre' } as CSSProperties}
         >
           {layout.lines.map((line, i) => {
@@ -449,6 +464,20 @@ function TextBody({ node }: { node: TextNode }): ReactNode {
       </g>
     </>
   )
+}
+
+/**
+ * The stroke width to draw text with, given where the stroke is meant to sit.
+ *
+ * Drawn behind the fill, a stroke of width W shows W/2 outside the glyph — so a
+ * centred stroke needs no adjustment, and an outer one is asked for at double
+ * width to put the full W outside. Inner is the one SVG cannot do to text
+ * without clipping every glyph, and drawing it as centred would be a lie about
+ * a stroke's position; it is drawn at its own width, which is the closest
+ * honest answer.
+ */
+function textStrokeWidth(stroke: Style['stroke']): number {
+  return stroke.align === 'outer' ? stroke.width * 2 : stroke.width
 }
 
 /**

@@ -32,6 +32,7 @@ import { createDocument, createText } from '@/document/NodeFactory'
 import { addNode } from '@/document/DocumentModel'
 import { replaceDocument, getDoc, transaction, undo } from '@/state/DocumentStore'
 import { clearTextRunStyle, setTextRunStyle, isCharacterStyle } from '@/history/Commands'
+import { caretRect, indexAtPoint, layoutOf, selectionRects } from '@/text/TextGeometry'
 import type { NodeId, TextNode, TextRun } from '@/document/types'
 
 const TEXT = 'You can adjust the text'
@@ -220,5 +221,74 @@ describe('formatting through the command', () => {
     const segments = runsIn(node(id), 11, 14)
     expect(segments[0]!.style.fontWeight).toBe(700)
     expect(node(id).text.slice(11, 14)).toBe('can')
+  })
+})
+
+describe('where the characters are', () => {
+  it('gives every line the slice of the string it drew', () => {
+    const id = seed()
+    const layout = layoutOf(node(id))
+    for (const line of layout.lines) {
+      expect(node(id).text.slice(line.start, line.end)).toBe(line.text)
+    }
+  })
+
+  it('walks the caret rightwards, one character at a time', () => {
+    const id = seed()
+    let last = -1
+    for (let i = 0; i <= TEXT.length; i++) {
+      const rect = caretRect(node(id), i)
+      expect(Number.isFinite(rect.x)).toBe(true)
+      expect(rect.x).toBeGreaterThan(last)
+      last = rect.x
+    }
+  })
+
+  it('measures a run in its own style, not the object\u2019s', () => {
+    const plain = seed()
+    const plainAt = caretRect(node(plain), 10).x
+
+    // The same index, with the characters before it drawn much larger.
+    const big = seed([{ start: 0, end: 5, style: { fontSize: 48 } }])
+    const bigAt = caretRect(node(big), 10).x
+
+    // This is the whole point: a textarea would put both carets in the same
+    // place, because it lays every character out at one size.
+    expect(bigAt).toBeGreaterThan(plainAt + 20)
+  })
+
+  it('covers a selection with one rectangle per line', () => {
+    const id = seed()
+    const rects = selectionRects(node(id), 0, 7)
+    expect(rects).toHaveLength(1)
+    expect(rects[0]!.width).toBeGreaterThan(0)
+    expect(rects[0]!.height).toBeGreaterThan(0)
+  })
+
+  it('has nothing to draw for an empty selection', () => {
+    const id = seed()
+    expect(selectionRects(node(id), 4, 4)).toEqual([])
+  })
+
+  it('makes a selection wider the more it covers', () => {
+    const id = seed()
+    const short = selectionRects(node(id), 0, 3)[0]!.width
+    const long = selectionRects(node(id), 0, 10)[0]!.width
+    expect(long).toBeGreaterThan(short)
+  })
+
+  it('finds the character a point lands on, and comes back to it', () => {
+    const id = seed([{ start: 0, end: 5, style: { fontSize: 40 } }])
+    for (const index of [0, 3, 7, 12, TEXT.length]) {
+      const rect = caretRect(node(id), index)
+      expect(indexAtPoint(node(id), rect.x, rect.y + rect.height / 2)).toBe(index)
+    }
+  })
+
+  it('clamps a point outside the text to the nearest end', () => {
+    const id = seed()
+    expect(indexAtPoint(node(id), -500, 0)).toBe(0)
+    const far = indexAtPoint(node(id), 99999, 99999)
+    expect(far).toBe(TEXT.length)
   })
 })

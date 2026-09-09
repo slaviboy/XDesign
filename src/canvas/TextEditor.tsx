@@ -39,6 +39,7 @@ import { multiply, type Mat2D } from '../geometry/Matrix'
 import { worldMatrix } from '../document/SceneGraph'
 import { viewportMatrix } from './Viewport'
 import { setText } from '../history/Commands'
+import { indexAtPoint } from '../text/TextGeometry'
 import { fontStack } from '../text/FontRegistry'
 import { toHex } from '../document/color'
 import { endTextEditing, setEditor, setTextSelection } from '../state/EditorStore'
@@ -65,11 +66,18 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
   const doc = useDocument()
   const viewport = useEditorStore((s) => s.viewport)
   const ref = useRef<HTMLTextAreaElement>(null)
+  /** Where a pointer selection started, while one is being dragged. */
+  const anchorRef = useRef<number | null>(null)
   const node = doc.nodes[nodeId]
   // Local, and true from the first frame: the store cannot be the source of
   // truth here because the element has to be focusable before it can report
   // being focused, and it starts by focusing itself.
   const [focused, setFocused] = useState(true)
+  // Text carrying style runs cannot be drawn by a textarea at all: it has one
+  // font. For those the element stops drawing entirely and becomes an input
+  // sink — still the keyboard, the selection and the clipboard — while the
+  // canvas draws the glyphs and TextEditOverlay draws the caret.
+  const rich = node?.type === 'text' && !!node.runs?.length
   const [value, setValue] = useState(node?.type === 'text' ? node.text : '')
 
   const matrix = useMemo<Mat2D>(() => {
@@ -100,6 +108,86 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
     [nodeId],
   )
 
+  const reportSelection = useCallback(() => {
+    const el = ref.current
+    if (el) setTextSelection(nodeId, el.selectionStart, el.selectionEnd)
+  }, [nodeId])
+
+  /**
+   * Put the caret where the pointer is, measured against the layout the glyphs
+   * were drawn with.
+   *
+   * offsetX/offsetY are in the element's own coordinate system, which is the
+   * node's local space — CSS transforms do not affect them — so the point needs
+   * no conversion. Left to itself the textarea would place the caret using its
+   * own single-font layout, which for rich text is a layout nobody is looking
+   * at.
+   */
+  const pointerIndex = useCallback(
+    (e: React.PointerEvent<HTMLTextAreaElement>): number | null => {
+      if (!rich || node?.type !== 'text') return null
+      return indexAtPoint(node, e.nativeEvent.offsetX, e.nativeEvent.offsetY)
+    },
+    [rich, node],
+  )
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLTextAreaElement>) => {
+      const index = pointerIndex(e)
+      if (index === null) return
+      e.preventDefault()
+      const el = ref.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(index, index)
+      reportSelection()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      anchorRef.current = index
+    },
+    [pointerIndex, reportSelection],
+  )
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLTextAreaElement>) => {
+      if (anchorRef.current === null) return
+      const index = pointerIndex(e)
+      if (index === null) return
+      const el = ref.current
+      if (!el) return
+      const anchor = anchorRef.current
+      el.setSelectionRange(Math.min(anchor, index), Math.max(anchor, index))
+      reportSelection()
+    },
+    [pointerIndex, reportSelection],
+  )
+
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLTextAreaElement>) => {
+    if (anchorRef.current === null) return
+    anchorRef.current = null
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+  }, [])
+
+  /** Double-click selects the word under the pointer, as a textarea would. */
+  const onDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLTextAreaElement>) => {
+      if (!rich || node?.type !== 'text') return
+      const el = ref.current
+      if (!el) return
+      e.preventDefault()
+      const index = indexAtPoint(node, e.nativeEvent.offsetX, e.nativeEvent.offsetY)
+      const text = node.text
+      let start = index
+      let end = index
+      while (start > 0 && !/\s/.test(text[start - 1]!)) start--
+      while (end < text.length && !/\s/.test(text[end]!)) end++
+      el.setSelectionRange(start, end)
+      reportSelection()
+    },
+    [rich, node, reportSelection],
+  )
+
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       // Keystrokes must not reach the global shortcut layer while typing, or
@@ -120,11 +208,6 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
   useEffect(() => {
     if (node?.type !== 'text') endTextEditing()
   }, [node])
-
-  const reportSelection = useCallback(() => {
-    const el = ref.current
-    if (el) setTextSelection(nodeId, el.selectionStart, el.selectionEnd)
-  }, [nodeId])
 
   // `selectionchange` on the document rather than React's onSelect. React
   // synthesises onSelect from its own heuristics and does not fire it for a
@@ -161,6 +244,11 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
       }}
       onKeyDown={onKeyDown}
       onSelect={reportSelection}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onDoubleClick={onDoubleClick}
       onFocus={() => {
         setFocused(true)
         setEditor({ textEditingFocused: true })
@@ -197,7 +285,9 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
         // text hands editing straight back to it. `visibility: hidden` would
         // also make it unfocusable, which is a trap: it focuses itself on
         // mount, and could never become visible again.
-        color: focused ? fill : 'transparent',
+        // Rich text is drawn by the canvas, always. Uniform text is drawn here
+        // while this element has focus, and by the canvas once it does not.
+        color: rich || !focused ? 'transparent' : fill,
         background: 'transparent',
         border: 'none',
         outline: '1px solid var(--accent)',
@@ -221,7 +311,8 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
         // which is what lets None give it back unchanged.
         textTransform: CSS_TRANSFORM[ts.transform],
         textDecoration: decoration || undefined,
-        caretColor: focused ? fill : 'transparent',
+        // The rich caret is drawn by TextEditOverlay, from the real layout.
+        caretColor: rich || !focused ? 'transparent' : fill,
       }}
     />
   )

@@ -1762,3 +1762,21 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   white-space: nowrap;
 }
 .link-button:hover { color: var(--accent-hover); }
+
+/* Caret and selection for rich text, drawn from the layout because a textarea
+   cannot lay out mixed styling. Colours match what a browser draws for its own
+   selection, so the two paths look the same. */
+.text-selection-rect {
+  fill: var(--accent);
+  opacity: 0.28;
+}
+.text-caret {
+  fill: var(--text);
+  animation: text-caret-blink 1.06s steps(1) infinite;
+}
+@keyframes text-caret-blink {
+  50% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .text-caret { animation: none; }
+}

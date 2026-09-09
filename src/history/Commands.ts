@@ -652,7 +652,35 @@ function eachStyled(
   return touched
 }
 
+/**
+ * The characters a formatting command should act on, or null for "the whole
+ * object".
+ *
+ * A range only counts when it belongs to the one text node that is selected:
+ * a leftover selection from a text object that is no longer the subject would
+ * otherwise redirect the inspector at something the user is not looking at.
+ */
+export function textFormattingRange(): { nodeId: NodeId; start: number; end: number } | null {
+  const state = editorStore.getState()
+  const range = state.textSelection
+  if (!range || range.end <= range.start) return null
+  if (state.selection.length !== 1 || state.selection[0] !== range.nodeId) return null
+  const node = getDoc().nodes[range.nodeId]
+  if (node?.type !== 'text' || range.end > node.text.length) return null
+  return range
+}
+
 export function setFill(paint: Paint, coalesceKey?: string): boolean {
+  // Colouring a few selected characters rather than the object they are in.
+  // Only solid paint: a gradient would need a paint server of its own per run,
+  // which no design tool offers and the renderer does not emit — so a gradient
+  // keeps meaning "the whole text object", which is the only thing that can
+  // actually show one.
+  const range = paint.type === 'solid' ? textFormattingRange() : null
+  if (range) {
+    return setTextRunStyle(range.nodeId, range.start, range.end, { fill: paint }, coalesceKey)
+  }
+
   const ids = editableSelection()
   if (ids.length === 0) return false
   return transaction(

@@ -669,7 +669,20 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
     y: number
   } | null>(null)
 
-  const fill = common(nodes, (n) => paintKey(n.style.fill))
+  // With characters selected inside a text object, the Fill swatch is about
+  // those characters — setFill routes there too, so the two must agree.
+  const range = useEditorStore((s) => s.textSelection)
+  const textNode = nodes.length === 1 && nodes[0]!.type === 'text' ? nodes[0]! : null
+  const textRange =
+    textNode && range && range.nodeId === textNode.id && range.end > range.start &&
+    range.end <= textNode.text.length
+      ? range
+      : null
+  const rangeFill = textRange && textNode?.type === 'text'
+    ? common(runsIn(textNode, textRange.start, textRange.end), (r) => paintKey(r.fill ?? textNode.style.fill))
+    : null
+
+  const fill = textRange ? rangeFill : common(nodes, (n) => paintKey(n.style.fill))
   const strokePaint = common(nodes, (n) => paintKey(n.style.stroke.paint))
   const opacity = common(nodes, (n) => Math.round(n.style.opacity * 100))
   const strokeWidth = common(nodes, (n) => n.style.stroke.width)
@@ -682,12 +695,16 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
   const first = nodes[0]!
   const shadow = first.style.shadow
   const blur = first.style.blur
+  const rangeFillPaint =
+    textRange && textNode?.type === 'text'
+      ? (runsIn(textNode, textRange.start, textRange.end)[0]?.fill ?? textNode.style.fill)
+      : null
   const currentPaint: Paint =
     popover?.target === 'stroke'
       ? first.style.stroke.paint
       : popover?.target === 'shadow'
         ? { type: 'solid', color: shadow?.color ?? DEFAULT_SHADOW.color }
-        : first.style.fill
+        : (rangeFillPaint ?? first.style.fill)
 
   // The on-canvas gradient handles are part of the picker, as Adobe lists them:
   // they appear when it opens and go when it closes, and this is also what tells
