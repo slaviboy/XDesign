@@ -55,6 +55,7 @@ import {
   setCornerRadiusAt,
 } from '../history/Commands'
 import { setRepeatGridParams } from '../history/RepeatGridCommands'
+import { canImageTrace, openImageTrace } from '../history/TraceCommands'
 import { importTextIntoSelection } from '../app/textImport'
 import {
   artboardOf, geometryBounds, localBox, localGeometryBounds, nodeLocalMatrix, worldMatrix,
@@ -478,6 +479,7 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
       </Section>
 
       {styled.length > 0 && <AppearanceSection nodes={styled} />}
+      <ImageSection nodes={nodes} />
       <ArtboardSection nodes={nodes} />
       <RepeatGridSection nodes={nodes} />
       <ShapeSection nodes={nodes} />
@@ -1203,6 +1205,31 @@ const CORNER_LABELS: Record<(typeof CORNER_ORDER)[number], string> = {
  * That is exactly how Adobe keeps the grid "within the bounds of artboard" —
  * there is no width to author that could fail to fit.
  */
+/**
+ * What can be done to a bitmap.
+ *
+ * One entry for now, and it is the one worth a button: Image Trace is buried
+ * two menus deep in Illustrator and nobody finds it there either. A selected
+ * image is exactly the moment to offer it.
+ */
+function ImageSection({ nodes }: { nodes: DesignNode[] }) {
+  const images = nodes.filter((n) => n.type === 'image')
+  if (images.length !== 1 || nodes.length !== 1) return null
+  return (
+    <Section title={t('section.image')}>
+      <button
+        type="button"
+        className="button"
+        style={{ width: '100%' }}
+        disabled={!canImageTrace()}
+        onClick={() => openImageTrace(images[0]!.id)}
+      >
+        {t('menu.imageTrace')}
+      </button>
+    </Section>
+  )
+}
+
 function ArtboardSection({ nodes }: { nodes: DesignNode[] }) {
   const [picking, setPicking] = useState<{ x: number; y: number } | null>(null)
   const boards = nodes.filter((n): n is ArtboardNode => n.type === 'artboard')

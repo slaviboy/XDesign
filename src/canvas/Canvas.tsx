@@ -42,6 +42,7 @@ import {
 } from 'react'
 import { DocumentLayer } from './NodeRenderer'
 import { SelectionOverlay } from './SelectionOverlay'
+import { TracePreviewLayer } from './TracePreview'
 import { GridOverlay } from './GridOverlay'
 import { ImportIcon } from '../ui/icons'
 import { t } from '../i18n'
@@ -368,6 +369,9 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
         >
           <GridOverlay />
           <DocumentLayer />
+          {/* The Image Trace preview sits directly on the artwork it replaces,
+              above the document and below the guides. */}
+          <TracePreviewLayer />
           {/* Above the artwork: a guide is chrome and has to stay visible. */}
           <ArtboardGuides />
         </g>

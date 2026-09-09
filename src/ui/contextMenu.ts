@@ -30,6 +30,7 @@ import {
   ungroupSelection,
 } from '../history/Commands'
 import { runBooleanOperation } from '../history/BooleanCommands'
+import { canImageTrace, openImageTrace } from '../history/TraceCommands'
 import { copySelection, cutSelection, duplicateInPlace } from '../state/Clipboard'
 // Paste is never disabled: what another application has copied cannot be probed
 // synchronously, and a greyed-out Paste right after copying an image in Finder
@@ -197,6 +198,12 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
       disabled: !canOutlineStrokeSelection(),
       onSelect: () => outlineStrokeSelection(),
     },
+    // Only ever offered on an image, so it is hidden rather than greyed out
+    // for everything else — a permanently disabled entry on every shape is
+    // noise in a menu this long.
+    ...(canImageTrace()
+      ? [{ label: t('menu.imageTrace'), onSelect: () => openImageTrace() }]
+      : []),
     ...(guideBoards.length ? [guidesSubmenu(doc, guideBoards)] : []),
     ...unblockItems(doc, at, selection),
     { kind: 'separator' },

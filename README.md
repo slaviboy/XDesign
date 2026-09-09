@@ -213,6 +213,17 @@ export the work was built against is checked by rasterizing it alongside the app
 of it and comparing pixels, because "the right nodes in the right tree" can all be true while
 the artwork still looks wrong.
 
+**Image Trace** — turn a photograph, a scan or a flat logo into editable paths, with
+Illustrator's panel and Illustrator's controls: eleven presets, five preview modes, colour,
+greyscale or black-and-white, a palette size or a threshold, and an Advanced section holding
+Paths, Corners, Noise, abutting versus overlapping regions, fills, centreline strokes,
+snapping curves to lines and ignoring white. Paths, anchors and colours are counted before
+you commit, because a trace with twelve thousand anchors is not a trace anyone can edit. The
+preview is live: move a slider and the artwork on the canvas re-traces under it, and the View
+control puts the result, its outlines, or the original picture on screen so you can see what
+the settings actually did. Pressing Trace replaces the image with a group of ordinary paths —
+same place, same size, same position in the stack — in one undo step.
+
 **Clipboard** — copy an image or some text anywhere on the machine and paste it straight in,
 by `⌘V`, right-click ▸ Paste, or the app menu. It lands in the artboard you are working in:
 the one selected, or the one holding the selection. Text becomes a text object sized to the
@@ -1108,6 +1119,52 @@ a change to it is a change to every repeat — and it keeps a 10×10 grid the sa
 saved file as a single cell. The trade-off is that cells cannot differ; **Expand Grid**
 materialises them into independent objects when they need to.
 
+### Tracing is potrace's algorithm, not an approximation of it
+
+The stages are the ones Peter Selinger describes: follow the boundary between filled and
+empty pixels, find the fewest straight segments that stay within half a pixel of every point
+on it, adjust each vertex onto the least-squares line through the pixels it came from, then
+decide per vertex whether the turn is a corner or a curve and fit cubics to the rest. The
+panel's sliders are those parameters rather than post-processing: Corners is potrace's
+`alphamax`, Paths is its curve-optimisation tolerance, Noise is `turdsize`.
+
+Doing it properly is what makes the output usable. A 60-pixel disc traces to **five anchor
+points**, and the curve through them is never more than **0.54 px** from the true circle —
+which is the floor, because the pixel boundary the tracer is given is itself half a pixel
+away from the circle that drew it. A tracer that fitted curves to the boundary directly, or
+that smoothed a polygon afterwards, would need dozens of anchors for the same accuracy, and
+every one of them is a point somebody has to drag later.
+
+Holes need no special case. The boundary walk removes each region it has traced by flipping
+the pixels inside it, so a filled ring becomes an island the very next scan finds — nesting
+to any depth falls out of repeating one rule, with no containment tests and no tree to build.
+The hole's point list is reversed where its sign is known, so an outer path and its holes
+handed to any renderer come out right under the nonzero rule.
+
+### A trace is a conversation, so it runs in a worker and the latest question wins
+
+Tracing a photograph is a few hundred milliseconds of arithmetic. On the main thread that is
+a freeze on every slider movement, so it runs in a Worker — but a drag produces dozens of
+positions a second and a worker cannot look at its own queue while it is busy. The scheduler
+keeps at most one trace running and at most one queued, and a new request replaces whatever
+was waiting: the result you see is always for the settings you last asked for, never a
+flicker back through the ones you dragged past. Requests that were superseded while they ran
+are computed and then dropped, which is cheaper than the alternative of not starting them.
+
+The decoded pixels are transferred rather than copied, and an image larger than two megapixels
+is reduced once on decode rather than on every trace — a 24-megapixel photograph is a 96 MB
+buffer, and the trace it produces is indistinguishable from the reduced image's.
+
+### The preview hides the picture rather than covering it
+
+Showing a tracing result over its source looks like a job for a layer drawn on top. It is
+not: with Ignore White on, a trace is transparent everywhere the picture was white, and
+anything painted over the image would show it through the gaps — the one setting whose whole
+purpose is to remove the background would appear to do nothing. So the image node is told not
+to render at all while a view that replaces it is showing, and the traced paths are drawn in
+the viewport's own space over the hole where it was. Turning Preview off puts the picture
+back untouched, which is what the checkbox promises.
+
 ### `.xdesign` is a zip
 
 A ZIP holding `document.json` plus the raw bytes of every image under `assets/`. Base64
@@ -1150,6 +1207,7 @@ src/
   svg/         sanitizer, ID namespacer, importer, exporter
   text/        font registry, layout, spell check, font embedding
   images/      file import
+  trace/       Image Trace: quantize, decompose, polygon, smooth — DOM-free
   export/      export pipeline, rasterizer
   persistence/ .xdesign format, IndexedDB, file system, autosave
   ui/          top bar, toolbar, inspector, layers, dialogs
@@ -1164,8 +1222,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 309 unit tests (Vitest)
-npm run test:e2e   # 261 end-to-end tests (Playwright, real Chromium)
+npm test           # 589 unit tests (Vitest)
+npm run test:e2e   # 316 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

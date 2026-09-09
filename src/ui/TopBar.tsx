@@ -42,6 +42,7 @@ import {
 import { copySelection, cutSelection, duplicateInPlace } from '../state/Clipboard'
 import { pasteFromSystem } from '../state/SystemClipboard'
 import { stepZoom, zoomTo, zoomToFit, zoomToSelection } from '../shortcuts/KeyboardManager'
+import { canImageTrace, openImageTrace } from '../history/TraceCommands'
 import { openDialog, setEditor, type WorkspaceTab } from '../state/EditorStore'
 import { useDocumentStore, useEditorStore } from '../state/hooks'
 import { artboardIds } from '../document/SceneGraph'
@@ -172,6 +173,10 @@ export const TopBar = memo(function TopBar() {
           { label: t('menu.zoomToFit'), shortcut: `${MOD}0`, onSelect: zoomToFit },
           { label: t('menu.zoomTo100'), shortcut: `${MOD}1`, onSelect: () => zoomTo(1) },
           { label: t('menu.zoomToSelection'), shortcut: `${MOD}2`, disabled: !hasSelection, onSelect: zoomToSelection },
+          { kind: 'separator' },
+          // Adobe keeps Image Trace on the Object menu; this build has no
+          // Object menu, and View is where the panel that opens here lives.
+          { label: t('menu.imageTrace'), disabled: !canImageTrace(), onSelect: () => openImageTrace() },
           { kind: 'separator' },
           { label: t('menu.showGrid'), shortcut: `${MOD}'`, checked: gridVisible, onSelect: () => updateSettings({ gridVisible: !gridVisible }) },
           { label: t('menu.showGuides'), shortcut: `${MOD};`, checked: guidesVisible, onSelect: () => updateSettings({ guidesVisible: !guidesVisible }) },

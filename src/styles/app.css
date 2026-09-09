@@ -1430,3 +1430,150 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
 
 /* Fixed Size text that does not fit: Adobe's red bottom handle. */
 .resize-handle.overflowing { fill: #e5484d; stroke: #fff; }
+
+/* ------------------------------------------------------------ image trace */
+
+/* The panel takes the whole inspector column, so it owns the scroll and ends
+   in a footer that stays put — Preview and Trace must be reachable without
+   scrolling past a long Advanced section. */
+.image-trace-panel {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.trace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 6px 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  background: var(--bg-panel);
+  z-index: 1;
+}
+.trace-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.trace-subtitle {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.trace-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* A trace is fast enough that a progress bar would be a lie and slow enough
+   that silence reads as nothing happening. */
+.trace-spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: trace-spin 0.7s linear infinite;
+}
+@keyframes trace-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .trace-spinner { animation-duration: 2.4s; }
+}
+
+/* Label and control on one line, the label wide enough for "Stroke Width"
+   in every language the app ships. */
+.trace-row {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.trace-row:last-child { margin-bottom: 0; }
+.trace-label {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Same column as .trace-row, so sliders and dropdowns line up down the panel. */
+.slider-row.trace-slider { grid-template-columns: 74px 1fr 46px; }
+
+.trace-create-row {
+  display: grid;
+  grid-template-columns: 74px 1fr 1fr;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+.trace-create-row .checkbox-row { margin: 0; }
+
+/* Paths, anchors and colours: the three numbers that say whether a trace is
+   worth committing. */
+.trace-info {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  text-align: center;
+}
+/* Dimmed while the numbers describe settings the user has already changed. */
+.trace-info.stale { opacity: 0.45; }
+.trace-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  background: var(--bg-panel-alt);
+}
+.trace-readout-value {
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.trace-readout-label {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+.trace-error {
+  margin: 8px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--error);
+}
+
+.trace-footer {
+  margin-top: auto;
+  padding: 10px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+  position: sticky;
+  bottom: 0;
+}
+.trace-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.trace-buttons .button { flex: 1; }
+
+/* The preview on canvas. Outlines are drawn as a hairline in the selection
+   colour so they read as chrome over the artwork rather than as paint. */
+.trace-outline {
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0.9;
+}

@@ -60,6 +60,8 @@ import {
   setViewport,
   zoomAt,
 } from '../state/EditorStore'
+import { traceStore } from '../state/TraceStore'
+import { cancelImageTrace } from '../history/TraceCommands'
 import { centerViewport, fitViewport, nextZoomStep } from '../canvas/Viewport'
 import { artboardIds, boundsOfNodes, documentBounds } from '../document/SceneGraph'
 import { getTool, TOOL_SHORTCUTS } from '../tools/ToolRegistry'
@@ -276,7 +278,11 @@ export function installKeyboard(ctx: ToolContext, handlers: KeyboardHandlers): (
       }
       case 'Escape':
         e.preventDefault()
-        if (editorStore.getState().editingContext) setEditor({ editingContext: null })
+        // Image Trace is modeless but takes over the inspector, so Escape has
+        // to reach it before it reaches the selection — otherwise the panel
+        // would be the one thing on screen that Escape cannot close.
+        if (traceStore.getState().session) cancelImageTrace()
+        else if (editorStore.getState().editingContext) setEditor({ editingContext: null })
         else clearSelection()
         return
       case 'ArrowLeft':

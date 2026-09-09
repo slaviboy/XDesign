@@ -56,6 +56,7 @@ src/
   svg/         sanitizer, ID namespacer, importer, exporter
   text/        font registry, layout, spell check, font embedding
   images/      file import
+  trace/       Image Trace: quantize, decompose, polygon, smooth — DOM-free
   export/      export pipeline, rasterizer
   persistence/ .xdesign format, IndexedDB, file system, autosave
   ui/          top bar, toolbar, inspector, layers, dialogs

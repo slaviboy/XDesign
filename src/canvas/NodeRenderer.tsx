@@ -42,6 +42,7 @@ import {
 } from '../geometry/ShapeGeometry'
 import { localMatrix, maskOutlines } from '../document/SceneGraph'
 import { useDocumentStore, useEditorStore, useLiveTransformTick, useNode } from '../state/hooks'
+import { useTraceHidesSource } from './TracePreview'
 import { liveTransform } from './LiveTransform'
 import { gridStepForZoom } from './gridMath'
 import { clipKey, fxKey, geomKey } from './liveKeys'
@@ -523,8 +524,14 @@ function ImageBody({
   geomRef: (el: SVGElement | null) => (() => void) | undefined
 }): ReactNode {
   const dataUrl = useDocumentStore((s) => s.doc.assets[node.assetId]?.dataUrl)
+  // While Image Trace previews a result in place of the picture, the picture
+  // has to go — a trace with Ignore White on is transparent where the source
+  // was white, and anything drawn on top would show it through.
+  const traced = useTraceHidesSource(node.id)
   const { width, height } = node.transform
   const clipId = `img-clip-${node.id}`
+
+  if (traced) return null
 
   if (!dataUrl) {
     // The asset is missing (a corrupt file, or a node pasted from a document

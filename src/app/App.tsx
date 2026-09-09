@@ -29,6 +29,7 @@ import { Canvas } from '../canvas/Canvas'
 import { Toolbar } from '../ui/Toolbar'
 import { TopBar } from '../ui/TopBar'
 import { PropertyInspector } from '../ui/PropertyInspector'
+import { ImageTracePanel } from '../ui/ImageTracePanel'
 import { InspectorToolbar } from '../ui/InspectorToolbar'
 import { LayersPanel } from '../ui/LayersPanel'
 import { ensureDictionaries } from '../text/spellcheck'
@@ -43,6 +44,7 @@ import { buildContextMenu } from '../ui/contextMenu'
 import { installKeyboard } from '../shortcuts/KeyboardManager'
 import { importFiles } from '../images/ImageImporter'
 import { installSystemClipboard } from '../state/SystemClipboard'
+import { installTraceReconciler } from '../history/TraceCommands'
 import {
   adoptRecoveredDocument, importFilesFlow, openDocumentFlow, saveDocumentFlow,
 } from './fileOperations'
@@ -55,6 +57,8 @@ import {
 } from '../state/EditorStore'
 import { getTool } from '../tools/ToolRegistry'
 import { useEditorStore } from '../state/hooks'
+import { traceStore } from '../state/TraceStore'
+import { useStore } from 'zustand'
 import type { ToolContext } from '../tools/types'
 import type { Vec2 } from '../geometry/Matrix'
 
@@ -62,6 +66,7 @@ export function App() {
   const dialog = useEditorStore((s) => s.dialog)
   const inspectorWidth = useEditorStore((s) => s.inspectorWidth)
   const layersHeight = useEditorStore((s) => s.layersHeight)
+  const tracing = useStore(traceStore, (s) => s.session !== null)
   const menu = useMenuState()
   const [recovery, setRecovery] = useState<RecoveryOffer | null>(null)
 
@@ -112,6 +117,9 @@ export function App() {
 
   // ---- system clipboard ----------------------------------------------------
   useEffect(() => installSystemClipboard(), [])
+
+  // ---- close Image Trace if its image leaves the document ------------------
+  useEffect(() => installTraceReconciler(), [])
 
   // ---- stop the browser navigating away on a stray file drop ---------------
   useEffect(() => {
@@ -181,12 +189,21 @@ export function App() {
         <Canvas onFilesDropped={onFilesDropped} onContextMenu={onContextMenu} />
         <aside className="inspector" style={{ width: inspectorWidth }}>
           <InspectorResizer />
-          <InspectorToolbar />
-          <PropertyInspector />
-          <LayersResizer />
-          <div style={{ height: layersHeight, display: 'flex', flexDirection: 'column' }}>
-            <LayersPanel />
-          </div>
+          {/* Image Trace takes the whole column while it is open: it is a
+              conversation with one object, and the properties of that object
+              are not what you are adjusting. */}
+          {tracing ? (
+            <ImageTracePanel />
+          ) : (
+            <>
+              <InspectorToolbar />
+              <PropertyInspector />
+              <LayersResizer />
+              <div style={{ height: layersHeight, display: 'flex', flexDirection: 'column' }}>
+                <LayersPanel />
+              </div>
+            </>
+          )}
         </aside>
       </div>
 
