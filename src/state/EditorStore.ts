@@ -245,6 +245,17 @@ export interface EditorState {
   /** Bumped by tools to force an overlay repaint without touching the document. */
   overlayTick: number
 
+  /**
+   * A cursor the active tool wants for where the pointer currently is, or null
+   * for the tool's own.
+   *
+   * A tool's cursor is a constant, which is right until what a press will do
+   * depends on what is under it: with the pen, a press on an existing point
+   * moves that point and a press anywhere else adds one, and a crosshair over
+   * both says neither.
+   */
+  hoverCursor: string | null
+
   snapEnabled: boolean
   dialog: DialogId
   notifications: Notification[]
@@ -290,6 +301,7 @@ export const editorStore = createStore<EditorState>()(
     cornerRadiusMode: null,
 
     overlayTick: 0,
+    hoverCursor: null,
 
     snapEnabled: true,
     dialog: null,

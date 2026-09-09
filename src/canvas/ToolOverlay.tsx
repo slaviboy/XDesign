@@ -32,7 +32,7 @@ import {
   rectPath,
 } from '../geometry/ShapeGeometry'
 import { transformPath } from '../geometry/PathUtils'
-import { corner, subpathToPath } from '../geometry/PathPoints'
+import { subpathToPath } from '../geometry/PathPoints'
 import {
   POLYGON_DEFAULT_SIDES, POLYGON_DEFAULT_STAR_RATIO,
 } from '../document/NodeFactory'
@@ -82,21 +82,11 @@ export const ToolOverlay = memo(function ToolOverlay() {
       {pen && (
         <g className="pen-preview">
           <path d={screenPath(subpathToPath(pen.sub), viewport)} className="pen-path" />
-          {pen.hover && pen.sub.points.length > 0 && (
-            // The pending segment as the CURVE it will actually be, not a
-            // straight line to the pointer: subpathToPath already emits C when
-            // the last anchor has an outgoing handle and L when it does not, so
-            // what you see is what gets committed.
-            <path
-              className="pen-rubber"
-              d={screenPath(
-                subpathToPath({
-                  points: [pen.sub.points[pen.sub.points.length - 1]!, corner(pen.hover.x, pen.hover.y)],
-                  closed: false,
-                }),
-                viewport,
-              )}
-            />
+          {pen.rubber && (
+            // What the path would BE if the pointer clicked here, not a straight
+            // line to it — in curvature mode that is the whole curve, because
+            // placing an anchor re-fairs the one before it.
+            <path className="pen-rubber" d={screenPath(subpathToPath(pen.rubber), viewport)} />
           )}
           {pen.sub.points.map((p, i) => {
             const s = docToScreen(viewport, p)

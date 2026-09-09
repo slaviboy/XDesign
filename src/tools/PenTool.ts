@@ -44,7 +44,9 @@ import {
   cornerPoint,
   moveHandle,
   reversePoints,
+  smoothPoint,
   subpathToPath,
+  subpathsToPath,
   type PenPoint,
   type PenSubpath,
 } from '../geometry/PathPoints'
@@ -63,6 +65,7 @@ import {
 import {
   beginPathEditing,
   clearInsertPreview,
+  pathEditGrabAt,
   editableOutline,
   endPathEditing,
   isPointEditable,
@@ -120,8 +123,30 @@ interface PenState {
   endArm: { id: NodeId; at: Vec2; press: CanvasPointerEvent } | null
   /** True once an armed press has moved far enough to be a point drag. */
   armDragging: boolean
-  /** Whether a resumed path has actually been changed yet. */
+  /** Whether the model differs from what is in the document. */
   dirty: boolean
+  /**
+   * The node's OTHER subpaths, in document space.
+   *
+   * The pen works on exactly one open subpath, and a node can hold more than
+   * one. They are carried along so that writing the node back does not throw
+   * the rest of it away.
+   */
+  otherSubs: PenSubpath[]
+  /** The first anchor of a fresh path, which no undo step can restore. */
+  origin: PenPoint | null
+  /** True while writing the document, so the reload does not fight the write. */
+  committing: boolean
+  /** Bumped per gesture, so consecutive gestures cannot coalesce into one step. */
+  step: number
+  /** What the gesture in progress will be called in the undo history. */
+  pendingLabel: string
+  /**
+   * Handles computed from the anchors instead of pulled by hand.
+   *
+   * Adobe's Curvature tool as a mode of the pen. See applyCurvature.
+   */
+  curvature: boolean
 }
 
 const pen: PenState = {
@@ -135,15 +160,64 @@ const pen: PenState = {
   endArm: null,
   armDragging: false,
   dirty: false,
+  otherSubs: [],
+  origin: null,
+  committing: false,
+  step: 0,
+  pendingLabel: 'Draw path',
+  curvature: false,
 }
 
 /** Screen-pixel radius for "clicked the first point to close". */
 const CLOSE_PX = 9
 /** Below this screen distance a handle drag is still a click. */
 const HANDLE_DEAD_PX = 2
+/**
+ * How far a curvature handle reaches, as a fraction of the span between the
+ * neighbouring anchors. 1/3 is the classic Catmull-Rom-to-Bezier figure and is
+ * what makes evenly spaced clicks trace a circle almost exactly.
+ */
+const CURVATURE_STRENGTH = 1 / 3
 
-export function getPenPreview(): { sub: PenSubpath; hover: Vec2 | null } | null {
-  return pen.building ? { sub: pen.building, hover: pen.hover } : null
+export function getPenPreview(): { sub: PenSubpath; rubber: PenSubpath | null } | null {
+  if (!pen.building) return null
+  // The pending segment is drawn as the path it would BECOME, which in
+  // curvature mode is not a segment at all: placing the next anchor re-fairs
+  // the one before it, so the preview has to be of the whole curve.
+  const rubber =
+    pen.hover && pen.building.points.length > 0
+      ? pen.curvature
+        ? withHover(pen.hover)
+        : {
+            closed: false,
+            points: [pen.building.points[pen.building.points.length - 1]!, corner(pen.hover.x, pen.hover.y)],
+          }
+      : null
+  return { sub: pen.building, rubber }
+}
+
+/** True while the pen computes handles from the anchors rather than by hand. */
+export function isPenCurvature(): boolean {
+  return pen.curvature
+}
+
+/**
+ * Switch between pulling handles by hand and computing them from the anchors.
+ *
+ * @returns the mode now in force.
+ */
+export function togglePenCurvature(): boolean {
+  pen.curvature = !pen.curvature
+  // The points already placed follow the mode, so the switch is visible on the
+  // path being drawn rather than only on whatever is placed after it.
+  if (pen.building && pen.curvature) {
+    applyCurvature(pen.building)
+    pen.dirty = true
+    pen.step++
+    commitBuilding('Curvature', pen.building.closed)
+  }
+  refreshOverlay()
+  return pen.curvature
 }
 
 function resetPen(): void {
@@ -157,6 +231,11 @@ function resetPen(): void {
   pen.endArm = null
   pen.armDragging = false
   pen.dirty = false
+  pen.otherSubs = []
+  pen.origin = null
+  pen.committing = false
+  // `curvature` deliberately survives: it is a mode the user chose, not state
+  // belonging to one path.
 }
 
 /**
@@ -244,6 +323,11 @@ function joinTargetAt(ctx: ToolContext, at: Vec2): { id: NodeId; points: PenPoin
   return null
 }
 
+/** Set the pointer's cursor, only when it actually changes. */
+function setHoverCursor(cursor: string | null): void {
+  if (editorStore.getState().hoverCursor !== cursor) setEditor({ hoverCursor: cursor })
+}
+
 /**
  * Hand the object over from point editing to drawing.
  *
@@ -252,6 +336,7 @@ function joinTargetAt(ctx: ToolContext, at: Vec2): { id: NodeId; points: PenPoin
  * around the very path the pen was extending.
  */
 function enterDrawing(): void {
+  setHoverCursor(null)
   if (editorStore.getState().nodeEditingId) {
     setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
     endPathEditing()
@@ -267,42 +352,34 @@ function lastAnchor(): PenPoint | null {
 }
 
 /**
- * Commit the in-progress path.
+ * Write the path being drawn into the document.
  *
- * Points are authored in document space; they are rebased into the node's local
- * space so the node's transform starts clean at identity rather than carrying an
- * arbitrary offset.
+ * Called after every gesture that changes it, so each anchor placed, each
+ * handle pulled and each point removed is its own undo step — Cmd+Z steps back
+ * through a path being drawn the way it steps back through anything else,
+ * rather than throwing away the whole path at once. The first call on a fresh
+ * path creates the node; every call after it rewrites the same one.
+ *
+ * Points are authored in DOCUMENT space and are mapped back through the node's
+ * own matrix, so a path being extended keeps its transform, its style and its
+ * id. A fresh path is rebased against its own bounds instead, so its transform
+ * starts clean rather than carrying an arbitrary offset.
  */
-function finishPath(closed: boolean): void {
+function commitBuilding(label: string, closed: boolean): void {
   const sub = pen.building
-  if (!sub || sub.points.length < 2) {
-    resetPen()
-    refreshOverlay()
-    return
-  }
-
+  if (!sub || sub.points.length < 2 || !pen.dirty) return
   sub.closed = closed
 
-  // Picked a path up and put it straight back down. Writing it back anyway
-  // would leave an undo step for a gesture that changed nothing — and on a line
-  // or a rectangle it is worse than nothing, since committing converts the
-  // shape to a path.
-  if (pen.resumeId && !pen.dirty && !closed && pen.mergeIds.length === 0) {
-    const id = pen.resumeId
-    resetPen()
-    setSelection([id])
-    refreshOverlay()
-    return
-  }
+  const doc = getDoc()
+  const nodeId = pen.resumeId && doc.nodes[pen.resumeId] ? pen.resumeId : null
 
-  // Resuming an existing node: map the points back through ITS matrix and write
-  // them in, so the path keeps its id, its style and its place in the tree.
-  if (pen.resumeId) {
-    const nodeId = pen.resumeId
-    const doc = getDoc()
-    if (doc.nodes[nodeId]) {
+  // Reentrancy guard: writing the node notifies the document subscriber, which
+  // would reload the very model being written from.
+  pen.committing = true
+  try {
+    if (nodeId) {
       const toLocal = invert(worldMatrix(doc, nodeId))
-      const localPoints = sub.points.map((p) => {
+      const toLocalPoint = (p: PenPoint): PenPoint => {
         const a = applyToPoint(toLocal, { x: p.x, y: p.y })
         const i = p.inX === null || p.inY === null ? null : applyToPoint(toLocal, { x: p.inX, y: p.inY })
         const o = p.outX === null || p.outY === null ? null : applyToPoint(toLocal, { x: p.outX, y: p.outY })
@@ -311,62 +388,180 @@ function finishPath(closed: boolean): void {
           inX: i?.x ?? null, inY: i?.y ?? null,
           outX: o?.x ?? null, outY: o?.y ?? null,
         }
-      })
-      const d = subpathToPath({ closed, points: localPoints })
+      }
+      // The pen's own subpath goes FIRST and the node's others follow, so
+      // reading the node back finds the pen's work at index 0. Writing only the
+      // pen's subpath, as this used to, threw the rest of the node away.
+      const subs: PenSubpath[] = [
+        { closed, points: sub.points.map(toLocalPoint) },
+        ...pen.otherSubs.map((other) => ({
+          closed: other.closed,
+          points: other.points.map(toLocalPoint),
+        })),
+      ]
+      const d = subpathsToPath(subs)
       const bounds = pathBounds(d)
       const merged = pen.mergeIds.filter((id) => id !== nodeId && doc.nodes[id])
-      resetPen()
-      transaction(merged.length ? 'Join paths' : 'Extend path', (draft) => {
-        const target = draft.nodes[nodeId]
-        if (!target) return false
-        if (target.type !== 'path' && !convertNodeToPath(target, d, closed)) return false
-        if (target.type !== 'path') return false
-        target.d = d
-        target.closed = closed
-        target.transform = {
-          ...target.transform,
-          width: Math.max(0.5, bounds.width || target.transform.width),
-          height: Math.max(0.5, bounds.height || target.transform.height),
-        }
-        // The joined-on paths go in the SAME transaction, so one undo puts both
-        // objects back rather than leaving a merged path and a ghost beside it.
-        if (merged.length) removeNodes(draft, merged)
-        return undefined
-      })
-      setSelection([nodeId])
-      refreshOverlay()
+      pen.mergeIds = []
+      transaction(
+        label,
+        (draft) => {
+          const target = draft.nodes[nodeId]
+          if (!target) return false
+          if (target.type !== 'path' && !convertNodeToPath(target, d, closed)) return false
+          if (target.type !== 'path') return false
+          target.d = d
+          target.closed = closed
+          target.transform = {
+            ...target.transform,
+            width: Math.max(0.5, bounds.width || target.transform.width),
+            height: Math.max(0.5, bounds.height || target.transform.height),
+          }
+          // The joined-on paths go in the SAME transaction, so one undo puts
+          // both objects back rather than leaving a merged path and a ghost.
+          if (merged.length) removeNodes(draft, merged)
+          return undefined
+        },
+        { coalesceKey: `pen:${nodeId}:${pen.step}` },
+      )
+      pen.dirty = false
       return
     }
+
+    const b = pathBounds(subpathToPath(sub))
+    const localSub: PenSubpath = {
+      closed: sub.closed,
+      points: sub.points.map((p) => ({
+        x: p.x - b.x,
+        y: p.y - b.y,
+        inX: p.inX === null ? null : p.inX - b.x,
+        inY: p.inY === null ? null : p.inY - b.y,
+        outX: p.outX === null ? null : p.outX - b.x,
+        outY: p.outY === null ? null : p.outY - b.y,
+      })),
+    }
+    const node = createPath(
+      subpathToPath(localSub),
+      { x: b.x, y: b.y, width: Math.max(1, b.width), height: Math.max(1, b.height) },
+      {
+        fill: closed ? { type: 'solid', color: { r: 217, g: 217, b: 217, a: 1 } } : { type: 'none' },
+        stroke: { ...DEFAULT_STROKE, paint: { type: 'solid', color: { r: 0, g: 0, b: 0, a: 1 } }, width: 1 },
+      },
+      closed,
+    )
+    // Not selected: a transform frame around a path still being drawn is not
+    // what the pen is doing, and finishPath selects it when the path is done.
+    pen.resumeId = insertNode(node, undefined, false)
+    pen.dirty = false
+  } finally {
+    pen.committing = false
+  }
+}
+
+/**
+ * Reload the path being drawn from the document.
+ *
+ * Undo and redo change the node under the pen while it is still drawing, and
+ * the pen's model has to follow or the next click writes the pre-undo geometry
+ * straight back. The node is a faithful image of the model — the pen wrote it —
+ * so reading it back is exact, and the pen's subpath is the one at index 0.
+ */
+export function syncPen(): void {
+  if (!pen.building || pen.committing) return
+  const id = pen.resumeId
+  if (!id) return
+
+  const doc = getDoc()
+  const outline = editableOutline(doc.nodes[id])
+  if (!outline) {
+    // Undone past the node's creation. The first anchor was never in the
+    // document, so it is restored from the pen rather than read back.
+    pen.resumeId = null
+    pen.otherSubs = []
+    pen.mergeIds = []
+    pen.dirty = true
+    pen.building = pen.origin ? { points: [{ ...pen.origin }], closed: false } : null
+    refreshOverlay()
+    return
   }
 
-  const worldD = subpathToPath(sub)
-  const b = pathBounds(worldD)
-
-  const localSub: PenSubpath = {
-    closed: sub.closed,
-    points: sub.points.map((p) => ({
-      x: p.x - b.x,
-      y: p.y - b.y,
-      inX: p.inX === null ? null : p.inX - b.x,
-      inY: p.inY === null ? null : p.inY - b.y,
-      outX: p.outX === null ? null : p.outX - b.x,
-      outY: p.outY === null ? null : p.outY - b.y,
-    })),
+  const world = worldMatrix(doc, id)
+  const toDoc = (p: PenPoint): PenPoint => {
+    const a = applyToPoint(world, { x: p.x, y: p.y })
+    const i = p.inX === null || p.inY === null ? null : applyToPoint(world, { x: p.inX, y: p.inY })
+    const o = p.outX === null || p.outY === null ? null : applyToPoint(world, { x: p.outX, y: p.outY })
+    return {
+      x: a.x, y: a.y,
+      inX: i?.x ?? null, inY: i?.y ?? null,
+      outX: o?.x ?? null, outY: o?.y ?? null,
+    }
   }
-
-  const node = createPath(
-    subpathToPath(localSub),
-    { x: b.x, y: b.y, width: Math.max(1, b.width), height: Math.max(1, b.height) },
-    {
-      fill: closed ? { type: 'solid', color: { r: 217, g: 217, b: 217, a: 1 } } : { type: 'none' },
-      stroke: { ...DEFAULT_STROKE, paint: { type: 'solid', color: { r: 0, g: 0, b: 0, a: 1 } }, width: 1 },
-    },
-    closed,
-  )
-
-  resetPen()
-  insertNode(node)
+  const subs = pathToSubpaths(outline)
+  const own = subs[0]
+  if (!own) return
+  pen.building = { closed: own.closed, points: own.points.map(toDoc) }
+  pen.otherSubs = subs.slice(1).map((other) => ({
+    closed: other.closed,
+    points: other.points.map(toDoc),
+  }))
+  pen.dirty = false
   refreshOverlay()
+}
+
+/**
+ * Commit the path and put the pen down.
+ *
+ * Everything drawn is already in the document by now; this writes whatever the
+ * last gesture left and hands the object back to the pointer tools.
+ */
+function finishPath(closed: boolean): void {
+  const sub = pen.building
+  if (!sub || sub.points.length < 2) {
+    const id = pen.resumeId
+    resetPen()
+    if (id && getDoc().nodes[id]) setSelection([id])
+    refreshOverlay()
+    return
+  }
+  pen.step++
+  commitBuilding(closed ? 'Close path' : 'Draw path', closed)
+  const id = pen.resumeId
+  resetPen()
+  if (id && getDoc().nodes[id]) setSelection([id])
+  refreshOverlay()
+}
+
+/**
+ * Curvature mode: the anchors alone describe the path, and the handles are
+ * computed from them.
+ *
+ * Adobe's Curvature tool, and the reason it exists — tracing a shape with the
+ * pen means judging a handle length and direction at every anchor, and getting
+ * one wrong bends the two segments either side of it. Here each anchor's
+ * handles are a fraction of the vector between its NEIGHBOURS, which is the
+ * Catmull-Rom construction: the curve passes through every point placed, and
+ * placing the next one re-fairs the one before it. So a shape is traced by
+ * clicking along it, and it stays smooth the whole way.
+ *
+ * The ends keep their corners. A handle there would have nothing on the far
+ * side to balance against, and would send the curve past the last point.
+ */
+function applyCurvature(sub: PenSubpath): void {
+  for (let i = 0; i < sub.points.length; i++) {
+    if (!sub.closed && (i === 0 || i === sub.points.length - 1)) cornerPoint(sub, i)
+    else smoothPoint(sub, i, CURVATURE_STRENGTH)
+  }
+}
+
+/** The path as it would be with one more anchor where the pointer is. */
+function withHover(hover: Vec2): PenSubpath | null {
+  if (!pen.building) return null
+  const sub: PenSubpath = {
+    closed: false,
+    points: [...pen.building.points.map((p) => ({ ...p })), corner(hover.x, hover.y)],
+  }
+  applyCurvature(sub)
+  return sub
 }
 
 export const penTool: Tool = {
@@ -415,8 +610,11 @@ export const penTool: Tool = {
       // The press missed everything: leave any open path alone rather than
       // drawing a second one with both overlays on screen.
       enterDrawing()
-      pen.building = { points: [corner(e.doc.x, e.doc.y)], closed: false }
-      pen.draggingHandle = true
+      pen.step++
+      pen.origin = corner(e.doc.x, e.doc.y)
+      pen.building = { points: [{ ...pen.origin }], closed: false }
+      pen.pendingLabel = 'Draw path'
+      pen.draggingHandle = !pen.curvature
       pen.dragStart = e.doc
       refreshOverlay()
       return
@@ -426,6 +624,7 @@ export const penTool: Tool = {
     const points = pen.building.points
     const first = points[0]!
     const last = points[points.length - 1]!
+    pen.step++
 
     // Alt on the LAST anchor retracts its outgoing handle, so the next segment
     // leaves as a straight line — XD's "draw curves followed by straight lines".
@@ -435,6 +634,7 @@ export const penTool: Tool = {
       pen.draggingHandle = false
       pen.dragStart = null
       pen.dirty = true
+      pen.pendingLabel = 'Retract handle'
       refreshOverlay()
       return
     }
@@ -443,7 +643,7 @@ export const penTool: Tool = {
     // between can shape the closing curve.
     if (points.length >= 2 && Math.hypot(e.doc.x - first.x, e.doc.y - first.y) * zoom <= CLOSE_PX) {
       pen.closing = true
-      pen.draggingHandle = true
+      pen.draggingHandle = !pen.curvature
       pen.dragStart = e.doc
       return
     }
@@ -454,20 +654,32 @@ export const penTool: Tool = {
     const join = joinTargetAt(ctx, e.doc)
     if (join) {
       points.push(...join.points)
-      if (pen.resumeId === null) pen.resumeId = join.id
-      else pen.mergeIds.push(join.id)
+      // Adopting the joined path as the target keeps ITS id and style when the
+      // pen had none of its own; otherwise it is absorbed and removed.
+      if (pen.resumeId === null) {
+        pen.resumeId = join.id
+        pen.otherSubs = []
+      } else {
+        pen.mergeIds.push(join.id)
+      }
       pen.draggingHandle = false
       pen.dragStart = null
       pen.dirty = true
+      pen.pendingLabel = 'Join paths'
+      if (pen.curvature) applyCurvature(pen.building)
       refreshOverlay()
       return
     }
 
     const at = e.shiftKey ? snapAngle(last, e.doc, 45) : e.doc
     points.push(corner(at.x, at.y))
-    pen.draggingHandle = true
+    // In curvature mode the anchors alone describe the path, so there are no
+    // handles to pull and a drag from here would only fight the fairing.
+    if (pen.curvature) applyCurvature(pen.building)
+    pen.draggingHandle = !pen.curvature
     pen.dragStart = at
     pen.dirty = true
+    pen.pendingLabel = 'Add point'
     refreshOverlay()
   },
 
@@ -514,8 +726,10 @@ export const penTool: Tool = {
         }
       }
     } else if (!pen.building && !pen.endArm) {
-      // Idle over a path being edited: show where a click would drop an anchor.
+      // Idle over a path being edited: show where a click would drop an anchor,
+      // and say which of the two things a press would do.
       updateInsertPreview(e, ctx)
+      setHoverCursor(pathEditGrabAt(e, ctx) ? 'move' : null)
     }
     refreshOverlay()
   },
@@ -540,8 +754,19 @@ export const penTool: Tool = {
     if (pen.closing) {
       pen.closing = false
       pen.dirty = true
+      // Closing joins the last point to the first, so in curvature mode the
+      // fairing has to be redone with the ring closed — otherwise the one
+      // anchor the curve comes back to is the one left as a corner.
+      if (pen.curvature && pen.building) {
+        pen.building.closed = true
+        applyCurvature(pen.building)
+      }
       finishPath(true)
+      return
     }
+    // One press, one undo step: the anchor and any handle pulled out of it in
+    // the same gesture go in together.
+    commitBuilding(pen.pendingLabel, false)
   },
 
   onDoubleClick(e: CanvasPointerEvent, ctx: ToolContext): void {
@@ -572,6 +797,10 @@ export const penTool: Tool = {
     if (e.key === 'Backspace' || e.key === 'Delete') {
       if (pen.building && pen.building.points.length > 1) {
         pen.building.points.pop()
+        if (pen.curvature) applyCurvature(pen.building)
+        pen.dirty = true
+        pen.step++
+        commitBuilding('Remove point', false)
         refreshOverlay()
         return true
       }
@@ -602,6 +831,7 @@ export const penTool: Tool = {
 
   onDeactivate(): void {
     clearInsertPreview()
+    setHoverCursor(null)
     // Leaving the tool mid-path commits what has been drawn rather than losing it.
     if (pen.building && pen.building.points.length >= 2) finishPath(false)
     else resetPen()

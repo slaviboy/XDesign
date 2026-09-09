@@ -364,3 +364,159 @@ test('Alt and Shift keep their point-editing meanings on an end', async ({ page 
   await expect(page.locator('.anchor-point.selected')).toHaveCount(2)
   await expect(page.locator('.pen-preview')).toHaveCount(0)
 })
+
+// ---------------------------------------------------------------------------
+// One anchor, one undo step
+// ---------------------------------------------------------------------------
+
+const UNDO = 'ControlOrMeta+z'
+const REDO = 'ControlOrMeta+Shift+z'
+
+test('every anchor placed is its own undo step, while the path is still being drawn', async ({ page }) => {
+  // The path used to be written once, on finish, so five clicks were one undo
+  // entry and a misplaced anchor could only be taken back by discarding the lot.
+  await click(page, 200, 200)
+  await click(page, 320, 200)
+  expect(await pathD(page)).toBe('M0 0 L200 0')
+  await click(page, 320, 320)
+  await click(page, 420, 320)
+  expect(await pathD(page)).toBe('M0 0 L200 0 L200 200 L366.6667 200')
+
+  await page.keyboard.press(UNDO)
+  await expect.poll(() => pathD(page)).toBe('M0 0 L200 0 L200 200')
+  await page.keyboard.press(UNDO)
+  await expect.poll(() => pathD(page)).toBe('M0 0 L200 0')
+  await page.keyboard.press(REDO)
+  await expect.poll(() => pathD(page)).toBe('M0 0 L200 0 L200 200')
+
+  // And the pen is still drawing the same path throughout.
+  await click(page, 420, 320)
+  await page.keyboard.press('Enter')
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+  expect(await pathD(page)).toBe('M0 0 L200 0 L200 200 L366.6667 200')
+})
+
+test('undoing past the first anchor leaves the pen holding it', async ({ page }) => {
+  await click(page, 200, 200)
+  await click(page, 320, 200)
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+
+  // The first anchor was never in the document — there is no path with one
+  // point — so it comes back from the pen rather than from the history.
+  await page.keyboard.press(UNDO)
+  await expect(nodesOfType(page, 'path')).toHaveCount(0)
+  await expect(page.locator('.pen-preview .anchor-point')).toHaveCount(1)
+
+  await click(page, 400, 300)
+  await page.keyboard.press('Enter')
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+  expect(await pathD(page)).toBe('M0 0 L333.3333 166.6667')
+})
+
+test('splitting a line leaves two lines, not two curves', async ({ page }) => {
+  await click(page, 200, 200)
+  await click(page, 320, 200)
+  await click(page, 320, 320)
+  await page.keyboard.press('Enter')
+  await selectTool(page, 'select')
+  await click(page, 320, 260)
+  await selectTool(page, 'pen')
+
+  await click(page, 320, 260)
+  expect(await pathD(page)).toBe('M0 0 L200 0 L200 100 L200 200')
+})
+
+test('the cursor says whether a press will move a point or add one', async ({ page }) => {
+  await click(page, 200, 200)
+  await click(page, 320, 200)
+  await click(page, 320, 320)
+  await page.keyboard.press('Enter')
+  await selectTool(page, 'select')
+  await click(page, 320, 260)
+  await selectTool(page, 'pen')
+
+  const cursor = () => page.locator(CANVAS).evaluate((el) => getComputedStyle(el).cursor)
+  const onSegment = await pt(page, 320, 290)
+  await page.mouse.move(onSegment.x, onSegment.y)
+  await expect.poll(cursor).toBe('crosshair')
+
+  const onPoint = await pt(page, 320, 200)
+  await page.mouse.move(onPoint.x, onPoint.y)
+  await expect.poll(cursor).toBe('move')
+
+  const away = await pt(page, 600, 500)
+  await page.mouse.move(away.x, away.y)
+  await expect.poll(cursor).toBe('crosshair')
+})
+
+// ---------------------------------------------------------------------------
+// Curvature mode
+// ---------------------------------------------------------------------------
+
+test('curvature mode fairs the curve through every point clicked', async ({ page }) => {
+  await page.keyboard.press('Shift+`')
+  await click(page, 200, 300)
+  await click(page, 300, 220)
+  await click(page, 400, 300)
+  await click(page, 500, 220)
+  await page.keyboard.press('Enter')
+
+  // Every interior anchor carries handles, so the path runs through the points
+  // as one curve rather than as a chain of straight segments.
+  const d = (await pathD(page))!
+  expect(d.match(/C/g)).toHaveLength(3)
+  expect(d).not.toContain('L')
+
+  // And the mode is a mode: turned off, clicks give corners again. Matched by
+  // value rather than by index — the two paths land in different containers, so
+  // document order is not the order they were drawn in.
+  await page.keyboard.press('Shift+`')
+  await selectTool(page, 'pen')
+  await click(page, 200, 500)
+  await click(page, 300, 560)
+  await click(page, 400, 500)
+  await page.keyboard.press('Enter')
+  await expect(nodesOfType(page, 'path')).toHaveCount(2)
+  const all = await nodesOfType(page, 'path').locator('path').evaluateAll((els) =>
+    els.map((el) => el.getAttribute('d')),
+  )
+  expect(all).toContain('M0 0 L166.6667 100 L333.3333 0')
+})
+
+test('the curvature preview shows the whole curve, not a line to the pointer', async ({ page }) => {
+  await page.keyboard.press('Shift+`')
+  await click(page, 200, 300)
+  await click(page, 300, 220)
+  const ahead = await pt(page, 400, 300)
+  await page.mouse.move(ahead.x, ahead.y)
+
+  // Placing the next anchor re-fairs the one before it, so a straight rubber
+  // band to the pointer would show a path that is not the one about to exist.
+  const rubber = page.locator('.pen-rubber')
+  await expect(rubber).toHaveCount(1)
+  expect((await rubber.getAttribute('d'))!).toContain('C')
+})
+
+test('a curvature ring is faired all the way round when it closes', async ({ page }) => {
+  await page.keyboard.press('Shift+`')
+  await click(page, 300, 200)
+  await click(page, 400, 300)
+  await click(page, 300, 400)
+  await click(page, 200, 300)
+  await click(page, 300, 200)
+
+  const d = (await pathD(page))!
+  expect(d).toMatch(/Z\s*$/)
+  // The point the ring comes back to is faired like every other one; while the
+  // path was open it was an end, and ends keep their corners.
+  expect(d).not.toContain('L')
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+})
+
+test('a drag in curvature mode places a point rather than pulling handles', async ({ page }) => {
+  await page.keyboard.press('Shift+`')
+  await dragOut(page, 200, 300, 260, 300)
+  await click(page, 400, 300)
+  await page.keyboard.press('Enter')
+  expect(await pathD(page)).toBe('M0 0 L333.3333 0')
+})

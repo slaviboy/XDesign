@@ -67,6 +67,7 @@ import {
 } from '../state/EditorStore'
 import { useDocumentStore, useEditorStore } from '../state/hooks'
 import { endPathEditing, syncPathEditing } from '../tools/PathEditing'
+import { syncPen } from '../tools/PenTool'
 import type { CanvasPointerEvent, ToolContext } from '../tools/types'
 import type { Vec2 } from '../geometry/Matrix'
 
@@ -124,6 +125,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
   const canvasSize = useEditorStore((s) => s.canvasSize)
   const toolId = useEditorStore((s) => s.tool)
   const editingTextId = useEditorStore((s) => s.editingTextId)
+  const hoverCursor = useEditorStore((s) => s.hoverCursor)
 
   // --- coordinate helpers ---------------------------------------------------
 
@@ -209,10 +211,13 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
 
   // The document can change without the editor store changing at all — undo and
   // redo do exactly that. Without this, undoing a shape-to-path conversion left
-  // the point model holding path data for a node that was a rectangle again.
+  // the point model holding path data for a node that was a rectangle again,
+  // and undoing an anchor mid-path left the pen ready to write the pre-undo
+  // geometry straight back on the next click.
   useEffect(() => {
     return documentStore.subscribe(() => {
       if (editorStore.getState().nodeEditingId) syncPathEditing()
+      syncPen()
     })
   }, [])
 
@@ -375,7 +380,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
     [onContextMenu, toCanvasPoint],
   )
 
-  const cursor = middlePanRef.current ? 'grabbing' : getTool(toolId).cursor
+  const cursor = middlePanRef.current ? 'grabbing' : (hoverCursor ?? getTool(toolId).cursor)
 
   return (
     <div

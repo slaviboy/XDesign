@@ -41,13 +41,12 @@ import {
   subpathsToPath,
   togglePointType,
   type PenSubpath,
-  isSmooth,
 } from '../geometry/PathPoints'
 import { ancestorIds, nodePathData, worldMatrix } from '../document/SceneGraph'
 import { convertNodeToPath } from '../document/DocumentModel'
 import { liveTransform } from '../canvas/LiveTransform'
 import { geomKey } from '../canvas/liveKeys'
-import { transaction, getDoc } from '../state/DocumentStore'
+import { breakHistoryCoalescing, transaction, getDoc } from '../state/DocumentStore'
 import { hasStyle } from '../document/types'
 import { editorStore, refreshOverlay, setEditor } from '../state/EditorStore'
 import type { PointRef } from '../state/EditorStore'
@@ -66,17 +65,6 @@ interface EditState {
   changed: boolean
   /** True while a LiveTransform override is open, so it is closed exactly once. */
   live: boolean
-  /**
-   * An anchor pressed but not yet dragged.
-   *
-   * Adobe's convention, and the one this exists for: double-clicking a corner
-   * rounds it, and clicking a rounded one straightens it again. Deciding on
-   * pointerUP rather than DOWN is what keeps that from firing every time a
-   * point is picked up to be moved — a press that turns into a drag is a move,
-   * and only a press that goes nowhere is a click.
-   */
-  clickCandidate: PointHandleRef | null
-  moved: boolean
 }
 
 const edit: EditState = {
@@ -87,8 +75,6 @@ const edit: EditState = {
   lastLocal: null,
   changed: false,
   live: false,
-  clickCandidate: null,
-  moved: false,
 }
 
 /**
@@ -352,8 +338,6 @@ export function pathEditPointerDown(
 
     edit.dragging = grab
     edit.lastLocal = local
-    edit.moved = false
-    edit.clickCandidate = grab.kind === 'anchor' ? grab : null
     beginLive()
     refreshOverlay()
     return true
@@ -404,8 +388,6 @@ export function pathEditPointerDown(
     // Dragged by its first point, whose delta every moving point follows.
     edit.dragging = { subpath: segment.subpath, index: segment.index, kind: 'anchor' }
     edit.lastLocal = local
-    edit.moved = false
-    edit.clickCandidate = null
     beginLive()
     refreshOverlay()
     return true
@@ -441,7 +423,6 @@ export function pathEditPointerMove(e: CanvasPointerEvent, _ctx: ToolContext): b
 
   const dx = local.x - edit.lastLocal.x
   const dy = local.y - edit.lastLocal.y
-  if (dx !== 0 || dy !== 0) edit.moved = true
 
   if (edit.dragging.kind === 'anchor') {
     // Everything selected moves by the same delta, so several points or
@@ -470,26 +451,6 @@ export function pathEditPointerMove(e: CanvasPointerEvent, _ctx: ToolContext): b
 export function pathEditPointerUp(): boolean {
   if (!edit.nodeId || !edit.dragging) return false
 
-  // A press on a rounded point that went nowhere straightens it, the other
-  // half of the double-click that rounded it. Only when it did not move: a
-  // point picked up and put back is still a move, and flattening it would be
-  // a surprise the user did not ask for.
-  const candidate = edit.clickCandidate
-  edit.clickCandidate = null
-  if (candidate && !edit.moved && !edit.changed) {
-    const sub = edit.subs[candidate.subpath]
-    const point = sub?.points[candidate.index]
-    if (sub && point && isSmooth(point)) {
-      togglePointType(sub, candidate.index)
-      edit.changed = true
-      commitPath('Convert point')
-      edit.dragging = null
-      edit.lastLocal = null
-      endLive(true)
-      return true
-    }
-  }
-
   // Commit FIRST, while `dragging` is still set. Any store write notifies the
   // Canvas subscriber, and syncPathEditing reloads edit.subs from the document
   // unless a drag is in progress — so clearing `dragging` before committing
@@ -497,6 +458,10 @@ export function pathEditPointerUp(): boolean {
   if (edit.changed) commitPath('Edit path')
   edit.dragging = null
   edit.lastLocal = null
+  // One gesture, one undo step. The coalesce key exists so that the insert and
+  // the drag that follows it in the SAME press merge; without this break the
+  // next drag merges into them too, and three separate moves come back in one.
+  breakHistoryCoalescing()
   // Released after the commit: end() drops the override without restoring, and
   // by now React has the same geometry from the document, so nothing flashes.
   endLive(true)
@@ -555,7 +520,12 @@ export function pathEditKeyDown(e: KeyboardEvent): boolean {
 }
 
 /**
- * Double-click an anchor to convert it corner <-> smooth.
+ * Double-click an anchor to convert it corner <-> smooth, in both directions.
+ *
+ * ONE gesture for the whole conversion. Straightening used to be a single
+ * click, which made the pair asymmetric — and worse, it fired on the way out of
+ * every press that happened to land on a rounded point and go nowhere, so
+ * selecting a point to look at it flattened the curve through it.
  *
  * XD's binding. The existing Alt-click does the same thing and is kept: this
  * only fires once point editing is already open, so it cannot collide with the
@@ -567,12 +537,7 @@ export function pathEditDoubleClick(e: CanvasPointerEvent, ctx: ToolContext): bo
   const grab = findGrab(toLocal(e.doc), tolLocal)
   if (!grab || grab.kind !== 'anchor') return false
   const sub = edit.subs[grab.subpath]
-  if (!sub) return false
-  const point = sub.points[grab.index]
-  // Rounds a corner. A rounded point is straightened by a plain click instead,
-  // so the pair reads as one gesture and its opposite rather than as one
-  // gesture that does different things depending on what it lands on.
-  if (!point || isSmooth(point)) return false
+  if (!sub?.points[grab.index]) return false
   togglePointType(sub, grab.index)
   edit.changed = true
   commitPath('Convert point')
@@ -604,6 +569,13 @@ export function pathEditOpenEndAt(e: CanvasPointerEvent, ctx: ToolContext): Poin
     }
   }
   return null
+}
+
+/** The anchor or handle under the pointer, if a press there would grab one. */
+export function pathEditGrabAt(e: CanvasPointerEvent, ctx: ToolContext): PointHandleRef | null {
+  if (!edit.nodeId) return null
+  const tolLocal = (GRAB_PX / ctx.viewport().zoom) * localScale()
+  return findGrab(toLocal(e.doc), tolLocal)
 }
 
 /**

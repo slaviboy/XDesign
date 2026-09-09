@@ -136,9 +136,9 @@ describe('path point editing', () => {
     expect(sub().points).toHaveLength(2)
   })
 
-  it('double-clicking a corner rounds it, and clicking it again straightens it', () => {
-    // The pair every vector editor has: one gesture and its opposite, rather
-    // than one gesture that does different things depending on what it lands on.
+  it('double-clicking a corner rounds it, and doing it again straightens it', () => {
+    // One gesture and its opposite, rather than one gesture that does different
+    // things depending on what it lands on.
     openPath('M0 0 L100 0 L100 100 Z')
     const sub = () => getEditingSubpaths()!.subs[0]!
     expect(isSmooth(sub().points[1]!)).toBe(false)
@@ -146,23 +146,23 @@ describe('path point editing', () => {
     expect(pathEditDoubleClick(ev(100, 0), ctx)).toBe(true)
     expect(isSmooth(sub().points[1]!)).toBe(true)
 
-    // A second double-click has nothing to do: it only ever rounds.
-    expect(pathEditDoubleClick(ev(100, 0), ctx)).toBe(false)
-    expect(isSmooth(sub().points[1]!)).toBe(true)
-
-    // A press that goes nowhere straightens it again.
-    pathEditPointerDown(ev(100, 0), ctx)
-    pathEditPointerUp()
+    expect(pathEditDoubleClick(ev(100, 0), ctx)).toBe(true)
     expect(isSmooth(sub().points[1]!)).toBe(false)
   })
 
-  it('does not straighten a point that was dragged', () => {
+  it('a press that goes nowhere leaves the point alone', () => {
+    // Straightening used to happen on the way out of any press that landed on
+    // a rounded point and went nowhere, so selecting a point to look at it
+    // flattened the curve running through it.
     openPath('M0 0 L100 0 L100 100 Z')
     const sub = () => getEditingSubpaths()!.subs[0]!
     pathEditDoubleClick(ev(100, 0), ctx)
     expect(isSmooth(sub().points[1]!)).toBe(true)
 
-    // Picked up and moved: that is a move, not a click.
+    pathEditPointerDown(ev(100, 0), ctx)
+    pathEditPointerUp()
+    expect(isSmooth(sub().points[1]!)).toBe(true)
+
     pathEditPointerDown(ev(100, 0), ctx)
     pathEditPointerMove(ev(120, 10, { buttons: 1 }), ctx)
     pathEditPointerUp()

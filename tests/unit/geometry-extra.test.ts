@@ -285,6 +285,27 @@ describe('path points', () => {
     expect(after.height).toBeCloseTo(before.height, 6)
   })
 
+  it('splits a straight segment into two straight segments', () => {
+    // De Casteljau is exact here too — its control points land on the line — but
+    // it emits two curves, and a line wearing handles bends the moment either
+    // neighbour is dragged. Cutting a line in half leaves two lines.
+    const subs = pathToSubpaths('M0 0 L100 0 L100 100')
+    expect(insertPointAt(subs[0]!, 0, 0.5)).toBe(1)
+    const points = subs[0]!.points
+    expect(points).toHaveLength(4)
+    expect(points[1]).toMatchObject({ x: 50, y: 0, inX: null, inY: null, outX: null, outY: null })
+    // Neither neighbour picked up a handle either.
+    expect(points[0]!.outX).toBeNull()
+    expect(points[2]!.inX).toBeNull()
+    expect(subpathsToPath(subs)).not.toContain('C')
+  })
+
+  it('still splits a curve as a curve', () => {
+    const subs = pathToSubpaths('M0 0 C 10 40 30 40 40 0 L60 0')
+    insertPointAt(subs[0]!, 0, 0.5)
+    expect(subpathsToPath(subs)).toContain('C')
+  })
+
   it('toggles a point between corner and smooth', () => {
     const subs = pathToSubpaths('M0 0 L10 10 L20 0')
     expect(isSmooth(subs[0]!.points[1]!)).toBe(false)

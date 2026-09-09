@@ -42,7 +42,8 @@ import {
 import { copySelection, cutSelection, duplicateInPlace } from '../state/Clipboard'
 import { armPasteFallback } from '../state/SystemClipboard'
 import { redo, undo, getDoc } from '../state/DocumentStore'
-import { clearSelection, editorStore, setEditor, setTool } from '../state/EditorStore'
+import { clearSelection, editorStore, notify, setEditor, setTool } from '../state/EditorStore'
+import { togglePenCurvature } from '../tools/PenTool'
 import { traceStore } from '../state/TraceStore'
 import { cancelImageTrace } from '../history/TraceCommands'
 import { artboardIds } from '../document/SceneGraph'
@@ -101,6 +102,27 @@ export const COMMANDS: CommandSpec[] = [
   tool('artboard', 'Artboard', 'A', 'artboard'),
   tool('zoom', 'Zoom', 'Z', 'zoom'),
   tool('hand', 'Hand', 'H', 'hand'),
+  {
+    // Illustrator's Curvature tool binding. It is a MODE of the pen here rather
+    // than a thirteenth tool, because everything else about drawing — closing,
+    // joining, carrying an existing path on — is identical either way.
+    id: 'tool.penCurvature',
+    group: 'Tools',
+    label: 'Pen: curvature mode (smooth through the points)',
+    defaultChord: 'Shift+`',
+    run: () => {
+      if (editorStore.getState().tool !== 'pen') setTool('pen')
+      const on = togglePenCurvature()
+      notify(
+        'info',
+        on ? 'Curvature mode on' : 'Curvature mode off',
+        on
+          ? 'Click along a shape and the curve is faired through every point.'
+          : 'Click for corners, click-drag to pull handles.',
+        2500,
+      )
+    },
+  },
 
   // ---- File --------------------------------------------------------------
   { id: 'file.new', group: 'File', label: 'New document', defaultChord: 'Mod+N', run: (h) => h.onNew() },

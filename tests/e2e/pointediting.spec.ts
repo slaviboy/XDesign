@@ -155,7 +155,7 @@ test('a segment drags both of its ends, and only those', async ({ page }) => {
   expect(await readField(page, 'W')).toBeCloseTo(widthBefore, 1)
 })
 
-test('double-click rounds a corner and a click straightens it again', async ({ page }) => {
+test('double-click rounds a corner, and double-click straightens it again', async ({ page }) => {
   await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 340, y: 300 })
   await selectTool(page, 'direct-select')
   await clickCanvas(page, { x: 270, y: 250 })
@@ -165,10 +165,16 @@ test('double-click rounds a corner and a click straightens it again', async ({ p
   // A rounded point has handles; a corner has none.
   await expect(page.locator('.path-points .bezier-handle')).not.toHaveCount(0)
 
-  // Far enough apart in time that the browser does not fold this into the
-  // double-click that came before it.
+  // The same gesture back the other way. Straightening used to be a SINGLE
+  // click, which fired on the way out of any press that landed on a rounded
+  // point and went nowhere — so selecting a point to look at it flattened the
+  // curve through it.
   await page.waitForTimeout(600)
   await clickCanvas(page, { x: 200, y: 200 })
+  await expect(page.locator('.path-points .bezier-handle')).not.toHaveCount(0)
+
+  await page.waitForTimeout(600)
+  await page.locator(CANVAS).dblclick({ position: { x: 200, y: 200 } })
   await expect(page.locator('.path-points .bezier-handle')).toHaveCount(0)
 })
 

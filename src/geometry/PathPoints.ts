@@ -315,6 +315,18 @@ export function insertPointAt(sub: PenSubpath, index: number, t: number): number
   const p3 = { x: b.x, y: b.y }
 
   const lerp = (u: Vec2, v: Vec2) => ({ x: u.x + (v.x - u.x) * t, y: u.y + (v.y - u.y) * t })
+
+  // Splitting a STRAIGHT segment gives two straight segments. De Casteljau is
+  // correct for it too — the control points it produces lie on the line, so the
+  // shape is identical — but the result is emitted as two curves, and a line
+  // wearing handles bends the moment either neighbour is dragged. Cutting a
+  // line in half should leave two lines.
+  if (a.outX === null && a.outY === null && b.inX === null && b.inY === null) {
+    const s = lerp(p0, p3)
+    pts.splice(index + 1, 0, corner(s.x, s.y))
+    return index + 1
+  }
+
   const q0 = lerp(p0, p1)
   const q1 = lerp(p1, p2)
   const q2 = lerp(p2, p3)
