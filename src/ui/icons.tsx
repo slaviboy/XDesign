@@ -104,8 +104,11 @@ export const DirectCursorIcon = (p: IconProps) => (
   </ToolIcon>
 )
 
+/** A square, not a wide rectangle: the rail reads as a row of primitives, and
+    the tool draws whatever you drag — so the icon should name the shape rather
+    than guess at a proportion. */
 export const RectIcon = (p: IconProps) => (
-  <ToolIcon {...p}><rect x="3.6" y="5.1" width="16.8" height="13.8" /></ToolIcon>
+  <ToolIcon {...p}><rect x="4.6" y="4.6" width="14.8" height="14.8" /></ToolIcon>
 )
 export const EllipseIcon = (p: IconProps) => (
   <ToolIcon {...p}><circle cx="12" cy="12" r="8.4" /></ToolIcon>
@@ -124,12 +127,22 @@ export const StarIcon = (p: IconProps) => (
 export const LineIcon = (p: IconProps) => (
   <ToolIcon {...p}><path d="M4.4 19.6L19.6 4.4" /></ToolIcon>
 )
-/** Fountain-pen nib — the universal mark for a Bézier pen. */
+/**
+ * Fountain-pen nib, angled the way a pen is held.
+ *
+ * Drawn upright and rotated into place, because a nib is a symmetrical shape
+ * about its own axis and describing it that way is the only version anyone can
+ * read afterwards — the rotated coordinates are not something to hand-edit.
+ * The slit runs from the vent to the tip, which is what makes it a nib rather
+ * than a leaf.
+ */
 export const PenIcon = (p: IconProps) => (
   <ToolIcon {...p}>
-    <path d="M12 2.6l7 11.1-7 7.7-7-7.7z" />
-    <path d="M12 2.6v11.1" />
-    <circle cx="12" cy="16.1" r="1.35" />
+    <g transform="rotate(-45 12 12)">
+      <path d="M9.6 6.2h4.8a1.7 1.7 0 011.7 1.7v5.7L12 19.2l-4.1-5.6V7.9a1.7 1.7 0 011.7-1.7z" />
+      <path d="M12 13.6v5.6" />
+      <circle cx="12" cy="10.4" r="1.1" />
+    </g>
   </ToolIcon>
 )
 export const PencilIcon = (p: IconProps) => (
@@ -138,8 +151,17 @@ export const PencilIcon = (p: IconProps) => (
     <path d="M14.6 5.7l3.7 3.7" />
   </ToolIcon>
 )
+/**
+ * A typeset T, filled, with the slab serifs a letterform actually has.
+ *
+ * Filled rather than stroked: the three rules it used to be drew a T of even
+ * thickness, which is a diagram of a letter rather than a letter. Everything
+ * else on the rail is a shape the tool draws, and this one is a glyph.
+ */
 export const TextIcon = (p: IconProps) => (
-  <ToolIcon {...p}><path d="M5.4 6.6V4.2h13.2v2.4M12 4.2v15.6M8.9 19.8h6.2" /></ToolIcon>
+  <ToolIcon {...p} fill="currentColor" stroke="none">
+    <path d="M4.6 4.4h14.8v1.8h-6.5v12h2.4V20H8.7v-1.8h2.4v-12H4.6z" />
+  </ToolIcon>
 )
 /** Artboard frame: the four rules that read as a canvas boundary. */
 export const ArtboardIcon = (p: IconProps) => (
