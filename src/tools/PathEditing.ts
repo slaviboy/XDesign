@@ -32,12 +32,12 @@ import { pathBounds } from '../geometry/PathUtils'
 import {
   clearHandle,
   closestSegment,
-  corner,
   deletePoint,
   insertPointAt,
   moveHandle,
   movePoint,
   pathToSubpaths,
+  segmentPoint,
   subpathsToPath,
   togglePointType,
   type PenSubpath,
@@ -183,6 +183,7 @@ export function beginPathEditing(nodeId: NodeId): boolean {
 }
 
 export function endPathEditing(): void {
+  insertPreview = null
   if (!edit.nodeId) return
   endLive(false)
   edit.nodeId = null
@@ -579,42 +580,73 @@ export function pathEditDoubleClick(e: CanvasPointerEvent, ctx: ToolContext): bo
 }
 
 /**
- * Continue an open path from one of its ends.
+ * The open end under the pointer, if there is one.
  *
- * Reuses the whole editing commit path, so the node keeps its id, its style and
- * its place in the layer tree — the alternative, starting a fresh path that
- * happens to touch the old one, leaves the user with two objects where they
- * drew one.
+ * Only reports it — deciding what a press on an end MEANS belongs to the tool,
+ * because with the pen it means two different things: a click carries on
+ * drawing the path from there, a drag moves the point. Neither can be committed
+ * on the way down, so the press arms and the release chooses.
  */
-export function pathEditExtendAt(e: CanvasPointerEvent, ctx: ToolContext): boolean {
-  if (!edit.nodeId) return false
+export function pathEditOpenEndAt(e: CanvasPointerEvent, ctx: ToolContext): PointHandleRef | null {
+  if (!edit.nodeId) return null
   const tolLocal = (GRAB_PX / ctx.viewport().zoom) * localScale()
   const local = toLocal(e.doc)
 
   for (let si = 0; si < edit.subs.length; si++) {
     const sub = edit.subs[si]!
-    if (sub.closed || sub.points.length === 0) continue
-    const head = sub.points[0]!
-    const tail = sub.points[sub.points.length - 1]!
-
-    const atTail = Math.hypot(tail.x - local.x, tail.y - local.y) <= tolLocal
-    const atHead = !atTail && Math.hypot(head.x - local.x, head.y - local.y) <= tolLocal
-    if (!atTail && !atHead) continue
-
-    const point = corner(local.x, local.y)
-    const index = atTail ? sub.points.length : 0
-    if (atTail) sub.points.push(point)
-    else sub.points.unshift(point)
-
-    // Armed so the same press can pull handles out of the new anchor.
-    edit.dragging = { subpath: si, index, kind: 'anchor' }
-    edit.lastLocal = local
-    edit.changed = true
-    commitPath('Extend path')
-    setEditor({ selectedPoints: [{ subpath: si, index, kind: 'anchor' }] })
-    return true
+    if (sub.closed || sub.points.length < 2) continue
+    const last = sub.points.length - 1
+    for (const index of [last, 0]) {
+      const p = sub.points[index]!
+      if (Math.hypot(p.x - local.x, p.y - local.y) <= tolLocal) {
+        return { subpath: si, index, kind: 'anchor' }
+      }
+    }
   }
-  return false
+  return null
+}
+
+/**
+ * Where clicking the outline would drop an anchor, in DOCUMENT space.
+ *
+ * The pen inserts a point wherever the outline is clicked, and until this
+ * existed the only way to find out where was to click and look. It is a preview
+ * of one specific press, so it is suppressed wherever that press would do
+ * something else: on an anchor or a handle, which get grabbed, and off the
+ * outline entirely, which starts a new path.
+ */
+let insertPreview: Vec2 | null = null
+
+export function getInsertPreview(): Vec2 | null {
+  return insertPreview
+}
+
+export function clearInsertPreview(): void {
+  if (!insertPreview) return
+  insertPreview = null
+  refreshOverlay()
+}
+
+export function updateInsertPreview(e: CanvasPointerEvent, ctx: ToolContext): void {
+  if (!edit.nodeId || edit.dragging) return clearInsertPreview()
+  const tolLocal = (GRAB_PX / ctx.viewport().zoom) * localScale()
+  const local = toLocal(e.doc)
+  if (findGrab(local, tolLocal)) return clearInsertPreview()
+
+  const near = closestSegment(edit.subs, local)
+  if (!near || near.distance > tolLocal + strokeSlack()) return clearInsertPreview()
+  const sub = edit.subs[near.subpath]
+  const at = sub ? segmentPoint(sub, near.index, near.t) : null
+  if (!at) return clearInsertPreview()
+
+  const world = applyToPoint(edit.world, at)
+  // Repainting only on a real move: the pointer produces a move event per
+  // sample and the overlay tick drives a React render.
+  if (insertPreview && Math.abs(insertPreview.x - world.x) < 1e-6 && Math.abs(insertPreview.y - world.y) < 1e-6) {
+    return
+  }
+  insertPreview = world
+  refreshOverlay()
 }
 
 /**

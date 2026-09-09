@@ -38,6 +38,7 @@ import {
 } from '../document/NodeFactory'
 import { getDrawPreview } from '../tools/ShapeTools'
 import { getPenPreview } from '../tools/PenTool'
+import { getInsertPreview } from '../tools/PathEditing'
 import { getPencilPreview } from '../tools/PencilTool'
 import { getArtboardPreview } from '../tools/ArtboardTool'
 import { getTextDragPreview } from '../tools/TextTool'
@@ -59,6 +60,7 @@ export const ToolOverlay = memo(function ToolOverlay() {
 
   const shape = getDrawPreview()
   const pen = getPenPreview()
+  const insertAt = getInsertPreview()
   const pencil = getPencilPreview()
   const artboard = getArtboardPreview()
   const textBox = getTextDragPreview()
@@ -120,6 +122,14 @@ export const ToolOverlay = memo(function ToolOverlay() {
           })}
         </g>
       )}
+
+      {/* Where the pen would drop an anchor if it were clicked here. Drawn as a
+          ring rather than a filled dot so it reads as a place rather than as a
+          point that already exists. */}
+      {insertAt && (() => {
+        const s = docToScreen(viewport, insertAt)
+        return <circle className="insert-preview" cx={s.x} cy={s.y} r={4} />
+      })()}
 
       {pencil && (
         <polyline

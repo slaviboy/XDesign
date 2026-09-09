@@ -43,13 +43,14 @@ import {
   pathToSubpaths,
   cornerPoint,
   moveHandle,
+  reversePoints,
   subpathToPath,
   type PenPoint,
   type PenSubpath,
 } from '../geometry/PathPoints'
 import { createPath } from '../document/NodeFactory'
-import { isEffectivelyLocked, hitTest, worldMatrix } from '../document/SceneGraph'
-import { convertNodeToPath } from '../document/DocumentModel'
+import { isEffectivelyLocked, hitTest, hitTestAll, worldMatrix } from '../document/SceneGraph'
+import { convertNodeToPath, removeNodes } from '../document/DocumentModel'
 import { insertNode } from '../history/Commands'
 import { getDoc, transaction } from '../state/DocumentStore'
 import {
@@ -61,15 +62,17 @@ import {
 } from '../state/EditorStore'
 import {
   beginPathEditing,
+  clearInsertPreview,
   editableOutline,
   endPathEditing,
   isPointEditable,
   pathEditDoubleClick,
-  pathEditExtendAt,
   pathEditKeyDown,
+  pathEditOpenEndAt,
   pathEditPointerDown,
   pathEditPointerMove,
   pathEditPointerUp,
+  updateInsertPreview,
 } from './PathEditing'
 import { snapAngle } from './snapHelpers'
 import { DEFAULT_STROKE } from '../document/types'
@@ -98,6 +101,27 @@ interface PenState {
    * add exactly one point and the next click started an unrelated object.
    */
   resumeId: NodeId | null
+  /**
+   * Other nodes folded into the path being drawn, deleted when it is committed.
+   *
+   * Clicking a second path's open end JOINS the two: its points come into the
+   * pen's model and the node they came from goes away, so what was two objects
+   * ends as one. Kept until the commit so the whole join is a single undo step.
+   */
+  mergeIds: NodeId[]
+  /**
+   * An open end pressed, with nothing decided yet.
+   *
+   * A press on an end is two gestures wearing the same clothes: released where
+   * it started it carries on drawing the path, and dragged it moves that point.
+   * Committing either on the way down gets the other one wrong, so the press
+   * only arms and the release chooses.
+   */
+  endArm: { id: NodeId; at: Vec2; press: CanvasPointerEvent } | null
+  /** True once an armed press has moved far enough to be a point drag. */
+  armDragging: boolean
+  /** Whether a resumed path has actually been changed yet. */
+  dirty: boolean
 }
 
 const pen: PenState = {
@@ -107,6 +131,10 @@ const pen: PenState = {
   dragStart: null,
   closing: false,
   resumeId: null,
+  mergeIds: [],
+  endArm: null,
+  armDragging: false,
+  dirty: false,
 }
 
 /** Screen-pixel radius for "clicked the first point to close". */
@@ -125,32 +153,43 @@ function resetPen(): void {
   pen.dragStart = null
   pen.closing = false
   pen.resumeId = null
+  pen.mergeIds = []
+  pen.endArm = null
+  pen.armDragging = false
+  pen.dirty = false
 }
 
 /**
- * Try to pick up an existing open path at the point clicked.
+ * An open end of `id` within reach of `at`, with the whole subpath in DOCUMENT
+ * space.
  *
- * Points are carried into DOCUMENT space, because that is what the pen builds
- * in; finishPath maps them back through the node's own matrix, so a resumed
- * path keeps its transform, its style and its id.
+ * Document space, because that is what the pen builds in; finishPath maps the
+ * points back through the target node's own matrix, so a path picked up here
+ * keeps its transform, its style and its id.
  */
-function resumeAt(doc: DesignDocument, id: NodeId, at: Vec2, zoom: number): boolean {
+function openEndAt(
+  doc: DesignDocument,
+  id: NodeId,
+  at: Vec2,
+  zoom: number,
+): { points: PenPoint[]; atHead: boolean } | null {
   const node = doc.nodes[id]
   const outline = editableOutline(node)
-  if (!outline) return false
+  if (!outline) return null
 
   const world = worldMatrix(doc, id)
-  const subs = pathToSubpaths(outline)
-  for (const sub of subs) {
+  for (const sub of pathToSubpaths(outline)) {
     if (sub.closed || sub.points.length < 2) continue
-    const toDoc = (p: PenPoint): PenPoint => ({
-      x: applyToPoint(world, { x: p.x, y: p.y }).x,
-      y: applyToPoint(world, { x: p.x, y: p.y }).y,
-      inX: p.inX === null || p.inY === null ? null : applyToPoint(world, { x: p.inX, y: p.inY }).x,
-      inY: p.inX === null || p.inY === null ? null : applyToPoint(world, { x: p.inX, y: p.inY }).y,
-      outX: p.outX === null || p.outY === null ? null : applyToPoint(world, { x: p.outX, y: p.outY }).x,
-      outY: p.outX === null || p.outY === null ? null : applyToPoint(world, { x: p.outX, y: p.outY }).y,
-    })
+    const toDoc = (p: PenPoint): PenPoint => {
+      const a = applyToPoint(world, { x: p.x, y: p.y })
+      const i = p.inX === null || p.inY === null ? null : applyToPoint(world, { x: p.inX, y: p.inY })
+      const o = p.outX === null || p.outY === null ? null : applyToPoint(world, { x: p.outX, y: p.outY })
+      return {
+        x: a.x, y: a.y,
+        inX: i?.x ?? null, inY: i?.y ?? null,
+        outX: o?.x ?? null, outY: o?.y ?? null,
+      }
+    }
     const points = sub.points.map(toDoc)
     const head = points[0]!
     const tail = points[points.length - 1]!
@@ -158,25 +197,67 @@ function resumeAt(doc: DesignDocument, id: NodeId, at: Vec2, zoom: number): bool
     const atTail = Math.hypot(tail.x - at.x, tail.y - at.y) * zoom <= CLOSE_PX
     const atHead = !atTail && Math.hypot(head.x - at.x, head.y - at.y) * zoom <= CLOSE_PX
     if (!atTail && !atHead) continue
-
-    // Appending always happens at the END, so a head grab reverses the path —
-    // which swaps each point's two handles with it.
-    if (atHead) {
-      points.reverse()
-      for (const pt of points) {
-        const [ix, iy] = [pt.inX, pt.inY]
-        pt.inX = pt.outX
-        pt.inY = pt.outY
-        pt.outX = ix
-        pt.outY = iy
-      }
-    }
-
-    pen.building = { points, closed: false }
-    pen.resumeId = id
-    return true
+    return { points, atHead }
   }
-  return false
+  return null
+}
+
+/**
+ * Pick up an existing open path and carry on drawing it.
+ *
+ * The points come into the pen's own model, so every further click appends as
+ * normal and Enter or Escape finishes it. Without this you could add exactly one
+ * point and the next click started an unrelated object.
+ */
+function resumeAt(doc: DesignDocument, id: NodeId, at: Vec2, zoom: number): boolean {
+  const end = openEndAt(doc, id, at, zoom)
+  if (!end) return false
+  // Appending always happens at the END, so a head grab reverses the path.
+  pen.building = { points: end.atHead ? reversePoints(end.points) : end.points, closed: false }
+  pen.resumeId = id
+  pen.dirty = false
+  return true
+}
+
+/**
+ * Another open path whose end is under the pointer, ready to be joined on.
+ *
+ * Its points arrive with the clicked end FIRST, so appending them runs the path
+ * on from where the pen already is — the segment between the two ends is the
+ * join, exactly as if it had been drawn by hand.
+ */
+function joinTargetAt(ctx: ToolContext, at: Vec2): { id: NodeId; points: PenPoint[] } | null {
+  const doc = ctx.doc()
+  const zoom = ctx.viewport().zoom
+  const reach = Math.max(ctx.tolerance(), CLOSE_PX / zoom)
+  const taken = new Set<NodeId>(pen.mergeIds)
+  if (pen.resumeId) taken.add(pen.resumeId)
+
+  // Topmost first, matching what a click would otherwise have selected.
+  const candidates = hitTestAll(doc, at, { tolerance: reach })
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const id = candidates[i]!
+    if (taken.has(id) || isEffectivelyLocked(doc, id)) continue
+    const end = openEndAt(doc, id, at, zoom)
+    if (end) return { id, points: end.atHead ? end.points : reversePoints(end.points) }
+  }
+  return null
+}
+
+/**
+ * Hand the object over from point editing to drawing.
+ *
+ * The transform frame belongs to a selected object, and a path being drawn is
+ * not one — leaving the selection in place drew a resize box with handles
+ * around the very path the pen was extending.
+ */
+function enterDrawing(): void {
+  if (editorStore.getState().nodeEditingId) {
+    setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
+    endPathEditing()
+  }
+  clearInsertPreview()
+  setSelection([])
 }
 
 /** The anchor a new segment would start from. */
@@ -202,6 +283,18 @@ function finishPath(closed: boolean): void {
 
   sub.closed = closed
 
+  // Picked a path up and put it straight back down. Writing it back anyway
+  // would leave an undo step for a gesture that changed nothing — and on a line
+  // or a rectangle it is worse than nothing, since committing converts the
+  // shape to a path.
+  if (pen.resumeId && !pen.dirty && !closed && pen.mergeIds.length === 0) {
+    const id = pen.resumeId
+    resetPen()
+    setSelection([id])
+    refreshOverlay()
+    return
+  }
+
   // Resuming an existing node: map the points back through ITS matrix and write
   // them in, so the path keeps its id, its style and its place in the tree.
   if (pen.resumeId) {
@@ -221,8 +314,9 @@ function finishPath(closed: boolean): void {
       })
       const d = subpathToPath({ closed, points: localPoints })
       const bounds = pathBounds(d)
+      const merged = pen.mergeIds.filter((id) => id !== nodeId && doc.nodes[id])
       resetPen()
-      transaction('Extend path', (draft) => {
+      transaction(merged.length ? 'Join paths' : 'Extend path', (draft) => {
         const target = draft.nodes[nodeId]
         if (!target) return false
         if (target.type !== 'path' && !convertNodeToPath(target, d, closed)) return false
@@ -234,6 +328,9 @@ function finishPath(closed: boolean): void {
           width: Math.max(0.5, bounds.width || target.transform.width),
           height: Math.max(0.5, bounds.height || target.transform.height),
         }
+        // The joined-on paths go in the SAME transaction, so one undo puts both
+        // objects back rather than leaving a merged path and a ghost beside it.
+        if (merged.length) removeNodes(draft, merged)
         return undefined
       })
       setSelection([nodeId])
@@ -279,53 +376,45 @@ export const penTool: Tool = {
   shortcut: 'P',
 
   onPointerDown(e: CanvasPointerEvent, ctx: ToolContext): void {
-    // An open end means "carry on drawing THIS path", and that is decided before
-    // the point editor gets a look.
-    //
-    // The order matters now that the Pen adopts whatever is already selected.
-    // With the editor open, pathEditExtendAt would take the click first: it
-    // drops a single anchor on the end and leaves you editing points, so the
-    // next click — the one meant to place the next segment — misses the path
-    // entirely and starts an unrelated one beside it. resumeAt instead lifts the
-    // whole path back into the pen, which is what continuing to draw means.
-    const hit = pen.building
-      ? null
-      : hitTest(ctx.doc(), e.doc, { tolerance: ctx.tolerance() })
-    if (hit && resumeAt(ctx.doc(), hit, e.doc, ctx.viewport().zoom)) {
-      if (editorStore.getState().nodeEditingId) {
-        setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
-        endPathEditing()
-      }
-      pen.draggingHandle = true
-      pen.dragStart = e.doc
-      refreshOverlay()
-      return
-    }
-
-    // Anywhere else on a path being edited: move a point, or insert one.
-    if (editorStore.getState().nodeEditingId) {
-      if (pathEditExtendAt(e, ctx)) return
-      // Only the Pen adds points by clicking an outline.
-      if (pathEditPointerDown(e, ctx, { insertOnSegment: true })) return
-    }
-
     if (!pen.building) {
-      // Clicking a shape the Pen is not already editing opens its points. A
-      // press on the body only opens the editor — inserting a point there as
-      // well would add an anchor nobody asked for, and an end would have been
-      // taken by resumeAt above.
-      if (hit && isPointEditable(ctx.doc().nodes[hit])) {
+      const doc = ctx.doc()
+      const hit = hitTest(doc, e.doc, { tolerance: ctx.tolerance() })
+      const wasEditing = editorStore.getState().nodeEditingId
+
+      // Pressing a path the pen is not already editing opens its points.
+      if (hit && hit !== wasEditing && isPointEditable(doc.nodes[hit]) && !isEffectivelyLocked(doc, hit)) {
         setSelection([hit])
-        setEditor({ nodeEditingId: hit })
+        setEditor({ nodeEditingId: hit, selectedPoints: [], selectedSegments: [] })
         beginPathEditing(hit)
-        return
       }
-      // Editing was live but the press missed everything: leave that path alone
-      // rather than starting a second one with both overlays on screen.
-      if (editorStore.getState().nodeEditingId) {
-        setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
-        endPathEditing()
+
+      const editingId = editorStore.getState().nodeEditingId
+      if (editingId) {
+        // An open end: arm, and let the release say whether this was a click
+        // carrying the path on or a drag moving that point. Alt and Shift keep
+        // their point-editing meanings, so they go straight through.
+        const end = e.altKey || e.shiftKey ? null : pathEditOpenEndAt(e, ctx)
+        if (end) {
+          pen.endArm = { id: editingId, at: e.doc, press: e }
+          pen.armDragging = false
+          setEditor({ selectedPoints: [end], selectedSegments: [] })
+          clearInsertPreview()
+          refreshOverlay()
+          return
+        }
+        // Only a path that was ALREADY open takes point work from this press.
+        // The press that opened it does none: the anchors have only just
+        // appeared, and dropping one under the pointer is not what a first
+        // click on an object means.
+        if (editingId === wasEditing && pathEditPointerDown(e, ctx, { insertOnSegment: true })) return
+        // Pressed the object itself, just not on anything grabbable. Starting a
+        // new path on top of it is never what that means.
+        if (editingId !== wasEditing || hit === editingId) return
       }
+
+      // The press missed everything: leave any open path alone rather than
+      // drawing a second one with both overlays on screen.
+      enterDrawing()
       pen.building = { points: [corner(e.doc.x, e.doc.y)], closed: false }
       pen.draggingHandle = true
       pen.dragStart = e.doc
@@ -345,6 +434,7 @@ export const penTool: Tool = {
       clearHandle(pen.building, points.length - 1, 'out')
       pen.draggingHandle = false
       pen.dragStart = null
+      pen.dirty = true
       refreshOverlay()
       return
     }
@@ -358,14 +448,42 @@ export const penTool: Tool = {
       return
     }
 
+    // A different path's open end: join the two into one object. Checked before
+    // placing a point, so the click lands on the path that is there rather than
+    // dropping an anchor on top of it and leaving two objects touching.
+    const join = joinTargetAt(ctx, e.doc)
+    if (join) {
+      points.push(...join.points)
+      if (pen.resumeId === null) pen.resumeId = join.id
+      else pen.mergeIds.push(join.id)
+      pen.draggingHandle = false
+      pen.dragStart = null
+      pen.dirty = true
+      refreshOverlay()
+      return
+    }
+
     const at = e.shiftKey ? snapAngle(last, e.doc, 45) : e.doc
     points.push(corner(at.x, at.y))
     pen.draggingHandle = true
     pen.dragStart = at
+    pen.dirty = true
     refreshOverlay()
   },
 
   onPointerMove(e: CanvasPointerEvent, ctx: ToolContext): void {
+    // An armed end that has travelled far enough is a point drag after all, so
+    // the grab happens now — from where the press was, not from here, or the
+    // point would jump to the pointer.
+    if (pen.endArm && !pen.armDragging) {
+      const arm = pen.endArm
+      const moved = Math.hypot(e.doc.x - arm.at.x, e.doc.y - arm.at.y) * ctx.viewport().zoom
+      if (moved > HANDLE_DEAD_PX) {
+        pen.armDragging = true
+        pathEditPointerDown(arm.press, ctx)
+      }
+    }
+
     if (editorStore.getState().nodeEditingId && pathEditPointerMove(e, ctx)) return
 
     const anchor = lastAnchor()
@@ -388,24 +506,40 @@ export const penTool: Tool = {
             // Without it they mirror, making the joint smooth.
             moveHandle(pen.building, index, 'out', to, !e.altKey)
           }
+          pen.dirty = true
         } else if (!pen.closing) {
           // Dragged out and back again: leave a corner rather than a smooth
           // point wearing stale handles.
           cornerPoint(pen.building, index)
         }
       }
+    } else if (!pen.building && !pen.endArm) {
+      // Idle over a path being edited: show where a click would drop an anchor.
+      updateInsertPreview(e, ctx)
     }
     refreshOverlay()
   },
 
   onPointerUp(e: CanvasPointerEvent, ctx: ToolContext): void {
     void e
-    void ctx
+    const arm = pen.endArm
+    pen.endArm = null
+    if (arm && !pen.armDragging) {
+      // Released where it went down: carry on drawing that path from here.
+      if (resumeAt(ctx.doc(), arm.id, arm.at, ctx.viewport().zoom)) {
+        enterDrawing()
+        refreshOverlay()
+        return
+      }
+    }
+    pen.armDragging = false
+
     if (editorStore.getState().nodeEditingId && pathEditPointerUp()) return
     pen.draggingHandle = false
     pen.dragStart = null
     if (pen.closing) {
       pen.closing = false
+      pen.dirty = true
       finishPath(true)
     }
   },
@@ -467,6 +601,7 @@ export const penTool: Tool = {
   },
 
   onDeactivate(): void {
+    clearInsertPreview()
     // Leaving the tool mid-path commits what has been drawn rather than losing it.
     if (pen.building && pen.building.points.length >= 2) finishPath(false)
     else resetPen()

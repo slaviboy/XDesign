@@ -25,8 +25,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   beginPathEditing, endPathEditing, getEditingSubpaths, isPointEditable,
-  pathEditDoubleClick, pathEditExtendAt, pathEditKeyDown, pathEditPointerDown,
-  pathEditPointerMove, pathEditPointerUp, syncPathEditing,
+  clearInsertPreview, getInsertPreview, pathEditDoubleClick, pathEditKeyDown,
+  pathEditOpenEndAt, pathEditPointerDown, pathEditPointerMove, pathEditPointerUp,
+  syncPathEditing, updateInsertPreview,
 } from '@/tools/PathEditing'
 import {
   createDocument, createImage, createLine, createPath, createPolygon,
@@ -175,26 +176,18 @@ describe('path point editing', () => {
     expect(isSmooth(sub().points[1]!)).toBe(true)
   })
 
-  it('extends an open path from its end instead of starting a new one', () => {
-    const node = openPath('M0 0 L100 0 L100 100')
-    expect(pathEditExtendAt(ev(100, 100), ctx)).toBe(true)
-    expect(getEditingSubpaths()!.subs[0]!.points).toHaveLength(4)
-    // Same node — not a second path that happens to touch the first.
-    expect(Object.values(getDoc().nodes).filter((n) => n.type === 'path')).toHaveLength(1)
-    expect(getDoc().nodes[node.id]).toBeDefined()
-  })
-
-  it('extends from the head as well as the tail', () => {
+  it('reports the open end under the pointer, at either end', () => {
     openPath('M20 20 L100 20 L100 100')
-    expect(pathEditExtendAt(ev(20, 20), ctx)).toBe(true)
-    const pts = getEditingSubpaths()!.subs[0]!.points
-    expect(pts).toHaveLength(4)
-    expect(pts[0]!.x).toBeCloseTo(20, 6)
+    expect(pathEditOpenEndAt(ev(100, 100), ctx)).toEqual({ subpath: 0, index: 2, kind: 'anchor' })
+    expect(pathEditOpenEndAt(ev(20, 20), ctx)).toEqual({ subpath: 0, index: 0, kind: 'anchor' })
   })
 
-  it('does not extend a closed path', () => {
+  it('reports nothing in the middle of a path, or on a closed one', () => {
+    openPath('M0 0 L100 0 L100 100')
+    // A middle anchor is not an end: the pen moves it, it does not draw on.
+    expect(pathEditOpenEndAt(ev(100, 0), ctx)).toBeNull()
     openPath('M0 0 L100 0 L100 100 Z')
-    expect(pathEditExtendAt(ev(0, 0), ctx)).toBe(false)
+    expect(pathEditOpenEndAt(ev(0, 0), ctx)).toBeNull()
   })
 
   it('inserts a point on the outline only when the caller asks for it', () => {
@@ -414,12 +407,52 @@ describe('editing shapes that are not paths', () => {
     expect(getEditingSubpaths()!.subs[0]!.points).toHaveLength(2)
   })
 
-  it('extending a line from its end keeps it one node', () => {
-    const line = openShape(createLine({ x: 0, y: 0, width: 100, height: 0 }, {}, { x1: 0, y1: 0, x2: 100, y2: 0 }))
-    expect(pathEditExtendAt(ev(100, 0), ctx)).toBe(true)
-    expect(getEditingSubpaths()!.subs[0]!.points).toHaveLength(3)
-    expect(Object.values(getDoc().nodes).filter((n) => n.type === 'path')).toHaveLength(1)
-    expect(getDoc().nodes[line.id]!.type).toBe('path')
+  it('a line offers both of its ends to the pen', () => {
+    openShape(createLine({ x: 0, y: 0, width: 100, height: 0 }, {}, { x1: 0, y1: 0, x2: 100, y2: 0 }))
+    expect(pathEditOpenEndAt(ev(100, 0), ctx)).toEqual({ subpath: 0, index: 1, kind: 'anchor' })
+    expect(pathEditOpenEndAt(ev(0, 0), ctx)).toEqual({ subpath: 0, index: 0, kind: 'anchor' })
+    // Opening a line's points converts nothing on its own.
+    expect(Object.values(getDoc().nodes).filter((n) => n.type === 'path')).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The anchor the pen is about to add
+// ---------------------------------------------------------------------------
+
+describe('insert preview', () => {
+  beforeEach(() => {
+    endPathEditing()
+    clearInsertPreview()
+  })
+
+  it('sits on the outline under the pointer', () => {
+    openPath('M0 0 L100 0 L100 100')
+    updateInsertPreview(ev(50, 3), ctx)
+    expect(getInsertPreview()).toEqual({ x: 50, y: 0 })
+  })
+
+  it('goes away on an anchor, which is grabbed rather than added to', () => {
+    openPath('M0 0 L100 0 L100 100')
+    updateInsertPreview(ev(50, 0), ctx)
+    expect(getInsertPreview()).not.toBeNull()
+    updateInsertPreview(ev(100, 0), ctx)
+    expect(getInsertPreview()).toBeNull()
+  })
+
+  it('goes away away from the outline, where a click starts a new path', () => {
+    openPath('M0 0 L100 0 L100 100')
+    updateInsertPreview(ev(50, 0), ctx)
+    updateInsertPreview(ev(50, 60), ctx)
+    expect(getInsertPreview()).toBeNull()
+  })
+
+  it('follows a curve rather than the straight line across it', () => {
+    openPath('M0 0 C0 -40 100 -40 100 0')
+    updateInsertPreview(ev(50, -30), ctx)
+    const at = getInsertPreview()!
+    expect(at.x).toBeCloseTo(50, 4)
+    expect(at.y).toBeCloseTo(-30, 1)
   })
 })
 

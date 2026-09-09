@@ -342,6 +342,42 @@ function cubicAt(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): Vec2 {
 }
 
 /**
+ * Where a segment is at parameter t.
+ *
+ * closestSegment reports WHICH segment and how far along it, which is all a hit
+ * test needs; drawing the point the pen is about to insert needs the position
+ * itself, and it has to be the same arithmetic insertPointAt will use or the
+ * preview would sit slightly off the anchor that follows it.
+ */
+export function segmentPoint(sub: PenSubpath, index: number, t: number): Vec2 | null {
+  const pts = sub.points
+  const a = pts[index]
+  const b = pts[(index + 1) % pts.length]
+  if (!a || !b) return null
+  return cubicAt(
+    { x: a.x, y: a.y },
+    { x: a.outX ?? a.x, y: a.outY ?? a.y },
+    { x: b.inX ?? b.x, y: b.inY ?? b.y },
+    { x: b.x, y: b.y },
+    t,
+  )
+}
+
+/**
+ * Reverse a subpath's points, swapping each one's two handles with it.
+ *
+ * A point's handles are named for the direction the path runs through it, so
+ * reversing the order without swapping them turns every curve inside out. Used
+ * wherever a path has to be walked from its other end: resuming from the head,
+ * and joining a path on by the end that was clicked.
+ */
+export function reversePoints(points: readonly PenPoint[]): PenPoint[] {
+  return points
+    .map((p) => ({ ...p, inX: p.outX, inY: p.outY, outX: p.inX, outY: p.inY }))
+    .reverse()
+}
+
+/**
  * The nearest point on a path outline, and how far away it is.
  *
  * The coarse scan finds which part of which segment is closest; the refinement

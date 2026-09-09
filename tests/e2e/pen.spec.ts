@@ -194,3 +194,173 @@ test('the pen extends an existing open path instead of starting a second one', a
   await click(page, 320, 260)
   await expect(page.locator('.anchor-point')).toHaveCount(4)
 })
+
+// ---------------------------------------------------------------------------
+// Working on a path that is already there
+// ---------------------------------------------------------------------------
+
+/** Draw the standard two-segment open path and hand it back via the pointer. */
+async function drawAndReselect(page: Page) {
+  await click(page, 200, 200)
+  await click(page, 320, 200)
+  await click(page, 320, 320)
+  await page.keyboard.press('Enter')
+  await selectTool(page, 'select')
+  await click(page, 320, 260)
+  await selectTool(page, 'pen')
+}
+
+test('no resize frame is drawn over a path the pen is carrying on', async ({ page }) => {
+  await drawAndReselect(page)
+  await expect(page.locator('.selection-frame')).toHaveCount(0)
+
+  // Picking the path up for drawing used to clear point editing and leave the
+  // node selected, which is exactly the state that draws a transform frame —
+  // so a box with resize handles appeared around the path being drawn.
+  await click(page, 320, 320)
+  await expect(page.locator('.pen-preview')).toHaveCount(1)
+  await expect(page.locator('.selection-frame')).toHaveCount(0)
+})
+
+test('dragging a point moves it, and clicking it draws on from there', async ({ page }) => {
+  await drawAndReselect(page)
+
+  // A press on an end is two gestures wearing the same clothes, so it is the
+  // release that decides. Dragged: the point moves.
+  const from = await pt(page, 320, 320)
+  const to = await pt(page, 260, 380)
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  await page.mouse.move(to.x, to.y, { steps: 8 })
+  await page.mouse.up()
+  expect(await pathD(page)).toBe('M0 0 L200 0 L100 300')
+  await expect(page.locator('.pen-preview')).toHaveCount(0)
+
+  // Clicked: the same press carries the path on instead.
+  await click(page, 260, 380)
+  await expect(page.locator('.pen-preview')).toHaveCount(1)
+  await click(page, 180, 440)
+  await page.keyboard.press('Enter')
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+  expect(await pathD(page)).toBe('M0 0 L200 0 L100 300 L-33.3333 400')
+})
+
+test('a middle point is moved by the pen too', async ({ page }) => {
+  await drawAndReselect(page)
+  const from = await pt(page, 320, 200)
+  const to = await pt(page, 380, 160)
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  await page.mouse.move(to.x, to.y, { steps: 8 })
+  await page.mouse.up()
+  expect(await pathD(page)).toBe('M0 0 L300 -66.6667 L200 200')
+})
+
+test('the pen marks where a click would add a point', async ({ page }) => {
+  await click(page, 200, 200)
+  await click(page, 320, 200)
+  await click(page, 320, 320)
+  await page.keyboard.press('Enter')
+  await selectTool(page, 'select')
+  await click(page, 600, 150)
+  await selectTool(page, 'pen')
+
+  // Nothing is open yet, so there is nothing to preview: the first click on an
+  // object opens its points rather than adding one.
+  const on = await pt(page, 320, 260)
+  await page.mouse.move(on.x, on.y)
+  await expect(page.locator('.insert-preview')).toHaveCount(0)
+  await click(page, 320, 260)
+  await expect(page.locator('.anchor-point')).toHaveCount(3)
+
+  const lower = await pt(page, 320, 290)
+  await page.mouse.move(lower.x, lower.y)
+  await expect(page.locator('.insert-preview')).toHaveCount(1)
+  // On the outline, not under the pointer: it says where the anchor lands.
+  const marker = page.locator('.insert-preview')
+  expect(Number(await marker.getAttribute('cx'))).toBeCloseTo(320, 0)
+  expect(Number(await marker.getAttribute('cy'))).toBeCloseTo(290, 0)
+
+  // Off the outline a click starts a new path, so there is nothing to promise.
+  await page.mouse.move(lower.x + 200, lower.y)
+  await expect(page.locator('.insert-preview')).toHaveCount(0)
+})
+
+test('clicking a second path by its end joins the two into one object', async ({ page }) => {
+  await click(page, 150, 150)
+  await click(page, 250, 150)
+  await page.keyboard.press('Enter')
+  await selectTool(page, 'pen')
+  await click(page, 400, 300)
+  await click(page, 500, 300)
+  await page.keyboard.press('Enter')
+  await expect(nodesOfType(page, 'path')).toHaveCount(2)
+
+  await selectTool(page, 'select')
+  await click(page, 200, 150)
+  await selectTool(page, 'pen')
+  await click(page, 250, 150)   // carry the first path on
+  await click(page, 400, 300)   // and run it into the second one's end
+  await page.keyboard.press('Enter')
+
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+  expect(await pathD(page)).toBe('M0 0 L166.6666 0 L416.6666 250 L583.3333 250')
+
+  // One undo, not two: the join and the object it consumed are one step.
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(nodesOfType(page, 'path')).toHaveCount(2)
+})
+
+test('a line can be carried on from its end, and joined to another', async ({ page }) => {
+  await selectTool(page, 'line')
+  await dragOut(page, 150, 500, 250, 500)
+  await selectTool(page, 'line')
+  await dragOut(page, 400, 560, 500, 560)
+  await expect(nodesOfType(page, 'line')).toHaveCount(2)
+
+  await selectTool(page, 'select')
+  await click(page, 200, 500)
+  await selectTool(page, 'pen')
+  await click(page, 250, 500)
+  await click(page, 400, 560)
+  await page.keyboard.press('Enter')
+
+  await expect(nodesOfType(page, 'line')).toHaveCount(0)
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+  expect(await pathD(page)).toBe('M0 0 L166.6667 0 L416.6667 100 L583.3334 100')
+})
+
+test('picking a line up and putting it straight back down leaves it a line', async ({ page }) => {
+  await selectTool(page, 'line')
+  await dragOut(page, 200, 400, 350, 400)
+  await selectTool(page, 'select')
+  await click(page, 275, 400)
+  await selectTool(page, 'pen')
+
+  // Committing an unchanged path would convert the line to a path and leave an
+  // undo step for a gesture that drew nothing.
+  await click(page, 350, 400)
+  await page.keyboard.press('Escape')
+  await expect(nodesOfType(page, 'line')).toHaveCount(1)
+  await expect(nodesOfType(page, 'path')).toHaveCount(0)
+})
+
+test('Alt and Shift keep their point-editing meanings on an end', async ({ page }) => {
+  await drawAndReselect(page)
+
+  // Alt-click rounds the corner rather than picking the path up to draw.
+  const end = await pt(page, 320, 320)
+  await page.keyboard.down('Alt')
+  await page.mouse.click(end.x, end.y)
+  await page.keyboard.up('Alt')
+  await expect(page.locator('.pen-preview')).toHaveCount(0)
+  expect((await pathD(page))!).toContain('C')
+
+  // Shift-click adds it to the point selection rather than picking it up.
+  await click(page, 320, 200)
+  await page.keyboard.down('Shift')
+  await page.mouse.click(end.x, end.y)
+  await page.keyboard.up('Shift')
+  await expect(page.locator('.anchor-point.selected')).toHaveCount(2)
+  await expect(page.locator('.pen-preview')).toHaveCount(0)
+})

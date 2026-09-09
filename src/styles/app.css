@@ -284,6 +284,7 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .size-badge text { fill: #fff; font-size: 10px; font-family: var(--font-ui); }
 
 .shape-preview { fill: rgba(20, 115, 230, 0.10); stroke: var(--accent); stroke-width: 1; }
+.insert-preview { fill: none; stroke: var(--accent); stroke-width: 1.5; }
 .pen-path { fill: none; stroke: var(--accent); stroke-width: 1.5; }
 .pen-rubber { fill: none; stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; }
 .pencil-preview { fill: none; stroke: var(--preview-stroke); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
