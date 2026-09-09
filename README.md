@@ -1229,6 +1229,26 @@ half that falls outside the glyph — which is what an outlined letter is suppos
 like, and what Adobe does, where Stroke sits below Fill in a type object's appearance. An
 outer stroke is then asked for at double width so the full width lands outside.
 
+### Sampling a curve tells you where it is, not how far away it is
+
+Finding which segment a click landed on walks each one at twenty-five sampled
+points and takes the nearest. That answers "which segment" perfectly well, and
+it is the wrong way to answer "how far": on a 240-unit line the samples are ten
+units apart, so a click landing exactly ON the line between two of them was
+reported as five units off it.
+
+That is invisible while the tolerance it is compared against is large — and the
+tolerance is a screen distance converted into the node's own units, so it
+shrinks as the view zooms in. Past a few hundred percent it drops below the
+sample spacing, and clicking a line starts working only where a sample happens
+to fall. At a round zoom the middle of a two-point line lands exactly on one,
+which is why it looked fine until someone tried 3341%.
+
+The coarse scan still picks the segment; a ternary search over the interval
+around the best sample then finds the real distance. Thirty iterations shrink
+that interval by five orders of magnitude, which is far below anything anyone
+can click.
+
 ### What you click is the stroke, not the curve down the middle of it
 
 Hit-testing a whole object has always counted the stroke: a line drawn eight
@@ -1426,8 +1446,8 @@ they stay a constant size at any zoom and can never end up in an export.
 ## Testing
 
 ```bash
-npm test           # 680 unit tests (Vitest)
-npm run test:e2e   # 358 end-to-end tests (Playwright, real Chromium)
+npm test           # 684 unit tests (Vitest)
+npm run test:e2e   # 359 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

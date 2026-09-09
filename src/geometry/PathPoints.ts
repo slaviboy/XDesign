@@ -332,7 +332,35 @@ export function insertPointAt(sub: PenSubpath, index: number, t: number): number
   return index + 1
 }
 
-/** Nearest point on the path outline, for click-to-insert. */
+/** A point on one cubic segment. */
+function cubicAt(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): Vec2 {
+  const mt = 1 - t
+  return {
+    x: mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x,
+    y: mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y,
+  }
+}
+
+/**
+ * The nearest point on a path outline, and how far away it is.
+ *
+ * The coarse scan finds which part of which segment is closest; the refinement
+ * after it is what makes the DISTANCE mean anything. Sampling alone reports the
+ * distance to the nearest sample, and on a long segment the samples are far
+ * apart — a quarter of a 240-unit line is ten units between them, so a click
+ * landing exactly ON the line between two samples reports being five units off
+ * it.
+ *
+ * That is invisible while the tolerance it is compared against is large, and
+ * the tolerance is a screen distance converted into these units — so it shrinks
+ * as the view zooms in, and somewhere past a few hundred percent it drops below
+ * the sample spacing. Then clicking a line works only where a sample happens to
+ * fall, which reads as "sometimes it selects and mostly it does not".
+ *
+ * Ternary search over the interval around the best sample: the distance along
+ * one such interval has a single minimum, and thirty iterations shrink it by
+ * five orders of magnitude, which is far below any tolerance anyone can click.
+ */
 export function closestSegment(
   subs: readonly PenSubpath[],
   point: Vec2,
@@ -350,14 +378,37 @@ export function closestSegment(
       const p1 = { x: a.outX ?? a.x, y: a.outY ?? a.y }
       const p2 = { x: b.inX ?? b.x, y: b.inY ?? b.y }
       const p3 = { x: b.x, y: b.y }
+      const distanceAt = (t: number): number => {
+        const q = cubicAt(p0, p1, p2, p3, t)
+        return Math.hypot(q.x - point.x, q.y - point.y)
+      }
+
+      let bestT = 0
+      let bestDistance = Infinity
       for (let k = 0; k <= samples; k++) {
         const t = k / samples
-        const mt = 1 - t
-        const x = mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x
-        const y = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y
-        const dist = Math.hypot(x - point.x, y - point.y)
-        if (!best || dist < best.distance) best = { subpath: si, index: i, t, distance: dist }
+        const dist = distanceAt(t)
+        if (dist < bestDistance) {
+          bestDistance = dist
+          bestT = t
+        }
       }
+
+      const step = 1 / samples
+      let lo = Math.max(0, bestT - step)
+      let hi = Math.min(1, bestT + step)
+      for (let iteration = 0; iteration < 30 && hi - lo > 1e-6; iteration++) {
+        const third = (hi - lo) / 3
+        const m1 = lo + third
+        const m2 = hi - third
+        if (distanceAt(m1) < distanceAt(m2)) hi = m2
+        else lo = m1
+      }
+      const t = (lo + hi) / 2
+      const dist = Math.min(bestDistance, distanceAt(t))
+      const at = dist === bestDistance ? bestT : t
+
+      if (!best || dist < best.distance) best = { subpath: si, index: i, t: at, distance: dist }
     }
   })
   return best

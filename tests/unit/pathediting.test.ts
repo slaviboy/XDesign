@@ -37,7 +37,7 @@ import { geomKey } from '@/canvas/NodeRenderer'
 import { addNode } from '@/document/DocumentModel'
 import { replaceDocument, getDoc, undo } from '@/state/DocumentStore'
 import { setEditor, editorStore } from '@/state/EditorStore'
-import { isSmooth } from '@/geometry/PathPoints'
+import { closestSegment, isSmooth } from '@/geometry/PathPoints'
 import type { CanvasPointerEvent, ToolContext } from '@/tools/types'
 import type { DesignNode, PathNode } from '@/document/types'
 
@@ -420,5 +420,70 @@ describe('editing shapes that are not paths', () => {
     expect(getEditingSubpaths()!.subs[0]!.points).toHaveLength(3)
     expect(Object.values(getDoc().nodes).filter((n) => n.type === 'path')).toHaveLength(1)
     expect(getDoc().nodes[line.id]!.type).toBe('path')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Measuring the distance to a segment
+// ---------------------------------------------------------------------------
+
+describe('closestSegment', () => {
+  const straight = (length: number) => ({
+    points: [
+      { x: 0, y: 0, inX: null, inY: null, outX: null, outY: null },
+      { x: length, y: 0, inX: null, inY: null, outX: null, outY: null },
+    ],
+    closed: false,
+  })
+
+  it('reports no distance at all for a point ON the segment', () => {
+    // The bug this exists for. The scan samples the segment 25 times, so on a
+    // long one the samples are ten units apart — and reporting the distance to
+    // the nearest SAMPLE means a click landing exactly on the line between two
+    // of them is reported as five units off it. That is invisible while the
+    // tolerance is large, and the tolerance is a screen distance converted into
+    // these units: it shrinks as the view zooms in, until clicking a line works
+    // only where a sample happens to fall.
+    const sub = straight(240)
+    for (const x of [0, 5, 12, 17, 55, 119, 121, 180, 235, 240]) {
+      const found = closestSegment([sub], { x, y: 0 })!
+      expect(found.distance, `x=${x}`).toBeLessThan(0.001)
+    }
+  })
+
+  it('measures the perpendicular distance, wherever along the segment it is', () => {
+    const sub = straight(240)
+    for (const x of [7, 63, 128, 199]) {
+      expect(closestSegment([sub], { x, y: 3 })!.distance, `x=${x}`).toBeCloseTo(3, 3)
+    }
+  })
+
+  it('is accurate on a curve too', () => {
+    // A quarter circle of radius 100, near enough: the midpoint of the curve
+    // sits at a known distance from the centre of that circle.
+    const sub = {
+      points: [
+        { x: 0, y: 100, inX: null, inY: null, outX: 55.2, outY: 100 },
+        { x: 100, y: 0, inX: 100, inY: 55.2, outX: null, outY: null },
+      ],
+      closed: false,
+    }
+    const found = closestSegment([sub], { x: 0, y: 0 })!
+    // Every point on the arc is ~100 from the corner it curves around.
+    expect(found.distance).toBeGreaterThan(98)
+    expect(found.distance).toBeLessThan(102)
+  })
+
+  it('names the segment the point is nearest to', () => {
+    const sub = {
+      points: [
+        { x: 0, y: 0, inX: null, inY: null, outX: null, outY: null },
+        { x: 100, y: 0, inX: null, inY: null, outX: null, outY: null },
+        { x: 100, y: 100, inX: null, inY: null, outX: null, outY: null },
+      ],
+      closed: false,
+    }
+    expect(closestSegment([sub], { x: 37, y: 2 })!.index).toBe(0)
+    expect(closestSegment([sub], { x: 98, y: 61 })!.index).toBe(1)
   })
 })

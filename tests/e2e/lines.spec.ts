@@ -34,7 +34,7 @@
  */
 
 import { test, expect } from '@playwright/test'
-import { drawShape, openApp, selectTool } from './helpers'
+import { CANVAS, drawShape, openApp, selectTool } from './helpers'
 
 /** How far the drawn line escapes its own selection frame, in screen pixels. */
 async function escapesFrameBy(page: import('@playwright/test').Page): Promise<number> {
@@ -51,18 +51,20 @@ async function escapesFrameBy(page: import('@playwright/test').Page): Promise<nu
 
 /** Bring the line to the middle of the view, so a click on it is a click on it. */
 async function centreOnLine(page: import('@playwright/test').Page): Promise<void> {
-  const size = page.viewportSize()!
+  // The CANVAS, not the window: the inspector takes the right-hand quarter of
+  // the page, and centring on the window puts the artwork under it.
+  const canvas = await page.locator(CANVAS).boundingBox()
   const box = await page
     .locator('.document-layer [data-node-id]:not([data-node-type="artboard"])')
     .first()
     .boundingBox()
-  if (!box) return
-  const dx = size.width / 2 - (box.x + box.width / 2)
-  const dy = size.height / 2 - (box.y + box.height / 2)
+  if (!canvas || !box) return
+  const cx = canvas.x + canvas.width / 2
+  const cy = canvas.y + canvas.height / 2
   await page.keyboard.down('Space')
-  await page.mouse.move(size.width / 2, size.height / 2)
+  await page.mouse.move(cx, cy)
   await page.mouse.down()
-  await page.mouse.move(size.width / 2 + dx, size.height / 2 + dy, { steps: 5 })
+  await page.mouse.move(cx + (cx - (box.x + box.width / 2)), cy + (cy - (box.y + box.height / 2)), { steps: 5 })
   await page.mouse.up()
   await page.keyboard.up('Space')
 }
@@ -238,5 +240,35 @@ test('a line stays selectable and draggable however far in you zoom', async ({ p
     await page.mouse.up()
     const after = (await shape.boundingBox())!
     expect(after.y - before.y, level).toBeCloseTo(-40, 0)
+  }
+})
+
+test('a line is selectable all along it, at an awkward zoom', async ({ page }) => {
+  // 3341% rather than a round number on purpose. The segment test used to
+  // report the distance to the nearest of twenty-five samples along the
+  // segment, so on a long line it only answered near a sample — and the
+  // tolerance it is compared against shrinks as the view zooms in, until the
+  // samples are the only places that work. At a round zoom, clicking the middle
+  // of a two-point line happens to land exactly on one.
+  await drawShape(page, 'line', { x: 260, y: 320 }, { x: 500, y: 320 })
+  await selectTool(page, 'direct-select')
+
+  const zoom = page.locator('[data-testid="zoom-value"]')
+  await zoom.fill('3341%')
+  await zoom.press('Enter')
+  await centreOnLine(page)
+
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  const box = (await page.locator('.document-layer [data-node-id]:not([data-node-type="artboard"])')
+    .first()
+    .boundingBox())!
+  const y = box.y + box.height / 2
+
+  // Everywhere across the canvas, not just where a sample fell.
+  for (const fraction of [0.1, 0.23, 0.37, 0.5, 0.61, 0.78, 0.9]) {
+    const x = canvas.x + 20 + (canvas.width - 40) * fraction
+    await page.keyboard.press('Escape')
+    await page.mouse.click(x, y)
+    await expect(page.locator('.path-points .selected-segment'), `${fraction} along`).toHaveCount(1)
   }
 })
