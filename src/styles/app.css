@@ -200,7 +200,12 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .canvas-svg { display: block; }
 
 .grid-overlay line { stroke: var(--grid-line); stroke-width: 1; }
-.artboard-guides .guide { stroke: var(--guide); stroke-width: 1; opacity: 0.85; }
+/* No stroke of its own: the colour is inherited from the group, which carries
+   the document's guide colour inline. A rule naming a colour here would win
+   over that inherited value — a declaration on the element always beats one
+   inherited from an ancestor — which is why changing the colour in Preferences
+   used to repaint only the drag handle, the one part with no rule of its own. */
+.artboard-guides .guide { stroke-width: 1; opacity: 0.85; }
 /* Wide enough to catch without hunting, invisible so it does not thicken the
    line. Stroke, not fill: a line has no interior. */
 .artboard-guides .guide-hit { stroke: transparent; stroke-width: 9; }

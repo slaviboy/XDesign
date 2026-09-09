@@ -628,3 +628,36 @@ test('the measurement rule takes the artboard title\'s place while it is needed'
   await page.mouse.up()
   await expect(page.locator('.artboard-label')).toHaveCount(1)
 })
+
+test('the guide colour applies to every guide, not just the selected one', async ({ page }) => {
+  // The colour lives on the group as an inline style and is inherited by each
+  // guide. A CSS rule naming a colour on `.guide` itself would beat that
+  // inherited value — which is how changing the preference came to repaint only
+  // the drag handle, the one part of a guide with no rule of its own.
+  await openApp(page)
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  const strips = page.locator('.guide-strip')
+  for (const [index, target] of [[0, { x: 320, y: 300 }], [1, { x: 420, y: 260 }]] as const) {
+    const strip = (await strips.nth(index).boundingBox())!
+    await page.mouse.move(strip.x + strip.width / 2, strip.y + strip.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(canvas.x + target.x, canvas.y + target.y, { steps: 6 })
+    await page.mouse.up()
+  }
+
+  const guides = page.locator('.artboard-guides .guide:not(.guide-hit)')
+  await expect(guides).toHaveCount(2)
+
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-preferences"]').click()
+  await page.locator('[data-testid="guide-color"]').click()
+  const hex = page.locator('.popover .field', { has: page.locator('.field-label:text-is("#")') })
+    .locator('input')
+  await hex.fill('00AA44')
+  await hex.press('Enter')
+
+  // Both of them, and neither is selected.
+  await expect
+    .poll(async () => guides.evaluateAll((nodes) => nodes.map((n) => getComputedStyle(n).stroke)))
+    .toEqual(['rgb(0, 170, 68)', 'rgb(0, 170, 68)'])
+})

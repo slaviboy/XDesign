@@ -48,7 +48,7 @@ import {
   type PenSubpath,
 } from '../geometry/PathPoints'
 import { createPath } from '../document/NodeFactory'
-import { hitTest, worldMatrix } from '../document/SceneGraph'
+import { isEffectivelyLocked, hitTest, worldMatrix } from '../document/SceneGraph'
 import { convertNodeToPath } from '../document/DocumentModel'
 import { insertNode } from '../history/Commands'
 import { getDoc, transaction } from '../state/DocumentStore'
@@ -279,8 +279,30 @@ export const penTool: Tool = {
   shortcut: 'P',
 
   onPointerDown(e: CanvasPointerEvent, ctx: ToolContext): void {
-    // Editing an existing path takes priority over starting a new one, and an
-    // open end continues the path rather than beginning a second one.
+    // An open end means "carry on drawing THIS path", and that is decided before
+    // the point editor gets a look.
+    //
+    // The order matters now that the Pen adopts whatever is already selected.
+    // With the editor open, pathEditExtendAt would take the click first: it
+    // drops a single anchor on the end and leaves you editing points, so the
+    // next click — the one meant to place the next segment — misses the path
+    // entirely and starts an unrelated one beside it. resumeAt instead lifts the
+    // whole path back into the pen, which is what continuing to draw means.
+    const hit = pen.building
+      ? null
+      : hitTest(ctx.doc(), e.doc, { tolerance: ctx.tolerance() })
+    if (hit && resumeAt(ctx.doc(), hit, e.doc, ctx.viewport().zoom)) {
+      if (editorStore.getState().nodeEditingId) {
+        setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
+        endPathEditing()
+      }
+      pen.draggingHandle = true
+      pen.dragStart = e.doc
+      refreshOverlay()
+      return
+    }
+
+    // Anywhere else on a path being edited: move a point, or insert one.
     if (editorStore.getState().nodeEditingId) {
       if (pathEditExtendAt(e, ctx)) return
       // Only the Pen adds points by clicking an outline.
@@ -288,37 +310,20 @@ export const penTool: Tool = {
     }
 
     if (!pen.building) {
-      // Clicking an existing path with the pen enters point editing on it, or
-      // extends it when the click lands on an open end.
-      const hit = hitTest(ctx.doc(), e.doc, { tolerance: ctx.tolerance() })
-      // An open end picks the path back up, so the next click carries on
-      // drawing it instead of starting an unrelated object beside it.
-      if (hit && resumeAt(ctx.doc(), hit, e.doc, ctx.viewport().zoom)) {
-        if (editorStore.getState().nodeEditingId) {
-          setEditor({ nodeEditingId: null, selectedPoints: [] })
-          endPathEditing()
-        }
-        pen.draggingHandle = true
-        pen.dragStart = e.doc
-        refreshOverlay()
-        return
-      }
-      // Otherwise clicking a shape opens its points for editing.
+      // Clicking a shape the Pen is not already editing opens its points. A
+      // press on the body only opens the editor — inserting a point there as
+      // well would add an anchor nobody asked for, and an end would have been
+      // taken by resumeAt above.
       if (hit && isPointEditable(ctx.doc().nodes[hit])) {
         setSelection([hit])
         setEditor({ nodeEditingId: hit })
         beginPathEditing(hit)
-        // Only the extend case carries this press over: clicking an open end
-        // continues the path in one gesture. A press on the body just opens the
-        // editor — inserting a point there as well would add an anchor nobody
-        // asked for, and XD only inserts once you are already editing.
-        pathEditExtendAt(e, ctx)
         return
       }
       // Editing was live but the press missed everything: leave that path alone
       // rather than starting a second one with both overlays on screen.
       if (editorStore.getState().nodeEditingId) {
-        setEditor({ nodeEditingId: null, selectedPoints: [] })
+        setEditor({ nodeEditingId: null, selectedPoints: [], selectedSegments: [] })
         endPathEditing()
       }
       pen.building = { points: [corner(e.doc.x, e.doc.y)], closed: false }
@@ -440,11 +445,35 @@ export const penTool: Tool = {
     return false
   },
 
+  /**
+   * Pick up whatever is already selected, as the two pointers do.
+   *
+   * Choosing the Pen with a path selected should put you straight into that
+   * path: its points on screen, ready for a click on an end to carry on drawing
+   * it. Needing to click the object first was a step that existed only because
+   * nothing was listening for the tool change — and it was worse here than
+   * elsewhere, because a click on the canvas with the Pen is how you START A NEW
+   * PATH, so the "wake it up" click was ambiguous with drawing.
+   */
+  onActivate(ctx: ToolContext): void {
+    const editor = editorStore.getState()
+    if (editor.nodeEditingId || pen.building) return
+    if (editor.selection.length !== 1) return
+    const id = editor.selection[0]!
+    const doc = ctx.doc()
+    if (isEffectivelyLocked(doc, id) || !isPointEditable(doc.nodes[id])) return
+    setEditor({ nodeEditingId: id, selectedPoints: [], selectedSegments: [] })
+    beginPathEditing(id)
+  },
+
   onDeactivate(): void {
     // Leaving the tool mid-path commits what has been drawn rather than losing it.
     if (pen.building && pen.building.points.length >= 2) finishPath(false)
     else resetPen()
-    endPathEditing()
+    // Point editing is NOT ended here: `nodeEditingId` owns its lifetime and the
+    // Canvas subscriber closes it when setTool clears that. Ending it here would
+    // stop the Pen and the two pointers handing the points back and forth.
+    resetPen()
   },
 }
 

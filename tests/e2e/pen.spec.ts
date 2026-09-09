@@ -181,9 +181,16 @@ test('the pen extends an existing open path instead of starting a second one', a
   await expect(nodesOfType(page, 'path')).toHaveCount(1)
 
   await selectTool(page, 'pen')
-  // Click the path body to enter editing, then its end anchor to continue it.
-  await click(page, 320, 260)
+  // Clicking the open end picks the path back up for DRAWING rather than
+  // dropping another anchor on top of the one already there — which is what it
+  // used to do, leaving a zero-length segment behind. So the count is unchanged
+  // until a click actually places a point somewhere new.
   await click(page, 320, 320)
-  await expect(page.locator('.anchor-point')).toHaveCount(4)
+  await click(page, 400, 380)
+  await page.keyboard.press('Enter')
+
   await expect(nodesOfType(page, 'path')).toHaveCount(1)
+  await selectTool(page, 'direct-select')
+  await click(page, 320, 260)
+  await expect(page.locator('.anchor-point')).toHaveCount(4)
 })

@@ -403,6 +403,12 @@ export const setEditor = (partial: Partial<EditorState>) => editorStore.setState
  *   hands control back to the selection tool immediately after creating a text
  *   box, and must not tear down the editor it just opened.
  */
+/**
+ * Tools that work on a path's points, and so inherit the open point editor
+ * from one another instead of closing it.
+ */
+const KEEPS_POINT_EDITING = new Set<ToolId>(['select', 'direct-select', 'pen'])
+
 export function setTool(tool: ToolId, keepEditing = false): void {
   const s = editorStore.getState()
   if (s.tool === tool) return
@@ -417,8 +423,9 @@ export function setTool(tool: ToolId, keepEditing = false): void {
     editingTextId: keepEditing ? s.editingTextId : null,
     textSelection: keepEditing ? s.textSelection : null,
     textEditingFocused: keepEditing ? s.textEditingFocused : false,
-    // Both pointers keep the point overlay; every other tool drops it.
-    nodeEditingId: tool === 'select' || tool === 'direct-select' ? s.nodeEditingId : null,
+    // The two pointers and the Pen all work on points, so the overlay is handed
+    // between them rather than torn down and rebuilt. Every other tool drops it.
+    nodeEditingId: KEEPS_POINT_EDITING.has(tool) ? s.nodeEditingId : null,
   })
   activateHandler?.(tool)
 }

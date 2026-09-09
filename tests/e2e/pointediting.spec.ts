@@ -67,10 +67,11 @@ test('the Pen is the tool that adds points to a line', async ({ page }) => {
   await clickCanvas(page, { x: 250, y: 200 })
   await expect(anchors(page)).toHaveCount(2)
 
-  // The Pen's first click on a shape opens its points; the second inserts, as
-  // XD does. Both clicks are on the line, and only the second adds to it.
+  // Direct Selection left the line's points open, and the Pen adopts them, so
+  // its first click on the outline inserts. There used to be a wake-up click
+  // before this one — the Pen could only react to a click, and on the canvas a
+  // click is how you start a new path, so the two were ambiguous.
   await selectTool(page, 'pen')
-  await clickCanvas(page, { x: 280, y: 200 })
   await expect(anchors(page)).toHaveCount(2)
   await clickCanvas(page, { x: 300, y: 200 })
   await expect(anchors(page)).toHaveCount(3)
@@ -169,4 +170,46 @@ test('double-click rounds a corner and a click straightens it again', async ({ p
   await page.waitForTimeout(600)
   await clickCanvas(page, { x: 200, y: 200 })
   await expect(page.locator('.path-points .bezier-handle')).toHaveCount(0)
+})
+
+test('the Pen picks up the selected path, and carries on drawing it', async ({ page }) => {
+  // Choosing the Pen used to need a click on the object to wake it up — and
+  // with the Pen that click is ambiguous, because a click on the canvas is how
+  // you start a NEW path.
+  await drawLine(page)
+  await selectTool(page, 'direct-select')
+  await clickCanvas(page, { x: 300, y: 200 })
+  await expect(anchors(page)).toHaveCount(2)
+
+  await selectTool(page, 'pen')
+  await expect(anchors(page), 'the Pen adopts the selection with no click').toHaveCount(2)
+
+  // Click the open end and keep going: this must extend the SAME object rather
+  // than leaving an unrelated path beside it.
+  await clickCanvas(page, { x: 400, y: 200 })
+  await clickCanvas(page, { x: 450, y: 260 })
+  await clickCanvas(page, { x: 510, y: 210 })
+  await page.keyboard.press('Enter')
+
+  await expect(nodesOfType(page, 'line')).toHaveCount(0)
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+
+  await selectTool(page, 'direct-select')
+  await clickCanvas(page, { x: 350, y: 200 })
+  await expect(anchors(page), 'two original points plus the two placed').toHaveCount(4)
+})
+
+test('the Pen hands the object back to the pointers', async ({ page }) => {
+  await drawLine(page)
+  await selectTool(page, 'pen')
+  await expect(anchors(page)).toHaveCount(2)
+
+  // Select shows the box, not the points, and does it on arrival.
+  await selectTool(page, 'select')
+  await expect(anchors(page)).toHaveCount(0)
+  await expect(page.locator('.selection-frame')).toHaveCount(1)
+
+  // And Direct Selection takes the points straight back.
+  await selectTool(page, 'direct-select')
+  await expect(anchors(page)).toHaveCount(2)
 })
