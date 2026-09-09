@@ -1243,6 +1243,12 @@ The segment test counts the stroke now, so anywhere the line is visible is
 somewhere it can be picked up. Anchors deliberately do not: an anchor is a
 handle drawn at a fixed size on screen, not something the artwork draws.
 
+How far the stroke reaches is not always half its width, either. An inner or
+outer stroke is drawn at DOUBLE width against a clip or a mask, so its paint
+lands a full width to one side of the path rather than half a width either
+side — and taking half of it regardless left the outer part of a wide line
+unclickable.
+
 ### A click target is a screen distance, wherever the object is
 
 The tolerance a click carries is in world units — screen pixels divided by the zoom — but
@@ -1421,7 +1427,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 680 unit tests (Vitest)
-npm run test:e2e   # 356 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 358 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

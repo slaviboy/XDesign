@@ -546,8 +546,16 @@ export function hitTestNode(
 
   const styled = hasStyle(node) ? node : null
   const hasFill = !!styled && styled.style.fill.type !== 'none' && !options.strokeOnly
+  // How far the stroke reaches from the path, which is not always half its
+  // width: an inner or outer stroke is drawn at double width against a clip or
+  // a mask, so the paint lands a FULL width to one side. Taking half of it
+  // there leaves the outer half of a visible line unclickable — you click what
+  // you can see and nothing happens, which is worse the wider the stroke and so
+  // worse the further in the view is zoomed.
   const strokeW =
-    styled && styled.style.stroke.paint.type !== 'none' ? styled.style.stroke.width : 0
+    styled && styled.style.stroke.paint.type !== 'none'
+      ? styled.style.stroke.width * (styled.style.stroke.align === 'center' ? 1 : 2)
+      : 0
 
   // Text and images are solid targets regardless of fill.
   if (

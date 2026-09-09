@@ -52,7 +52,10 @@ async function escapesFrameBy(page: import('@playwright/test').Page): Promise<nu
 /** Bring the line to the middle of the view, so a click on it is a click on it. */
 async function centreOnLine(page: import('@playwright/test').Page): Promise<void> {
   const size = page.viewportSize()!
-  const box = await page.locator('.document-layer [data-node-type="line"]').boundingBox()
+  const box = await page
+    .locator('.document-layer [data-node-id]:not([data-node-type="artboard"])')
+    .first()
+    .boundingBox()
   if (!box) return
   const dx = size.width / 2 - (box.x + box.width / 2)
   const dy = size.height / 2 - (box.y + box.height / 2)
@@ -176,4 +179,64 @@ test('a segment selected on a line can be dragged', async ({ page }) => {
   const after = (await shape.boundingBox())!
   expect(after.x - before.x).toBeCloseTo(40, 0)
   expect(after.y - before.y).toBeCloseTo(30, 0)
+})
+
+test('an inner or outer stroke is clickable across all of it', async ({ page }) => {
+  // An inner or outer stroke is drawn at DOUBLE width against a clip or a mask,
+  // so its paint lands a full width to one side of the path rather than half a
+  // width either side. Hit-testing took half regardless, which left the outer
+  // part of a visible line unclickable — click what you can see, nothing
+  // happens — and the wider the stroke the bigger the dead band.
+  await drawShape(page, 'line', { x: 300, y: 320 }, { x: 460, y: 320 })
+  const stroke = page.locator('.section', { hasText: 'STROKE' })
+  const width = stroke.locator('.field', { has: page.locator('.field-label:text-is("W")') })
+    .locator('input')
+    .first()
+  await width.fill('24')
+  await width.press('Enter')
+  await page.locator('.icon-select[title^="Stroke alignment"]').click()
+  await page.locator('.menu-item', { hasText: 'Outside' }).click()
+  await selectTool(page, 'select')
+
+  const shape = page.locator('.document-layer [data-node-id]:not([data-node-type="artboard"])').first()
+  const box = (await shape.boundingBox())!
+  const x = box.x + box.width / 2
+
+  // Right across the band, edge to edge.
+  for (const fraction of [0.05, 0.25, 0.5, 0.75, 0.95]) {
+    await page.keyboard.press('Escape')
+    await page.mouse.click(x, box.y + box.height * fraction)
+    await expect(page.locator('.layer-row.selected'), `${fraction} down the stroke`).toHaveCount(1)
+  }
+})
+
+test('a line stays selectable and draggable however far in you zoom', async ({ page }) => {
+  await drawShape(page, 'line', { x: 300, y: 320 }, { x: 460, y: 320 })
+  const zoom = page.locator('[data-testid="zoom-value"]')
+
+  for (const level of ['400%', '1600%']) {
+    await page.keyboard.press('Escape')
+    await selectTool(page, 'direct-select')
+    await zoom.fill(level)
+    await zoom.press('Enter')
+    await centreOnLine(page)
+
+    const shape = page.locator('.document-layer [data-node-id]:not([data-node-type="artboard"])').first()
+    const box = (await shape.boundingBox())!
+    const x = box.x + box.width / 2
+    const y = box.y + box.height / 2
+
+    // Clicking it selects it, and selects something that can be dragged.
+    await page.mouse.click(x, y)
+    await expect(page.locator('.layer-row.selected'), level).toHaveCount(1)
+    await expect(page.locator('.path-points .selected-segment'), level).toHaveCount(1)
+
+    const before = (await shape.boundingBox())!
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.mouse.move(x, y - 40, { steps: 6 })
+    await page.mouse.up()
+    const after = (await shape.boundingBox())!
+    expect(after.y - before.y, level).toBeCloseTo(-40, 0)
+  }
 })
