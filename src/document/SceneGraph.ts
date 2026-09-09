@@ -684,7 +684,13 @@ export function hitTestAll(
       // artwork. So descending into an artboard resets the ancestor chain.
       const childAncestor = (child: NodeId): NodeId | null => {
         if (options.deep) return null
-        if (node.type === 'artboard') return null
+        // An artboard is a frame, not a group, so the chain restarts at its
+        // child rather than continuing through it — but it does restart.
+        // Returning null instead left the artboard's own children unseeded, so
+        // a click resolved one level too deep: the leaf for a single group, and
+        // the INNER group for nested ones, which is the opposite of treating a
+        // group as one object.
+        if (node.type === 'artboard') return child
         return topLevelAncestor ?? child
       }
       for (const child of node.children) {

@@ -99,7 +99,7 @@ import {
 import { getDoc } from '../state/DocumentStore'
 import { isUniformCornerRadius } from '../document/types'
 import type { Mat2D, Vec2 } from '../geometry/Matrix'
-import type { NodeId } from '../document/types'
+import type { DesignDocument, NodeId } from '../document/types'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
 
 type Phase = 'idle' | 'pending' | 'marquee' | 'transform' | 'radius' | 'star-ratio' | 'gradient'
@@ -149,6 +149,44 @@ function reset(): void {
  * what makes groups feel like single objects. Inside an entered group (after a
  * double-click), clicks resolve to that group's direct children instead.
  */
+/**
+ * The next group to step into on a double-click, or null when already as deep
+ * as the groups go.
+ *
+ * Artboards are deliberately not in the chain. An artboard is a frame rather
+ * than an object, and clicking its artwork already selects the artwork, so
+ * counting it as a level to enter spent the first double-click going nowhere
+ * visible.
+ */
+function nextGroupToEnter(doc: DesignDocument, leaf: NodeId): NodeId | null {
+  const context = editorStore.getState().editingContext
+  // Outermost first, which is the order they are entered in.
+  const groups = ancestorIds(doc, leaf)
+    .filter((id) => doc.nodes[id]?.type === 'group')
+    .reverse()
+  if (groups.length === 0) return null
+
+  if (!context) return groups[0]!
+  const at = groups.indexOf(context)
+  // A double-click in a different subtree starts that subtree from the top
+  // rather than silently jumping to wherever the old context happened to sit.
+  if (at === -1) return groups[0]!
+  return groups[at + 1] ?? null
+}
+
+/** The group that contains `id`, or null when its parent is an artboard or the root. */
+function enclosingGroup(doc: DesignDocument, id: NodeId): NodeId | null {
+  const parent = doc.nodes[id]?.parentId
+  return parent && doc.nodes[parent]?.type === 'group' ? parent : null
+}
+
+/** The child of `container` that leads to `leaf`. */
+function directChildOf(doc: DesignDocument, container: NodeId, leaf: NodeId): NodeId | null {
+  const chain = [leaf, ...ancestorIds(doc, leaf)]
+  const at = chain.indexOf(container)
+  return at > 0 ? chain[at - 1]! : null
+}
+
 function resolvePick(point: Vec2, tolerance: number): NodeId | null {
   const doc = getDoc()
   const context = editorStore.getState().editingContext
@@ -162,7 +200,11 @@ function resolvePick(point: Vec2, tolerance: number): NodeId | null {
       if (idx > 0) return chain[idx - 1]!
       return inner
     }
-    return null
+    // Nothing inside the group is under the pointer. Leave the group and pick
+    // whatever was actually clicked rather than swallowing the click: clicking
+    // a different object is not a request to do nothing.
+    exitGroup()
+    return hitTest(doc, point, { tolerance })
   }
   return hitTest(doc, point, { tolerance })
 }
@@ -476,15 +518,32 @@ export const selectionTool: Tool = {
     if (!deep) return
 
     const node = doc.nodes[deep]
-    // Double-clicking text goes straight to editing it.
+    // Double-clicking text goes straight to editing it, at any depth.
     if (node?.type === 'text') {
       setSelection([deep])
       setEditor({ editingTextId: deep })
       return
     }
-    // Double-clicking any shape shows its points — a line its two ends, a
-    // rectangle its four corners. Text was already handled above, and nothing
-    // is written to the document, so this is free until a point actually moves.
+
+    // Stepping into a group comes FIRST, and this ordering is the whole
+    // behaviour. Every ordinary shape is point-editable, so testing that first
+    // meant a double-click inside a group always opened point editing and
+    // switched to Direct Selection — the group-entering code below could only
+    // ever be reached by an image or a preserved svg, and no amount of
+    // double-clicking would take you into a group.
+    const next = nextGroupToEnter(doc, deep)
+    if (next) {
+      enterGroup(next)
+      // Select the direct child of the group just entered, not the leaf: one
+      // level per double-click is what makes the nesting legible, and it agrees
+      // with what a single click inside that group would now pick.
+      setSelection([directChildOf(doc, next, deep) ?? deep])
+      return
+    }
+
+    // Nothing left to enter, so this is the shape itself: show its points — a
+    // line its two ends, a rectangle its four corners. Nothing is written to
+    // the document, so this is free until a point actually moves.
     if (isPointEditable(node)) {
       setSelection([deep])
       setEditor({ nodeEditingId: deep })
@@ -497,19 +556,7 @@ export const selectionTool: Tool = {
       setTool('direct-select')
       return
     }
-
-    // Otherwise step into the group that contains what was clicked.
-    const chain = ancestorIds(doc, deep)
-    const context = editorStore.getState().editingContext
-    const groups = chain.filter((id) => doc.nodes[id]?.type === 'group' || doc.nodes[id]?.type === 'artboard')
-    const currentIdx = context ? groups.indexOf(context) : groups.length
-    const next = groups[currentIdx - 1] ?? groups[groups.length - 1]
-    if (next) {
-      enterGroup(next)
-      setSelection([deep])
-    } else {
-      setSelection([deep])
-    }
+    setSelection([deep])
   },
 
   onKeyDown(e: KeyboardEvent): boolean {
@@ -564,8 +611,14 @@ export const selectionTool: Tool = {
         reset()
         return true
       }
-      if (editorStore.getState().editingContext) {
-        exitGroup()
+      const context = editorStore.getState().editingContext
+      if (context) {
+        // Step out one level, mirroring the way double-click steps in. Dropping
+        // straight to the top made nesting a one-way trip: three double-clicks
+        // in, one Escape all the way out.
+        const parent = enclosingGroup(getDoc(), context)
+        if (parent) enterGroup(parent)
+        else exitGroup()
         return true
       }
       if (editorStore.getState().nodeEditingId) {
