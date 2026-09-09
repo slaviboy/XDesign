@@ -239,6 +239,58 @@ test('flip is non-destructive and reversible', async ({ page }) => {
   nums(restored).forEach((v, i) => expect(v).toBeCloseTo(nums(before)[i]!, 3))
 })
 
+test('zoom steps in usable increments, by key and by wheel', async ({ page }) => {
+  await openApp(page)
+  const zoom = page.locator('[data-testid="zoom-value"]')
+  const set = async (value: string) => {
+    await zoom.fill(value)
+    await zoom.press('Enter')
+  }
+
+  // Stepping up must not double. It used to go 100, 200, 400, 800, so two
+  // presses took you from readable to unusable with no setting in between.
+  await set('100%')
+  await press(page, '=')
+  await expect(zoom).toHaveValue('150%')
+  await press(page, '=')
+  await expect(zoom).toHaveValue('200%')
+  await press(page, '=')
+  await expect(zoom).toHaveValue('300%')
+
+  await set('100%')
+  await press(page, '-')
+  await expect(zoom).toHaveValue('67%')
+  await press(page, '-')
+  await expect(zoom).toHaveValue('50%')
+
+  // One mouse-wheel notch. The delta is clamped, because a notch of 120 pixels
+  // through the exponential mapping is a 2.7x jump — and some mice send 240,
+  // which is 11x.
+  await set('100%')
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  await page.mouse.move(canvas.x + 300, canvas.y + 300)
+  await page.keyboard.down('Control')
+  await page.mouse.wheel(0, -120)
+  await page.keyboard.up('Control')
+  await expect
+    .poll(async () => Number.parseFloat(await zoom.inputValue()))
+    .toBeGreaterThan(100)
+  const afterNotch = Number.parseFloat(await zoom.inputValue())
+  expect(afterNotch).toBeLessThan(140)
+
+  // A trackpad pinch sends deltas far below the clamp, so it is untouched and
+  // still ramps smoothly rather than in steps.
+  await set('100%')
+  await page.mouse.move(canvas.x + 300, canvas.y + 300)
+  await page.keyboard.down('Control')
+  await page.mouse.wheel(0, -8)
+  await page.keyboard.up('Control')
+  await expect
+    .poll(async () => Number.parseFloat(await zoom.inputValue()))
+    .toBeGreaterThan(100)
+  expect(Number.parseFloat(await zoom.inputValue())).toBeLessThan(112)
+})
+
 test('zoom and pan change the view without touching the document', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 300, y: 280 })

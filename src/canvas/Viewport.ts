@@ -93,7 +93,30 @@ export function centerViewport(
 }
 
 /** The zoom presets offered in the view menu. */
-export const ZOOM_PRESETS = [0.1, 0.25, 0.5, 0.75, 1, 2, 4, 8] as const
+/**
+ * The ladder Cmd+= and the +/- buttons step through.
+ *
+ * Roughly a third larger at each rung, which is the ratio every design tool
+ * settles on: big enough that a press does something, small enough that you can
+ * stop where you meant to. The old ladder DOUBLED above 100% — 100, 200, 400,
+ * 800 — so two presses took you from readable to unusable and there was no
+ * setting in between.
+ *
+ * It spans 2% to 6400%, matching the clamps in nextZoomStep, and every rung is
+ * a value that reads cleanly as a percentage.
+ */
+export const ZOOM_PRESETS = [
+  0.02, 0.03, 0.05, 0.08, 0.12, 0.17, 0.25, 0.33, 0.5, 0.67,
+  1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64,
+] as const
+
+/**
+ * The rungs the zoom menu offers, which is a different question.
+ *
+ * Stepping wants fine gradations; a menu wants a few round numbers you might
+ * deliberately ask for. Listing all twenty-three would make it a scroll.
+ */
+export const ZOOM_MENU_STEPS = [0.1, 0.25, 0.5, 0.75, 1, 2, 4, 8] as const
 
 /** Next preset above the current zoom — backs Cmd+= stepping. */
 export function nextZoomStep(current: number, direction: 1 | -1): number {

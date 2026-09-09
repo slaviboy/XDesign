@@ -78,6 +78,41 @@ export interface CanvasProps {
   onContextMenu?: (screen: Vec2, doc: Vec2) => void
 }
 
+/** How much of the wheel's delta becomes zoom. Tuned against a trackpad pinch. */
+const ZOOM_WHEEL_RATE = 0.01
+
+/**
+ * The largest delta one wheel event may contribute.
+ *
+ * A trackpad pinch arrives as a stream of small deltas — four to ten pixels an
+ * event, sixty times a second — and the exponential above turns that into a
+ * smooth ramp. A MOUSE wheel sends one notch of 100 to 120 in a single event,
+ * and some send 240: through the same exponential that is a 2.7x jump per
+ * notch, or 11x. Clamping to 25 caps one event at about 1.28x, which leaves the
+ * pinch untouched (its deltas are far below the clamp) and turns a mouse notch
+ * into a step you can actually stop on.
+ */
+const ZOOM_WHEEL_MAX_DELTA = 25
+
+/**
+ * The wheel's delta in pixels, whatever unit it arrived in.
+ *
+ * deltaMode is not always pixels: Firefox reports lines for a mouse wheel and
+ * some browsers report pages. Reading deltaY raw makes a line-mode notch of 3
+ * look like three pixels — a zoom that barely moves — while a pixel-mode notch
+ * of 120 blows past everything.
+ */
+function wheelZoomDelta(e: WheelEvent, el: HTMLElement): number {
+  const LINE_HEIGHT = 16
+  const pixels =
+    e.deltaMode === 1
+      ? e.deltaY * LINE_HEIGHT
+      : e.deltaMode === 2
+        ? e.deltaY * el.clientHeight
+        : e.deltaY
+  return Math.max(-ZOOM_WHEEL_MAX_DELTA, Math.min(ZOOM_WHEEL_MAX_DELTA, pixels))
+}
+
 export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -273,7 +308,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
       if (e.ctrlKey || e.metaKey) {
         // Trackpad pinch arrives as ctrl+wheel; exponential mapping keeps the
         // zoom feeling linear to the fingers.
-        const factor = Math.exp(-e.deltaY * 0.01)
+        const factor = Math.exp(-wheelZoomDelta(e, el) * ZOOM_WHEEL_RATE)
         zoomAt(screen.x, screen.y, v.zoom * factor)
       } else if (e.shiftKey) {
         panBy(-e.deltaY, 0)

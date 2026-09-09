@@ -1229,6 +1229,24 @@ half that falls outside the glyph — which is what an outlined letter is suppos
 like, and what Adobe does, where Stroke sits below Fill in a type object's appearance. An
 outer stroke is then asked for at double width so the full width lands outside.
 
+### One wheel notch is not one pinch
+
+Zooming by wheel maps the delta through an exponential, which is right: it keeps a trackpad
+pinch feeling linear to the fingers. But a pinch and a wheel do not send the same thing. A
+pinch arrives as a stream of four-to-ten-pixel deltas sixty times a second; a mouse wheel
+sends one notch of 100 to 120 in a single event, and some send 240. Through the same
+exponential that notch is a 2.7x jump — or 11x — which is not a zoom so much as a
+teleport.
+
+The delta is clamped to 25 before it is mapped, capping one event at about 1.28x. The pinch
+never reaches the clamp, so it is untouched; the notch becomes a step you can stop on.
+`deltaMode` is normalised first, because Firefox reports a wheel in LINES and some browsers
+in pages — read raw, a line-mode notch of 3 is a zoom that barely moves.
+
+The keyboard ladder had the same problem from the other end: it doubled above 100%, so
+100 → 200 → 400 → 800 took you from readable to unusable in two presses with no setting in
+between. It steps by about a third now, the ratio every design tool settles on.
+
 ### Sampling a curve tells you where it is, not how far away it is
 
 Finding which segment a click landed on walks each one at twenty-five sampled
@@ -1447,7 +1465,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 684 unit tests (Vitest)
-npm run test:e2e   # 359 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 360 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

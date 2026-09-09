@@ -43,6 +43,7 @@ import {
 import { copySelection, cutSelection, duplicateInPlace } from '../state/Clipboard'
 import { pasteFromSystem } from '../state/SystemClipboard'
 import { stepZoom, zoomTo, zoomToFit, zoomToSelection } from '../shortcuts/KeyboardManager'
+import { ZOOM_MENU_STEPS } from '../canvas/Viewport'
 import { canImageTrace, openImageTrace } from '../history/TraceCommands'
 import { openDialog, setEditor, type WorkspaceTab } from '../state/EditorStore'
 import { useDocumentStore, useEditorStore } from '../state/hooks'
@@ -399,7 +400,7 @@ function ZoomControl() {
     { label: t('menu.zoomToFit'), shortcut: shortcutLabel('view.zoomFit'), onSelect: zoomToFit },
     { label: t('menu.zoomToSelection'), shortcut: shortcutLabel('view.zoomSelection'), onSelect: zoomToSelection },
     { kind: 'separator' },
-    ...[0.1, 0.25, 0.5, 0.75, 1, 2, 4, 8].map((z) => ({
+    ...ZOOM_MENU_STEPS.map((z) => ({
       label: `${Math.round(z * 100)}%`,
       onSelect: () => zoomTo(z),
     })),
