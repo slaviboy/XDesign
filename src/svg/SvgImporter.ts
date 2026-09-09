@@ -45,6 +45,8 @@ import {
 } from '../geometry/Matrix'
 import { pathBounds, transformPath } from '../geometry/PathUtils'
 import { parsePreserveAspectRatio, viewBoxMatrix } from '../geometry/ViewBox'
+import { transformBounds } from '../geometry/Bounds'
+import { localMatrix } from '../document/SceneGraph'
 import { transformFromMatrix } from '../document/DocumentModel'
 import { createAssetId, createStopId } from '../document/ids'
 import {
@@ -715,21 +717,66 @@ function nestedViewportMatrix(el: Element): Mat2D | null {
   return offset ? multiply(offset, map) : map
 }
 
+/**
+ * Fit a group's own box to the children inside it.
+ *
+ * The origin has to move too, not just the size. A group whose box says
+ * (0,0,w,h) while its content actually starts at (100,50) has a selection frame
+ * offset from its own artwork by that much, and — because a resize scales about
+ * the group's local origin — dragging a handle then slides the contents as it
+ * scales them. groupNodes has always placed a group at its content's corner;
+ * this is the same normalization for groups the importer builds.
+ *
+ * Bounds come from each child's local matrix rather than its x/y and size, so a
+ * rotated or scaled child is measured by where it actually lands.
+ */
 function sizeGroupToChildren(groupId: NodeId, ctx: ImportContext): void {
   const group = ctx.nodes[groupId]
   if (!group || group.type !== 'group') return
+
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const childId of group.children) {
     const child = ctx.nodes[childId]
     if (!child) continue
-    const t = child.transform
-    minX = Math.min(minX, t.x)
-    minY = Math.min(minY, t.y)
-    maxX = Math.max(maxX, t.x + t.width)
-    maxY = Math.max(maxY, t.y + t.height)
+    const b = transformBounds(
+      { x: 0, y: 0, width: child.transform.width, height: child.transform.height },
+      localMatrix(child.transform),
+    )
+    minX = Math.min(minX, b.x)
+    minY = Math.min(minY, b.y)
+    maxX = Math.max(maxX, b.x + b.width)
+    maxY = Math.max(maxY, b.y + b.height)
   }
   if (!Number.isFinite(minX)) return
-  group.transform = { ...group.transform, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) }
+
+  const width = Math.max(1, maxX - minX)
+  const height = Math.max(1, maxY - minY)
+
+  if (minX !== 0 || minY !== 0) {
+    // Slide the children back by as much as the origin moves forward, so the
+    // artwork does not shift on screen.
+    for (const childId of group.children) {
+      const child = ctx.nodes[childId]
+      if (!child) continue
+      child.transform = {
+        ...child.transform,
+        x: child.transform.x - minX,
+        y: child.transform.y - minY,
+      }
+    }
+    // The offset is in the group's own local space, so it goes through the
+    // group's matrix to become a translation in its parent's space.
+    const moved = multiply(localMatrix(group.transform), translation(minX, minY))
+    group.transform = transformFromMatrix(
+      moved,
+      width,
+      height,
+      group.transform.originX,
+      group.transform.originY,
+    )
+    return
+  }
+  group.transform = { ...group.transform, width, height }
 }
 
 function importRect(el: Element, ctx: ImportContext, style: InheritedStyle, matrix: Mat2D): NodeId {

@@ -229,6 +229,30 @@ export function localGeometryBounds(node: DesignNode): Bounds {
   return localBox(node)
 }
 
+/**
+ * A node's own box in its LOCAL space, with a group measured by its contents.
+ *
+ * A group's stored width and height are written once, when it is formed, and
+ * never refitted — move a child afterwards and the box no longer describes the
+ * artwork. Everything that reasons about where a group actually is already goes
+ * through geometryBounds, which unions the children; this is the same answer in
+ * the group's own space, for the two callers that need it there: the selection
+ * frame, and the resize that divides by it.
+ */
+export function localContentBox(doc: DesignDocument, node: DesignNode): Bounds {
+  if (isContainer(node) && !usesOwnBox(node)) {
+    const kids: Bounds[] = []
+    for (const id of node.children) {
+      const child = doc.nodes[id]
+      if (!child) continue
+      const b = transformBounds(localContentBox(doc, child), nodeLocalMatrix(child))
+      if (b.width > 0 || b.height > 0) kids.push(b)
+    }
+    return kids.length ? unionAll(kids) : localBox(node)
+  }
+  return localGeometryBounds(node)
+}
+
 /** How far the stroke reaches past the fill, honoring miter limit and cap. */
 export function strokePadding(node: DesignNode): number {
   if (!hasStyle(node)) return 0

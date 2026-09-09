@@ -33,6 +33,7 @@ import { memo, useMemo } from 'react'
 import { applyToXY, meanScale, type Mat2D, type Vec2 } from '../geometry/Matrix'
 import { boundsFromPoints, type Bounds } from '../geometry/Bounds'
 import {
+  localContentBox,
   createMatrixCache,
   geometryBounds,
   localGeometryBounds,
@@ -221,9 +222,12 @@ function computeFrame(
     // Live matrices win during a drag; the document has not been written yet.
     let world = getLiveMatrix(id) ?? cache.world(doc, id)
     const liveSize = getLiveSize(id)
+    // A group's stored box is written once and never refitted, so framing it
+    // draws handles that are not on the artwork the moment a child moves.
+    // Measuring the contents puts them back on it.
     let local = liveSize
       ? { x: 0, y: 0, width: liveSize.width, height: liveSize.height }
-      : localGeometryBounds(node)
+      : localContentBox(doc, node)
 
     // A mask group shows only what its mask reveals, so the frame is the
     // mask's — framing the union would draw a rectangle round artwork that is
@@ -232,7 +236,7 @@ function computeFrame(
     const mask = isMaskGroup(node) ? doc.nodes[node.maskId] : undefined
     if (mask && !liveSize) {
       world = multiply(world, localMatrix(mask.transform))
-      local = localGeometryBounds(mask)
+      local = localContentBox(doc, mask)
     }
 
     const cornersDoc = [

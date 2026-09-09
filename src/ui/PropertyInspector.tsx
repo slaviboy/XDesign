@@ -57,9 +57,9 @@ import {
 import { setRepeatGridParams } from '../history/RepeatGridCommands'
 import { importTextIntoSelection } from '../app/textImport'
 import {
-  geometryBounds, localBox, localGeometryBounds, nodeLocalMatrix, worldMatrix,
+  artboardOf, geometryBounds, localBox, localGeometryBounds, nodeLocalMatrix, worldMatrix,
 } from '../document/SceneGraph'
-import { decompose, invert, multiply, type Mat2D } from '../geometry/Matrix'
+import { applyToPoint, decompose, invert, multiply, type Mat2D, type Vec2 } from '../geometry/Matrix'
 import { transformBounds, unionAll, type Bounds } from '../geometry/Bounds'
 import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
 import { getLiveMatrix, getLiveSize, usesIntrinsicSize } from '../tools/DragSession'
@@ -330,18 +330,31 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
 
   const effectiveW = common(nodes, (n) => round2(liveEffectiveSize(doc, n).width))
   const effectiveH = common(nodes, (n) => round2(liveEffectiveSize(doc, n).height))
-  const x = multiple ? null : round2(bounds?.x ?? 0)
-  const y = multiple ? null : round2(bounds?.y ?? 0)
+  // X and Y are measured from the artboard the object sits on, not from the
+  // canvas origin. An object 100 from its artboard's left edge reads 100
+  // wherever that artboard is moved to, which is what makes the number mean
+  // anything: tied to the global canvas it changed every time the artboard did,
+  // while the object had not moved at all.
+  const frameOrigin = useMemo(
+    () => (multiple ? { x: 0, y: 0 } : artboardOrigin(doc, nodes[0])),
+    [doc, nodes, multiple, liveTick],
+  )
+  const x = multiple ? null : round2((bounds?.x ?? 0) - frameOrigin.x)
+  const y = multiple ? null : round2((bounds?.y ?? 0) - frameOrigin.y)
 
+  // The edit is a delta, so it does not care which frame the number was in as
+  // long as the reference matches what was displayed.
   const applyX = (value: number) => {
     const node = nodes[0]
     if (!node || !bounds) return
-    setNodeTransform(node.id, { x: node.transform.x + (value - bounds.x) }, `x:${node.id}`)
+    const shown = bounds.x - frameOrigin.x
+    setNodeTransform(node.id, { x: node.transform.x + (value - shown) }, `x:${node.id}`)
   }
   const applyY = (value: number) => {
     const node = nodes[0]
     if (!node || !bounds) return
-    setNodeTransform(node.id, { y: node.transform.y + (value - bounds.y) }, `y:${node.id}`)
+    const shown = bounds.y - frameOrigin.y
+    setNodeTransform(node.id, { y: node.transform.y + (value - shown) }, `y:${node.id}`)
   }
   const applySize = (key: 'width' | 'height', value: number) => {
     for (const node of nodes) {
@@ -536,6 +549,25 @@ function liveGeometryScale(node: DesignNode): { kx: number; ky: number } | null 
     kx: node.transform.width > 0 ? size.width / node.transform.width : 1,
     ky: node.transform.height > 0 ? size.height / node.transform.height : 1,
   }
+}
+
+/**
+ * The world position of the top-left corner of the artboard a node sits on.
+ *
+ * Zero for a node on the bare pasteboard, and zero for an artboard itself —
+ * an artboard is positioned on the canvas, so its own X and Y are canvas
+ * coordinates and reading them relative to itself would always say 0,0.
+ *
+ * The corner is the local origin put through the artboard's matrix rather than
+ * the corner of its bounding box, so a rotated artboard still measures from the
+ * corner its contents are laid out from.
+ */
+function artboardOrigin(doc: DesignDocument, node: DesignNode | undefined): Vec2 {
+  if (!node) return { x: 0, y: 0 }
+  const board = artboardOf(doc, node.id)
+  if (!board || board === node.id) return { x: 0, y: 0 }
+  const live = getLiveMatrix(board)
+  return applyToPoint(live ?? worldMatrix(doc, board), { x: 0, y: 0 })
 }
 
 /**

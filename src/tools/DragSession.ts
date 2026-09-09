@@ -36,6 +36,7 @@
  */
 
 import {
+  compose,
   applyToPoint,
   invert,
   multiply,
@@ -54,6 +55,7 @@ import {
 } from '../geometry/ShapeGeometry'
 import { transformPath } from '../geometry/PathUtils'
 import {
+  localContentBox,
   geometryBounds,
   localMatrix,
   worldMatrix,
@@ -82,6 +84,13 @@ interface NodeSnapshot {
   world: Mat2D
   parentWorld: Mat2D
   transform: Transform
+  /**
+   * The box actually being dragged, in the node's local space. Equal to
+   * (0,0,width,height) for everything with a size of its own; for a group it is
+   * where its contents really are, which its stored box stops describing the
+   * moment a child moves.
+   */
+  content: Bounds
   type: DesignNode['type']
   /** Original path data, for path nodes whose geometry is baked on resize. */
   d?: string
@@ -233,6 +242,7 @@ export function beginDrag(
       // Images carry corner rounding too, and it shapes the clip they are
       // drawn through — so a live resize has to rebuild that clip as well.
       cornerRadius: node.type === 'rect' || node.type === 'image' ? node.cornerRadius : undefined,
+      content: localContentBox(doc, node),
       vertexRadius: node.type === 'polygon' ? node.cornerRadius : undefined,
       effectMargin: hasStyle(node) ? effectMargin(node.style) : 0,
       text: node.type === 'text' ? { text: node.text, style: node.textStyle, runs: node.runs } : undefined,
@@ -369,21 +379,33 @@ function applyResize(
 
   if (s.singleAxisResize) {
     const snap = s.nodes[0]!
+    // A group is measured by its contents, which need not start at its local
+    // origin: its stored box is written once and never refitted. Resizing
+    // against the stored box scaled the artwork about a corner that was not on
+    // it, so the contents slid sideways as they grew — worst from the handles
+    // furthest from that corner. `content` is the box actually being dragged.
+    const content = snap.content
     const local = applyToPoint(invert(snap.world), currentDoc)
     const box = resizeLocalBox(
-      snap.transform.width,
-      snap.transform.height,
+      content.width,
+      content.height,
       handle,
-      local,
+      { x: local.x - content.x, y: local.y - content.y },
       options,
     )
     // Re-anchor: the new local origin sits at (x0,y0) of the OLD local space,
     // and a negative signed extent mirrors the shape rather than inverting it.
     // For a group the extent goes into the scale as well, which is the only
     // thing that moves its children.
-    const kx = s.scalesContent && snap.transform.width > 0 ? box.width / snap.transform.width : 1
-    const ky = s.scalesContent && snap.transform.height > 0 ? box.height / snap.transform.height : 1
-    const reanchor = multiply(translation(box.x0, box.y0), scaling(box.sx * kx, box.sy * ky))
+    const kx = s.scalesContent && content.width > 0 ? box.width / content.width : 1
+    const ky = s.scalesContent && content.height > 0 ? box.height / content.height : 1
+    // Into the content box's frame, resize there, and back out again.
+    const reanchor = compose(
+      translation(-content.x, -content.y),
+      scaling(box.sx * kx, box.sy * ky),
+      translation(box.x0, box.y0),
+      translation(content.x, content.y),
+    )
     const world = multiply(snap.world, reanchor)
     out.set(snap.id, world)
     if (s.scalesContent) {

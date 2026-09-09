@@ -26,7 +26,8 @@
 
 import { test, expect } from '@playwright/test'
 import {
-  CANVAS, clickCanvas, dragOnCanvas, drawShape, modifier, openApp, press, selectTool,
+  CANVAS, clickCanvas, dragOnCanvas, drawShape, modifier, openApp, press, readField,
+  selectTool, setField,
 } from './helpers'
 
 type Page = import('@playwright/test').Page
@@ -224,5 +225,103 @@ test.describe('artboard-relative positioning', () => {
     expect(after[0]![0]! - before[0]![0]!).toBe(Math.round(artboardAfter - artboardBefore))
     expect(after[0]![1]! - before[0]![1]!).toBe(60)
     expect([after[0]![2], after[0]![3]]).toEqual([before[0]![2], before[0]![3]])
+  })
+})
+
+test.describe('a group whose contents have moved since it was made', () => {
+  /** Group two rects, then shove one child far below the group's original box. */
+  async function staleGroup(page: Page): Promise<void> {
+    await openApp(page)
+    await drawShape(page, 'rect', { x: 400, y: 250 }, { x: 460, y: 310 })
+    await drawShape(page, 'rect', { x: 500, y: 250 }, { x: 560, y: 310 })
+    await selectTool(page, 'select')
+    await page.keyboard.press(`${modifier()}+a`)
+    await press(page, 'g')
+
+    const c = (await page.locator(CANVAS).boundingBox())!
+    await page.mouse.dblclick(c.x + 430, c.y + 280)
+    await page.mouse.move(c.x + 430, c.y + 280)
+    await page.mouse.down()
+    await page.mouse.move(c.x + 430, c.y + 400, { steps: 8 })
+    await page.mouse.up()
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
+    await clickCanvas(page, { x: 530, y: 280 })
+  }
+
+  test('the selection frame is on the artwork, not on the box it was made with', async ({ page }) => {
+    await staleGroup(page)
+    const r = await rects(page)
+    const frame = (await page.locator('.selection-frame').boundingBox())!
+
+    const top = Math.min(...r.map((a) => a[1]!))
+    const bottom = Math.max(...r.map((a) => a[1]! + a[3]!))
+    // A group's stored box is written once and never refitted, so this used to
+    // be the height the group had when it was formed — 64 against artwork 180 —
+    // leaving every handle somewhere the artwork is not.
+    expect(frame.height).toBeGreaterThan((bottom - top) * 0.9)
+    expect(Math.round(frame.y)).toBeLessThanOrEqual(top)
+  })
+
+  test('scaling it still scales the children evenly', async ({ page }) => {
+    await staleGroup(page)
+    const before = await rects(page)
+    const frame = (await page.locator('.selection-frame').boundingBox())!
+
+    // The east handle: furthest from the stale box's corner, so the worst case
+    // for scaling about the wrong origin.
+    await page.mouse.move(frame.x + frame.width, frame.y + frame.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(frame.x + frame.width + 80, frame.y + frame.height / 2, { steps: 12 })
+    await page.mouse.up()
+
+    const after = await rects(page)
+    const sx = after.map((a, i) => a[2]! / before[i]![2]!)
+    expect(Math.max(...sx) - Math.min(...sx)).toBeLessThan(0.05)
+    expect(sx[0]!).toBeGreaterThan(1)
+    // Heights untouched by a horizontal-only handle.
+    expect(after.map((a) => a[3])).toEqual(before.map((b) => b[3]))
+  })
+})
+
+test.describe('coordinates are read from the artboard', () => {
+  test('X and Y do not change when the artboard moves', async ({ page }) => {
+    await openApp(page)
+    await drawShape(page, 'rect', { x: 400, y: 300 }, { x: 460, y: 360 })
+    await selectTool(page, 'select')
+    await clickCanvas(page, { x: 430, y: 330 })
+    const before = { x: await readField(page, 'X'), y: await readField(page, 'Y') }
+
+    const label = (await page.locator('.artboard-label').first().boundingBox())!
+    await page.mouse.move(label.x + label.width / 2, label.y + label.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(label.x + label.width / 2 + 150, label.y + label.height / 2 + 70, { steps: 10 })
+    await page.mouse.up()
+
+    await clickCanvas(page, { x: 580, y: 400 })
+    const after = { x: await readField(page, 'X'), y: await readField(page, 'Y') }
+
+    // The object has not moved relative to its artboard, so the numbers that
+    // describe it must not move either. Read against the canvas origin they
+    // changed by exactly how far the artboard was dragged.
+    expect(after.x).toBeCloseTo(before.x, 1)
+    expect(after.y).toBeCloseTo(before.y, 1)
+  })
+
+  test('typing an X still puts the object where it says, measured from the artboard', async ({ page }) => {
+    await openApp(page)
+    await drawShape(page, 'rect', { x: 400, y: 300 }, { x: 460, y: 360 })
+    await selectTool(page, 'select')
+    await clickCanvas(page, { x: 430, y: 330 })
+
+    await setField(page, 'X', 100)
+    expect(await readField(page, 'X')).toBeCloseTo(100, 1)
+
+    // 100 from the artboard's left edge, wherever the artboard is.
+    const artboard = await page.locator('.document-layer [data-node-type="artboard"]').first()
+      .evaluate((e) => (e as SVGGraphicsElement).getBoundingClientRect())
+    const rect = (await rects(page))[0]!
+    const zoom = artboard.width / 1280
+    expect((rect[0]! - artboard.x) / zoom).toBeCloseTo(100, 0)
   })
 })
