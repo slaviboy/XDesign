@@ -236,5 +236,6 @@
   "prefs.transfer.all": "すべて",
   "prefs.transfer.count": "{total} 件中 {count} 件",
   "prefs.transfer.nothing": "このファイルには、このバージョンで使用できる項目がありません。",
-  "prefs.transfer.canvasNote": "カンバス設定は開いているドキュメントを変更します。取り消しで元に戻せます。"
+  "prefs.transfer.canvasNote": "カンバス設定は開いているドキュメントを変更します。取り消しで元に戻せます。",
+  "prefs.transfer.export": "書き出し"
 }

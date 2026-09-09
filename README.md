@@ -1281,7 +1281,7 @@ they stay a constant size at any zoom and can never end up in an export.
 
 ```bash
 npm test           # 643 unit tests (Vitest)
-npm run test:e2e   # 328 end-to-end tests (Playwright, real Chromium)
+npm run test:e2e   # 329 end-to-end tests (Playwright, real Chromium)
 npm run lint
 npm run typecheck
 ```

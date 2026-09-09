@@ -236,5 +236,6 @@
   "prefs.transfer.all": "Todo",
   "prefs.transfer.count": "{count} de {total}",
   "prefs.transfer.nothing": "Este archivo no contiene nada que esta versión pueda usar.",
-  "prefs.transfer.canvasNote": "Los ajustes del lienzo cambian el documento abierto. Una acción de deshacer lo revierte."
+  "prefs.transfer.canvasNote": "Los ajustes del lienzo cambian el documento abierto. Una acción de deshacer lo revierte.",
+  "prefs.transfer.export": "Exportar"
 }

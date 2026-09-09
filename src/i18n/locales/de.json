@@ -236,5 +236,6 @@
   "prefs.transfer.all": "Alles",
   "prefs.transfer.count": "{count} von {total}",
   "prefs.transfer.nothing": "Diese Datei enthält nichts, was diese Version verwenden kann.",
-  "prefs.transfer.canvasNote": "Zeichenflächen-Einstellungen ändern das geöffnete Dokument. Ein Widerruf macht das rückgängig."
+  "prefs.transfer.canvasNote": "Zeichenflächen-Einstellungen ändern das geöffnete Dokument. Ein Widerruf macht das rückgängig.",
+  "prefs.transfer.export": "Exportieren"
 }

@@ -1681,7 +1681,13 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
    values line up as a column that can be read down. */
 .prefs-transfer-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  /* minmax(0, 1fr) rather than 1fr: a grid track's automatic minimum is its
+     min-content width, so a plain 1fr refuses to shrink below the longest word
+     in the name and squeezes the value column into an ellipsis instead. The
+     name is the column that should give way — it is repeated in every row and
+     stays readable truncated, while "Anything it touches" cut to "Anythi…"
+     tells you nothing. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 6px 4px;
@@ -1696,11 +1702,13 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Sized to its content, so the values read as a column down the dialog. The
+   ellipsis is a backstop for a language that needs more room than there is,
+   not the normal case. */
 .prefs-transfer-value {
   color: var(--text-faint);
   font-size: var(--fs-xs);
   text-align: right;
-  max-width: 45%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

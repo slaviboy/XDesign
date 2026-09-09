@@ -236,5 +236,6 @@
   "prefs.transfer.all": "Tudo",
   "prefs.transfer.count": "{count} de {total}",
   "prefs.transfer.nothing": "Este ficheiro não contém nada que esta versão possa usar.",
-  "prefs.transfer.canvasNote": "As definições da tela alteram o documento aberto. Uma anulação reverte-as."
+  "prefs.transfer.canvasNote": "As definições da tela alteram o documento aberto. Uma anulação reverte-as.",
+  "prefs.transfer.export": "Exportar"
 }

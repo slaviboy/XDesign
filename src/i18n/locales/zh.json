@@ -236,5 +236,6 @@
   "prefs.transfer.all": "全部",
   "prefs.transfer.count": "{total} 项中的 {count} 项",
   "prefs.transfer.nothing": "此文件不包含此版本可用的任何内容。",
-  "prefs.transfer.canvasNote": "画布设置会更改已打开的文档。撤销一次即可还原。"
+  "prefs.transfer.canvasNote": "画布设置会更改已打开的文档。撤销一次即可还原。",
+  "prefs.transfer.export": "导出"
 }

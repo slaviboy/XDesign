@@ -236,5 +236,6 @@
   "prefs.transfer.all": "Everything",
   "prefs.transfer.count": "{count} of {total}",
   "prefs.transfer.nothing": "This file holds nothing this version can use.",
-  "prefs.transfer.canvasNote": "Canvas settings change the open document. One undo reverses it."
+  "prefs.transfer.canvasNote": "Canvas settings change the open document. One undo reverses it.",
+  "prefs.transfer.export": "Export"
 }

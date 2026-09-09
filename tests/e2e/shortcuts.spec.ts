@@ -222,6 +222,30 @@ test('preferences export and import move settings between machines', async ({ pa
   await expect(shortcutButton(page, 'Save')).toHaveText('K')
 })
 
+test('every row is readable, and the button does not promise another dialog', async ({ page }) => {
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-export-prefs"]').click()
+
+  // Nothing is cut off. text-overflow leaves the full string in the DOM, so
+  // toContainText would pass on a truncated row — the width is the only thing
+  // that actually says whether it can be read.
+  const clipped = await page.locator('.prefs-transfer-value').evaluateAll((nodes) =>
+    nodes
+      .filter((n) => n.scrollWidth > n.clientWidth + 1)
+      .map((n) => n.textContent),
+  )
+  expect(clipped).toEqual([])
+
+  // And a long value is present in full, not an ellipsis.
+  await expect(
+    page.locator('.prefs-transfer-row', { hasText: 'Marquee selects' }).locator('.prefs-transfer-value'),
+  ).toHaveText('Anything it touches')
+
+  // The menu entry that opens this dialog ends in an ellipsis; this button
+  // performs the export, so it must not.
+  await expect(page.locator('.dialog-footer .button.primary')).toHaveText('Export')
+})
+
 test('export writes only the sections that are ticked', async ({ page }) => {
   await page.locator('[data-testid="app-menu"]').click()
   await page.locator('[data-testid="menu-export-prefs"]').click()

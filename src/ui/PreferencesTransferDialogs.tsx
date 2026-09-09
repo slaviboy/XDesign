@@ -197,7 +197,7 @@ export function PreferencesExportDialog() {
         <>
           <button type="button" className="button" onClick={closeDialog}>{t('trace.cancel')}</button>
           <button type="button" className="button primary" disabled={chosen.size === 0} onClick={write}>
-            {t('menu.export')}
+            {t('prefs.transfer.export')}
           </button>
         </>
       }
