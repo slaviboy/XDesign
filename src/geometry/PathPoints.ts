@@ -238,37 +238,65 @@ export function movePoint(sub: PenSubpath, index: number, dx: number, dy: number
  * joint smooth; otherwise the handles become independent, which is how a smooth
  * point is broken into a cusp.
  */
+/**
+ * What happens to the direction line on the far side of the anchor.
+ *
+ * The distinction is not a nicety, it is two different gestures:
+ *
+ *   'none'     leave it alone — Alt, and the cusp it makes.
+ *   'keep'     swing it round to stay opposite, at ITS OWN length. Dragging one
+ *              handle of a point that already has two: the other keeps the size
+ *              it was given, which is how every vector editor behaves.
+ *   'reflect'  make it the exact mirror image. Both lines are being drawn by
+ *              the SAME gesture — the drag that places a smooth point — so
+ *              there is no established length on the far side to preserve.
+ *
+ * Conflating the last two is what made a dragged-out curve arrive almost
+ * straight: 'keep' read the opposite handle's length, and on the first frame of
+ * a drag that length is a couple of pixels, so it stayed a couple of pixels for
+ * the rest of the gesture however far the pointer went.
+ */
+export type HandleMirror = 'none' | 'keep' | 'reflect'
+
 export function moveHandle(
   sub: PenSubpath,
   index: number,
   which: 'in' | 'out',
   to: Vec2,
-  mirror: boolean,
+  mirror: HandleMirror,
 ): void {
   const p = sub.points[index]
   if (!p) return
+  const far = which === 'in' ? 'out' : 'in'
   if (which === 'in') {
     p.inX = to.x
     p.inY = to.y
-    if (mirror) {
-      const len = Math.hypot((p.outX ?? p.x) - p.x, (p.outY ?? p.y) - p.y) || Math.hypot(to.x - p.x, to.y - p.y)
-      const dx = p.x - to.x
-      const dy = p.y - to.y
-      const d = Math.hypot(dx, dy) || 1
-      p.outX = p.x + (dx / d) * len
-      p.outY = p.y + (dy / d) * len
-    }
   } else {
     p.outX = to.x
     p.outY = to.y
-    if (mirror) {
-      const len = Math.hypot((p.inX ?? p.x) - p.x, (p.inY ?? p.y) - p.y) || Math.hypot(to.x - p.x, to.y - p.y)
-      const dx = p.x - to.x
-      const dy = p.y - to.y
-      const d = Math.hypot(dx, dy) || 1
-      p.inX = p.x + (dx / d) * len
-      p.inY = p.y + (dy / d) * len
-    }
+  }
+  if (mirror === 'none') return
+
+  const dx = p.x - to.x
+  const dy = p.y - to.y
+  const reach = Math.hypot(dx, dy)
+  if (reach === 0) return
+
+  const farX = far === 'in' ? p.inX : p.outX
+  const farY = far === 'in' ? p.inY : p.outY
+  const length =
+    mirror === 'reflect' || farX === null || farY === null
+      ? reach
+      : Math.hypot(farX - p.x, farY - p.y) || reach
+
+  const x = p.x + (dx / reach) * length
+  const y = p.y + (dy / reach) * length
+  if (far === 'in') {
+    p.inX = x
+    p.inY = y
+  } else {
+    p.outX = x
+    p.outY = y
   }
 }
 

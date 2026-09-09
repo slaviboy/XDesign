@@ -534,6 +534,35 @@ test('a drag in curvature mode places a point rather than pulling handles', asyn
 // The rest of what the documentation describes
 // ---------------------------------------------------------------------------
 
+test('a dragged curve gets two direction lines of equal length', async ({ page }) => {
+  // The complaint this was written for: the far handle sat on top of the
+  // anchor, so the curve had no curvature arriving at it. A real drag arrives
+  // as many small moves, and the far handle used to keep the length the first
+  // of them gave it.
+  const anchor = await pt(page, 300, 300)
+  const out = await pt(page, 360, 360)
+  await page.mouse.move(anchor.x, anchor.y)
+  await page.mouse.down()
+  await page.mouse.move(out.x, out.y, { steps: 10 })
+
+  const handles = await page
+    .locator('.pen-preview .bezier-handle')
+    .evaluateAll((els) => els.map((el) => [Number(el.getAttribute('cx')), Number(el.getAttribute('cy'))]))
+  expect(handles).toHaveLength(2)
+  const box = (await page.locator(CANVAS).boundingBox())!
+  const [a, b] = handles.map(([x, y]) => [x! + box.x - anchor.x, y! + box.y - anchor.y] as const)
+  // Equal reach either side, and opposite directions.
+  expect(Math.hypot(a![0], a![1])).toBeCloseTo(Math.hypot(b![0], b![1]), 1)
+  expect(a![0]).toBeCloseTo(-b![0], 1)
+  expect(a![1]).toBeCloseTo(-b![1], 1)
+
+  await page.mouse.up()
+  await click(page, 460, 300)
+  await page.keyboard.press('Enter')
+  // Both sides of the joint bend: a curve, not a corner wearing one handle.
+  expect((await pathD(page))!).toContain('C')
+})
+
 test('hovering a path with the pen shows handles over its start and end', async ({ page }) => {
   await click(page, 200, 200)
   await click(page, 320, 200)

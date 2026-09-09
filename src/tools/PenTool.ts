@@ -878,7 +878,7 @@ export const penTool: Tool = {
           const p = pen.building.points[arm.index]
           if (p) movePoint(pen.building, arm.index, to.x - p.x, to.y - p.y)
         } else {
-          moveHandle(pen.building, arm.index, 'out', to, false)
+          moveHandle(pen.building, arm.index, 'out', to, 'none')
         }
         pen.dirty = true
       }
@@ -908,11 +908,12 @@ export const penTool: Tool = {
           if (pen.closing) {
             // Only the incoming side: mirroring would rotate the first point's
             // outgoing handle and rewrite the segment already drawn from it.
-            moveHandle(pen.building, 0, 'in', to, false)
+            moveHandle(pen.building, 0, 'in', to, 'none')
           } else {
             // Alt splits the handles, which is how two curves meet at a cusp.
-            // Without it they mirror, making the joint smooth.
-            moveHandle(pen.building, index, 'out', to, !e.altKey)
+            // Without it they mirror — exactly, because this one drag is
+            // drawing both of them and neither has a length of its own yet.
+            moveHandle(pen.building, index, 'out', to, e.altKey ? 'none' : 'reflect')
           }
           pen.dirty = true
         } else if (!pen.closing) {

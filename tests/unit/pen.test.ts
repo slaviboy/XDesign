@@ -59,10 +59,20 @@ function click(x: number, y: number, mods: Partial<CanvasPointerEvent> = {}) {
   penTool.onPointerUp?.(ev(x, y, mods), ctx)
 }
 
-/** Press at the anchor and drag to (hx,hy): a smooth point. */
+/**
+ * Press at the anchor and drag to (hx,hy): a smooth point.
+ *
+ * The drag is delivered in STEPS, as a real one is. A single move event hid a
+ * mirroring bug for the life of the project: the far handle was given the
+ * near one's length only while it was still absent, so one big event looked
+ * perfect and ten small ones left it frozen at the size of the first.
+ */
 function dragOut(x: number, y: number, hx: number, hy: number, mods: Partial<CanvasPointerEvent> = {}) {
   penTool.onPointerDown?.(ev(x, y, mods), ctx)
-  penTool.onPointerMove?.(ev(hx, hy, mods), ctx)
+  const steps = 10
+  for (let i = 1; i <= steps; i++) {
+    penTool.onPointerMove?.(ev(x + ((hx - x) * i) / steps, y + ((hy - y) * i) / steps, mods), ctx)
+  }
   penTool.onPointerUp?.(ev(hx, hy, mods), ctx)
 }
 
@@ -98,6 +108,17 @@ describe('pen tool', () => {
     expect(d).toMatch(/^M/)
     expect(d).not.toContain('C')
     expect((d.match(/L/g) ?? []).length).toBe(2)
+  })
+
+  it('the two direction lines a drag creates are the same length', () => {
+    // What "mirrored" has to mean when one gesture draws both of them. The far
+    // handle used to be pinned to whatever length the first move event gave it,
+    // so a curve dragged out over any distance arrived almost straight.
+    dragOut(100, 100, 160, 100)
+    const p = building().points[0]!
+    expect(p.outX! - p.x).toBeCloseTo(60, 6)
+    expect(p.x - p.inX!).toBeCloseTo(60, 6)
+    expect(isMirrored(p)).toBe(true)
   })
 
   it('draws curves from click-drag, with mirrored handles', () => {

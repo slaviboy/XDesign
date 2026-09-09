@@ -547,8 +547,11 @@ export function pathEditPointerMove(e: CanvasPointerEvent, _ctx: ToolContext): b
       }
     }
   } else {
-    // Alt breaks the joint so the two handles move independently.
-    moveHandle(sub, edit.dragging.index, edit.dragging.kind, local, !e.altKey)
+    // Alt breaks the joint so the two handles move independently. Without it
+    // the far one swings round to stay opposite but keeps its own length: it
+    // was set deliberately at some point, and dragging this one is not a
+    // request to resize it.
+    moveHandle(sub, edit.dragging.index, edit.dragging.kind, local, e.altKey ? 'none' : 'keep')
   }
   edit.lastLocal = local
   edit.changed = true
