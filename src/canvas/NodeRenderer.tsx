@@ -842,6 +842,10 @@ function GroupBody({ node, copy }: { node: GroupNode; copy: CopyMode }): ReactNo
     )
   }
 
+  // A single-shape mask — every mask made in the editor — can follow a gesture
+  // live. See MaskOutline for why an imported group mask cannot.
+  const liveId = copy !== 'repeat' && !isContainer(mask) ? mask.id : null
+
   return (
     <>
       <defs>
@@ -852,13 +856,30 @@ function GroupBody({ node, copy }: { node: GroupNode; copy: CopyMode }): ReactNo
               imported <clipPath> may hold several shapes, and clipping to their
               bounding box instead would quietly be the wrong shape. */}
           {maskOutlines(doc, node.maskId!).map((o, i) => (
-            <path key={i} d={o.d} transform={toSvgMatrix(o.m)} />
+            <MaskOutline key={i} d={o.d} m={o.m} liveId={liveId} />
           ))}
         </clipPath>
       </defs>
       <g clipPath={`url(#${clipId})`}>{content}</g>
     </>
   )
+}
+
+/**
+ * One outline of a mask's clip.
+ *
+ * The mask is not painted, so there is no <g> of its own on screen for a
+ * gesture to move: this clip, in the mask group's space, is the only thing that
+ * shows it. So, like a backdrop's clip, it answers to the live channel itself —
+ * to the mask's own key, which carries its matrix, and its geometry key, which
+ * carries `d`. Without them a mask being moved or resized went on clipping to
+ * where it had been until the pointer came up. An imported group mask stays
+ * put: its outlines sit under matrices composed through the group, which no one
+ * key carries.
+ */
+function MaskOutline({ d, m, liveId }: { d: string; m: Mat2D; liveId: NodeId | null }): ReactNode {
+  const ref = useCallback(liveRefs(liveId ? [liveId, geomKey(liveId)] : [], liveId !== null), [liveId])
+  return <path ref={ref} d={d} transform={toSvgMatrix(m)} />
 }
 
 /** SVG 2 mask-type; luminance is the default so it is only stated for alpha. */

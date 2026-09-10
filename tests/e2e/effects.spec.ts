@@ -268,6 +268,72 @@ test('Ungroup Mask hands both objects back', async ({ page }) => {
   await expect(nodesOfType(page, 'rect')).toHaveCount(1)
 })
 
+/** A rectangle four times the mask's size, masked by an ellipse in its middle. */
+async function maskedRectangle(page: Page) {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 200, y: 150 }, { x: 600, y: 450 })
+  await drawShape(page, 'ellipse', { x: 330, y: 250 }, { x: 430, y: 330 })
+  await selectLayers(page, ['Ellipse', 'Rectangle'])
+  await press(page, 'M', true)
+  await expect(page.locator('.layer-row', { hasText: 'Mask Group' })).toHaveCount(1)
+}
+
+const handleCentre = async (page: Page, handle: string) => {
+  const b = (await page.locator(`.resize-handle[data-handle="${handle}"]`).boundingBox())!
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+}
+
+test('a mask group resizes from the handle under the pointer', async ({ page }) => {
+  await maskedRectangle(page)
+  // Framed by the mask, not by the rectangle it crops.
+  const before = (await page.locator('.selection-frame').boundingBox())!
+  expect(before.width).toBeLessThan(120)
+
+  const se = await handleCentre(page, 'se')
+  await page.mouse.move(se.x, se.y)
+  await page.mouse.down()
+  await page.mouse.move(se.x + 60, se.y + 40, { steps: 8 })
+  // The corner follows the pointer and the opposite one stays put — it used to
+  // be measured against the rectangle, and the group jumped the other way.
+  for (const phase of ['during', 'after']) {
+    if (phase === 'after') await page.mouse.up()
+    const now = (await page.locator('.selection-frame').boundingBox())!
+    expect(now.x, phase).toBeCloseTo(before.x, 0)
+    expect(now.y, phase).toBeCloseTo(before.y, 0)
+    expect(now.width, phase).toBeCloseTo(before.width + 60, 0)
+    expect(now.height, phase).toBeCloseTo(before.height + 40, 0)
+  }
+})
+
+test('a mask follows its own resize while the pointer is down', async ({ page }) => {
+  await maskedRectangle(page)
+  // The mask is not painted, so the Layers panel is the way to it.
+  await page.locator('.layer-row', { hasText: 'Ellipse' }).first().click()
+  const clip = page.locator('.document-layer clipPath[id^="mask-clip-"] path')
+  const read = () =>
+    clip.evaluate((p) => ({
+      d: p.getAttribute('d')!,
+      m: (p.getAttribute('transform') ?? '').match(/-?[\d.]+(e-?\d+)?/g)!.map(Number),
+    }))
+  const before = await read()
+
+  // From the top-left, which moves the outline as well as reshaping it.
+  const nw = await handleCentre(page, 'nw')
+  await page.mouse.move(nw.x, nw.y)
+  await page.mouse.down()
+  await page.mouse.move(nw.x - 40, nw.y - 30, { steps: 8 })
+  const during = await read()
+  await page.mouse.up()
+  const after = await read()
+
+  // Clipping to the new shape while the pointer is still down...
+  expect(during.d).not.toBe(before.d)
+  expect(during.m).not.toEqual(before.m)
+  // ...and to exactly the shape it is left with.
+  expect(during.d).toBe(after.d)
+  during.m.forEach((n, i) => expect(n).toBeCloseTo(after.m[i]!, 2))
+})
+
 test('a line cannot be a mask, because it hides everything', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'rect', { x: 220, y: 200 }, { x: 480, y: 380 })

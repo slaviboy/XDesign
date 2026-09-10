@@ -81,7 +81,7 @@ import { liveTransform } from '../canvas/LiveTransform'
 import { fxKey, geomKey } from '../canvas/liveKeys'
 import { effectMargin, filterRegion } from '../canvas/effects'
 import { intrinsicTextSize } from '../text/TextLayout'
-import { hasStyle, isContainer, sizingAfterResize, usesOwnBox } from '../document/types'
+import { hasStyle, isContainer, isMaskGroup, sizingAfterResize, usesOwnBox } from '../document/types'
 import type { DesignDocument, DesignNode, NodeId, TextSizing, TextStyle, Transform, TextRun } from '../document/types'
 import type { SnapLine } from '../geometry/Snapping'
 
@@ -96,12 +96,24 @@ interface NodeSnapshot {
   parentWorld: Mat2D
   transform: Transform
   /**
-   * The box actually being dragged, in the node's local space. Equal to
-   * (0,0,width,height) for everything with a size of its own; for a group it is
-   * where its contents really are, which its stored box stops describing the
-   * moment a child moves.
+   * The box actually being dragged, in the node's local space — or in the
+   * space `frameLocal` names, when there is one. Equal to (0,0,width,height)
+   * for everything with a size of its own; for a group it is where its contents
+   * really are, which its stored box stops describing the moment a child moves.
    */
   content: Bounds
+  /**
+   * The space the selection frame is drawn in, as a matrix into the node's own
+   * — absent where the two are the same, which is everywhere but a mask group.
+   *
+   * A mask group is framed by its mask: the mask's own box, through the mask's
+   * own matrix (see computeFrame). The handles are on that box, so a resize is
+   * worked out on it. Worked out on the group's contents instead — a masked
+   * photograph, most of it cropped away — the handle grabbed on the mask read
+   * as the photograph's corner arriving at the pointer, and the whole group
+   * leapt away from the cursor on the first move.
+   */
+  frameLocal?: Mat2D
   type: DesignNode['type']
   /** Original path data, for path nodes whose geometry is baked on resize. */
   d?: string
@@ -306,6 +318,10 @@ export function beginDrag(
   const cache = createMatrixCache()
   const nodes: NodeSnapshot[] = usable.map((id) => {
     const node = doc.nodes[id]!
+    const persp = is3dAffected(doc, id) ? perspectiveSnapshot(doc, node, startDoc) : undefined
+    // Flat only: a mask group in perspective is framed by its projected mask,
+    // which PerspectiveSnapshot.frameBox already measures in the group's space.
+    const mask = !persp && isMaskGroup(node) ? doc.nodes[node.maskId] : undefined
     return {
       id,
       world: cache.world(doc, id),
@@ -322,11 +338,12 @@ export function beginDrag(
       // Images carry corner rounding too, and it shapes the clip they are
       // drawn through — so a live resize has to rebuild that clip as well.
       cornerRadius: node.type === 'rect' || node.type === 'image' ? node.cornerRadius : undefined,
-      content: localContentBox(doc, node),
+      content: localContentBox(doc, mask ?? node),
+      frameLocal: mask ? localMatrix(mask.transform) : undefined,
       vertexRadius: node.type === 'polygon' ? node.cornerRadius : undefined,
       effectMargin: hasStyle(node) ? effectMargin(node.style) : 0,
       text: node.type === 'text' ? { text: node.text, style: node.textStyle, runs: node.runs } : undefined,
-      persp: is3dAffected(doc, id) ? perspectiveSnapshot(doc, node, startDoc) : undefined,
+      persp,
     }
   })
 
@@ -533,9 +550,11 @@ function applyResize(
     // PerspectiveSnapshot.frameBox.
     const projected = snap.persp?.frameBox ?? null
     const content = projected ?? snap.content
+    // Where the handles are: the node's own space, or its mask's (frameLocal).
+    const frameWorld = snap.frameLocal ? multiply(snap.world, snap.frameLocal) : snap.world
     const local = snap.persp && !projected
       ? perspectivePointer(snap, handle, currentDoc)
-      : applyToPoint(invert(snap.world), currentDoc)
+      : applyToPoint(invert(frameWorld), currentDoc)
     const box = resizeLocalBox(
       content.width,
       content.height,
@@ -560,7 +579,11 @@ function applyResize(
       translation(box.x0, box.y0),
       translation(content.x, content.y),
     )
-    let world = multiply(snap.world, reanchor)
+    // Resized in the frame's space and handed back to the node's: a mask group
+    // scales along its mask's sides, about its mask's pinned corner.
+    let world = snap.frameLocal
+      ? multiply(frameWorld, multiply(reanchor, invert(snap.frameLocal)))
+      : multiply(snap.world, reanchor)
     if (s.scalesContent) {
       if (snap.persp && !projected) {
         world = pinAnchor(s, snap, world, reanchor, handle, options, snap.transform.width, snap.transform.height)

@@ -16,16 +16,18 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { applyToPoint, invert, multiply, isOrthogonal } from '@/geometry/Matrix'
-import { localMatrix, worldMatrix, geometryBounds } from '@/document/SceneGraph'
+import { applyToPoint, invert, multiply, isOrthogonal, type Mat2D } from '@/geometry/Matrix'
+import { transformBounds } from '@/geometry/Bounds'
+import { localContentBox, localMatrix, worldMatrix, geometryBounds } from '@/document/SceneGraph'
 import { resizeBoxInPlace, transformFromMatrix } from '@/document/DocumentModel'
 import { createDocument, createRect, createEllipse, createPath } from '@/document/NodeFactory'
 import { addNode, groupNodes, ungroupNode } from '@/document/DocumentModel'
 import { replaceDocument, getDoc, transaction } from '@/state/DocumentStore'
 import { setSelection } from '@/state/EditorStore'
+import { maskWithShape } from '@/history/Commands'
 import { beginDrag, updateDrag, commitDrag, getLiveBox, getLiveMatrix } from '@/tools/DragSession'
 import { pathBounds } from '@/geometry/PathUtils'
-import type { DesignDocument } from '@/document/types'
+import type { DesignDocument, DesignNode } from '@/document/types'
 
 function freshDoc(): DesignDocument {
   const doc = createDocument('Test', false)
@@ -193,6 +195,94 @@ describe('resize with rotation', () => {
     expect(corner(M1, drawn, 0, 0).y).toBeCloseTo(pinned.y, 4)
     expect(corner(M1, drawn, 1, 1).x).toBeCloseTo(pointer.x, 4)
     expect(corner(M1, drawn, 1, 1).y).toBeCloseTo(pointer.y, 4)
+  })
+})
+
+describe('resizing a mask group', () => {
+  const noMods = { constrain: false, fromCenter: false }
+  /** A large photograph-sized rectangle, masked by `mask` placed over it. */
+  function maskOver(mask: DesignNode): { group: string; photo: string } {
+    replaceDocument(freshDoc())
+    const photo = createRect({ x: 0, y: 0, width: 400, height: 300 })
+    transaction('add', (d) => { addNode(d, photo, d.rootId); addNode(d, mask, d.rootId) })
+    setSelection([photo.id, mask.id])
+    return { group: maskWithShape()!, photo: photo.id }
+  }
+  /** A point of the mask's own box, in the world, through the group's matrix `g`. */
+  const onMask = (g: Mat2D, maskId: string, fx: number, fy: number) => {
+    const mask = getDoc().nodes[maskId]!
+    const local = { x: mask.transform.width * fx, y: mask.transform.height * fy }
+    return applyToPoint(multiply(g, localMatrix(mask.transform)), local)
+  }
+
+  it('grows from the handle under the pointer, not from the photograph the mask hides', () => {
+    // The mask sits in the middle of a picture four times its width. The resize
+    // used to divide by the picture: the mask's corner, grabbed, read as the
+    // picture's corner arriving at the pointer, and the group leapt away.
+    const mask = createEllipse({ x: 150, y: 110, width: 100, height: 80 })
+    const { group, photo } = maskOver(mask)
+    const g0 = worldMatrix(getDoc(), group)
+    const pinned = onMask(g0, mask.id, 0, 0)
+    const grabbed = onMask(g0, mask.id, 1, 1)
+    const pointer = { x: grabbed.x + 60, y: grabbed.y + 40 }
+
+    expect(beginDrag(getDoc(), [group], 'resize', grabbed, 'se')).toBe(true)
+    const mats = updateDrag(pointer, noMods)
+    // Mid-drag, the frame — the mask's box under the live matrix — is on the pointer.
+    const live = getLiveMatrix(group)!
+    expect(onMask(live, mask.id, 1, 1).x).toBeCloseTo(pointer.x, 6)
+    expect(onMask(live, mask.id, 1, 1).y).toBeCloseTo(pointer.y, 6)
+    expect(onMask(live, mask.id, 0, 0).x).toBeCloseTo(pinned.x, 6)
+    expect(onMask(live, mask.id, 0, 0).y).toBeCloseTo(pinned.y, 6)
+
+    commitDrag(mats)
+    const g1 = worldMatrix(getDoc(), group)
+    expect(onMask(g1, mask.id, 1, 1).x).toBeCloseTo(pointer.x, 6)
+    expect(onMask(g1, mask.id, 1, 1).y).toBeCloseTo(pointer.y, 6)
+    expect(onMask(g1, mask.id, 0, 0).x).toBeCloseTo(pinned.x, 6)
+    expect(onMask(g1, mask.id, 0, 0).y).toBeCloseTo(pinned.y, 6)
+    // And what it holds scaled with it, by the mask's own growth.
+    expect(geometryBounds(getDoc(), photo).width).toBeCloseTo(400 * 1.6, 4)
+    expect(geometryBounds(getDoc(), photo).height).toBeCloseTo(300 * 1.5, 4)
+  })
+
+  it('resizes along the sides of a mask turned inside its group', () => {
+    // The frame is drawn on the mask's own box, turned with it, so its handles
+    // are there — a resize measured square to the group missed them.
+    const mask = createRect({ x: 120, y: 90, width: 100, height: 60, rotation: 30 })
+    const { group } = maskOver(mask)
+    const g0 = worldMatrix(getDoc(), group)
+    const pinned = onMask(g0, mask.id, 0, 0)
+    const pointer = onMask(g0, mask.id, 1.3, 1.5)
+
+    beginDrag(getDoc(), [group], 'resize', onMask(g0, mask.id, 1, 1), 'se')
+    commitDrag(updateDrag(pointer, noMods))
+
+    const g1 = worldMatrix(getDoc(), group)
+    expect(onMask(g1, mask.id, 1, 1).x).toBeCloseTo(pointer.x, 6)
+    expect(onMask(g1, mask.id, 1, 1).y).toBeCloseTo(pointer.y, 6)
+    expect(onMask(g1, mask.id, 0, 0).x).toBeCloseTo(pinned.x, 6)
+    expect(onMask(g1, mask.id, 0, 0).y).toBeCloseTo(pinned.y, 6)
+    // Still a rectangle: scaled along its own sides, it cannot shear.
+    expect(isOrthogonal(worldMatrix(getDoc(), mask.id))).toBe(true)
+  })
+
+  it('a group holding a mask group is framed by what the mask shows', () => {
+    const mask = createEllipse({ x: 150, y: 110, width: 100, height: 80 })
+    const { group } = maskOver(mask)
+    const other = createRect({ x: 300, y: 120, width: 20, height: 20 })
+    transaction('add', (d) => { addNode(d, other, d.rootId) })
+    let outer = ''
+    transaction('group', (d) => { outer = groupNodes(d, [group, other.id])! })
+
+    const doc = getDoc()
+    const framed = transformBounds(localContentBox(doc, doc.nodes[outer]!), worldMatrix(doc, outer))
+    // The mask (150..250) and the square (300..320), not the 400-wide picture —
+    // the same box every world-space measure of the group already gave.
+    expect(framed.x).toBeCloseTo(150, 6)
+    expect(framed.width).toBeCloseTo(170, 6)
+    const world = geometryBounds(doc, outer)
+    for (const k of ['x', 'y', 'width', 'height'] as const) expect(framed[k]).toBeCloseTo(world[k], 6)
   })
 })
 

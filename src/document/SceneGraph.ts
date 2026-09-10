@@ -231,9 +231,16 @@ export function localGeometryBounds(node: DesignNode): Bounds {
  * through geometryBounds, which unions the children; this is the same answer in
  * the group's own space, for the two callers that need it there: the selection
  * frame, and the resize that divides by it.
+ *
+ * A mask group is measured by its mask, as geometryBounds measures it: only
+ * what the mask reveals is on screen. Measured by its contents, a group holding
+ * a masked photograph was framed — and resized — by the whole photograph,
+ * cropped part and all.
  */
 export function localContentBox(doc: DesignDocument, node: DesignNode): Bounds {
   if (isContainer(node) && !usesOwnBox(node)) {
+    const mask = isMaskGroup(node) ? doc.nodes[node.maskId] : undefined
+    if (mask) return transformBounds(localContentBox(doc, mask), nodeLocalMatrix(mask))
     const kids: Bounds[] = []
     for (const id of node.children) {
       const child = doc.nodes[id]

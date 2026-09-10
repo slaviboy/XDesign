@@ -1191,6 +1191,23 @@ The mask is drawn as a `<clipPath>` rather than a `<mask>`. A luminance mask wou
 shape's own fill and opacity leak into the result, so masking with a 50%-grey rectangle would
 half-hide what it masks. XD's masks have hard edges; a clip is what hard edges are.
 
+"The group's bounds are the mask's" has to hold everywhere the group is measured, and two places
+missed it. The resize still divided by the group's *contents* — the whole photograph, most of it
+cropped — while the handles were drawn on the mask. So the handle grabbed on the mask read as the
+photograph's corner arriving at the pointer, and the group leapt away on the first move. A mask
+group is now resized in its mask's frame: the mask's own box, through the mask's own matrix,
+which is where the selection frame draws the handles. A turned mask resizes along its own sides
+and stays a rectangle; what it holds follows, sheared if it is not square to the mask, which is
+the price of any resize along axes its content does not share. `localContentBox` measures a mask
+group by its mask as well, so a group *holding* one is framed by what shows.
+
+The other place was the drag itself. The clip is the only thing on screen that shows the mask,
+and it lives in the group's space, not inside a `<g>` of the mask's own — the mask is not painted
+— so nothing moved it until the pointer came up. It now answers to the live channel under the
+mask's two keys, its matrix and its `d`, the way a background blur's clip does. An imported group
+mask cannot: its outlines sit under matrices composed through the group, and no single key
+carries those.
+
 ### Outlining a stroke means flattening first, and that is not a shortcut
 
 `outlineStroke` walks each subpath offset by half the stroke width, inserting a join at every
