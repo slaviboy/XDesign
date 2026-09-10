@@ -35,7 +35,15 @@
 import { memo, useCallback, useMemo, type CSSProperties, type ReactNode } from 'react'
 import { meanScale, toSvgMatrix, type Mat2D } from '../geometry/Matrix'
 import type { Bounds } from '../geometry/Bounds'
-import { mat3ToMat2D, projectPathData } from '../geometry/Perspective'
+import {
+  isAffineMat3,
+  mat3FromMat2D,
+  mat3Multiply,
+  mat3ToMat2D,
+  projectedBounds,
+  projectPathData,
+  toCssMatrix3d,
+} from '../geometry/Perspective'
 import {
   ellipsePath,
   linePath,
@@ -1121,7 +1129,9 @@ function Object3D({
   const stored = useDocument()
   const liveTick = useLiveTransformTick()
   const live3dTick = useLive3dTick()
-  const zoom = useEditorStore((s) => meshZoomBucket(s.viewport.zoom))
+  // Only a mesh is cut for a zoom; perspective the browser draws is resolution
+  // free, so with it zooming re-renders nothing here at all.
+  const zoom = useEditorStore((s) => (CSS_PERSPECTIVE ? 1 : meshZoomBucket(s.viewport.zoom)))
   // The ticks are the dependency: mid-gesture the store has not changed, and
   // they are the only signal that the live values have.
   const doc = useMemo(() => liveDocument(stored), [stored, liveTick, live3dTick])
@@ -1218,14 +1228,40 @@ function SpaceChild({
 }
 
 /**
+ * Whether the canvas can hand perspective to the browser.
+ *
+ * An HTML element, unlike an SVG one, is drawn in real perspective by CSS
+ * `matrix3d`, and one inside a <foreignObject> still sits in the SVG's own
+ * painting order, clips and opacity. The browser then draws a tilted picture
+ * in ONE pass, straight through the projection — against the mesh, whose
+ * every triangle redraws the whole picture through a mask of its own. With a
+ * large photograph that is the difference between panning at 60 frames a
+ * second and at nine: measured on four tilted 3000px images, 16ms a frame
+ * against 110.
+ *
+ * WebKit is the exception. It is known to misplace composited HTML inside a
+ * <foreignObject> once SVG transforms are involved, and a 3D transform is
+ * exactly what composites it — so there, as in every exported file, the mesh
+ * draws instead. Every browser on iOS is WebKit underneath.
+ */
+const CSS_PERSPECTIVE = (() => {
+  if (typeof navigator === 'undefined') return true
+  const ua = navigator.userAgent
+  return !(/AppleWebKit\//.test(ua) && !/(Chrome|Chromium)\//.test(ua))
+})()
+
+/**
  * One flat picture, projected.
  *
- * The body is drawn once, flat, into <defs>; the mesh draws it again per
- * triangle. When the projection is affine — depth with no tilt — there is no
- * mesh: one transform is exact, and the body is drawn in place.
+ * On the canvas the browser does the projecting: the body is drawn once, in
+ * an inline <svg> inside an HTML <div> carrying the homography as CSS
+ * `matrix3d` (see CSS_PERSPECTIVE). Where that is not available, and in every
+ * export, the body is drawn once, flat, into <defs>, and a mesh draws it again
+ * per triangle. When the projection is affine — depth with no tilt — neither
+ * is needed: one SVG transform is exact, and the body is drawn in place.
  *
  * The node's own shadow and blur are applied to the projected result rather
- * than inside the body, so they run once instead of once per triangle.
+ * than inside the body, so they run once over the picture as it is seen.
  */
 function Plane({
   doc,
@@ -1246,7 +1282,7 @@ function Plane({
   // objects, and re-cutting a mesh that has not changed would be all waste.
   const key = `${h ? h.join(' ') : ''}|${domain.x} ${domain.y} ${domain.width} ${domain.height}|${pxPerUnit}`
   const mesh = useMemo(
-    () => (h ? planeMesh(h, domain, pxPerUnit, CANVAS_MESH) : null),
+    () => (h && !CSS_PERSPECTIVE ? planeMesh(h, domain, pxPerUnit, CANVAS_MESH) : null),
     [key],
   )
   if (!h) return null
@@ -1267,13 +1303,44 @@ function Plane({
       />
     )
 
-  if (!mesh) {
+  if (isAffineMat3(h)) {
     // Depth alone scales about the pivot: exact, and the effect stays in the
     // node's own units exactly as it would for a flat node.
     return (
       <g transform={toSvgMatrix(mat3ToMat2D(h))}>
         {fx && <defs>{fxDef(fx)}</defs>}
         <g filter={fx ? `url(#${fx.id})` : undefined}>{body}</g>
+      </g>
+    )
+  }
+
+  if (!mesh) {
+    // The browser projects it. The <foreignObject> is placed over the
+    // picture's bounds on screen and the div's homography is measured from
+    // there; the inline <svg> maps the plane's own coordinates onto the div.
+    const box = projectedBounds(h, domain) ?? domain
+    const toBox = mat3Multiply(
+      mat3FromMat2D([1, 0, 0, 1, -box.x, -box.y]),
+      mat3Multiply(h, mat3FromMat2D([1, 0, 0, 1, domain.x, domain.y])),
+    )
+    return (
+      <g filter={fx ? `url(#${fx.id})` : undefined}>
+        {fx && <defs>{fxDef(projectedRegion(h, fx))}</defs>}
+        <foreignObject className="plane-3d" x={box.x} y={box.y} width={box.width} height={box.height}>
+          <div
+            className="plane-3d-card"
+            style={{ width: domain.width, height: domain.height, transform: toCssMatrix3d(toBox) }}
+          >
+            <svg
+              className="plane-3d-art"
+              width={domain.width}
+              height={domain.height}
+              viewBox={`${domain.x} ${domain.y} ${domain.width} ${domain.height}`}
+            >
+              {body}
+            </svg>
+          </div>
+        </foreignObject>
       </g>
     )
   }

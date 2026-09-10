@@ -28,6 +28,7 @@ import {
   captureDownload,
   clickCanvas,
   drawShape,
+  dropFiles,
   modifier,
   nodesOfType,
   openApp,
@@ -39,6 +40,9 @@ import {
 } from './helpers'
 
 const toggle = (page: Page) => page.locator('[data-testid="toggle-3d"]')
+/** A plane the browser draws in perspective (CSS matrix3d inside a foreignObject). */
+const plane = (page: Page) => page.locator('.document-layer .plane-3d')
+/** The triangle mesh, which Chromium's canvas must not fall back to: it is what made images crawl. */
 const mesh = (page: Page) => page.locator('.document-layer mask[id^="p3d-"]')
 
 /** A 160×200 on-screen rectangle, selected, with the 3D controls shown. */
@@ -62,13 +66,41 @@ test('the cube shows the 3D fields, and a Y rotation draws the object in perspec
   await setField(page, 'Y rotation', 40)
 
   await expect(nodesOfType(page, 'rect')).toHaveAttribute('data-3d', '')
-  expect(await mesh(page).count()).toBeGreaterThan(1)
+  // Drawn by the browser in one pass, not by a mesh redrawing it per triangle.
+  await expect(plane(page)).toHaveCount(1)
+  await expect(mesh(page)).toHaveCount(0)
   // Turned about its vertical axis: narrower, and its near edge taller.
   const turned = (await selectionFrameBox(page))!
   expect(turned.width).toBeLessThan(flat.width - 10)
   expect(turned.height).toBeGreaterThan(flat.height + 5)
   // Adobe does not flip an object in 3D.
   await expect(page.locator('button[aria-label="Flip horizontal"]')).toBeDisabled()
+})
+
+test('an image in perspective is drawn in one pass, so zooming and panning stay smooth', async ({ page }) => {
+  await openApp(page)
+  // A large picture: the case where redrawing it per triangle made the canvas crawl.
+  const base64 = await page.evaluate(() => {
+    const c = document.createElement('canvas')
+    c.width = 2400
+    c.height = 1600
+    const x = c.getContext('2d')!
+    x.fillStyle = '#3399cc'
+    x.fillRect(0, 0, 2400, 1600)
+    x.fillStyle = '#e84a5f'
+    x.fillRect(300, 300, 900, 600)
+    return c.toDataURL('image/png').split(',')[1]!
+  })
+  await dropFiles(page, [{ name: 'photo.png', type: 'image/png', base64 }], { x: 420, y: 320 })
+  await expect(nodesOfType(page, 'image')).toHaveCount(1)
+  await page.locator('.layer-row', { hasText: 'photo' }).first().click()
+  await toggle(page).click()
+  await setField(page, 'Y rotation', 35)
+  await setField(page, 'X rotation', 15)
+
+  await expect(plane(page)).toHaveCount(1)
+  await expect(plane(page).locator('image')).toHaveCount(1)
+  await expect(mesh(page)).toHaveCount(0)
 })
 
 test('dragging the gizmo turns the object, and its centre pushes it in depth', async ({ page }) => {
@@ -85,7 +117,7 @@ test('dragging the gizmo turns the object, and its centre pushes it in depth', a
   expect(await readField(page, 'Y rotation')).toBeCloseTo(30, 0)
   await page.mouse.up()
   expect(await readField(page, 'Y rotation')).toBeCloseTo(30, 0)
-  expect(await mesh(page).count()).toBeGreaterThan(1)
+  await expect(plane(page)).toHaveCount(1)
 
   // The centre, dragged up, brings it toward you.
   const before = (await selectionFrameBox(page))!
@@ -102,10 +134,10 @@ test('dragging the gizmo turns the object, and its centre pushes it in depth', a
 test('⌥⌘T resets the 3D transform, and ⌘T shows and hides the controls', async ({ page }) => {
   await rectWith3d(page)
   await setField(page, 'Y rotation', 40)
-  await expect(mesh(page).first()).toBeAttached()
+  await expect(plane(page)).toHaveCount(1)
 
   await page.keyboard.press(`${modifier()}+Alt+t`)
-  await expect(mesh(page)).toHaveCount(0)
+  await expect(plane(page)).toHaveCount(0)
   expect(await readField(page, 'Y rotation')).toBe(0)
 
   // One undo step brings the tilt back.
@@ -130,7 +162,7 @@ test('Reset 3D Transforms is on the context menu', async ({ page }) => {
   await page.mouse.click(frame.x + 10, frame.y + frame.height / 2, { button: 'right' })
   await page.locator('.menu-item', { hasText: /^Transform/ }).hover()
   await page.locator('.menu-item', { hasText: 'Reset 3D Transforms' }).click()
-  await expect(mesh(page)).toHaveCount(0)
+  await expect(plane(page)).toHaveCount(0)
   expect(await readField(page, 'X rotation')).toBe(0)
 })
 

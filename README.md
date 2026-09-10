@@ -1565,14 +1565,30 @@ so a click takes the card that is drawn in front.
 
 **Drawing it.** A flat object seen in perspective is a *homography* of its flat rendering, and
 SVG has nothing that draws one: its transforms are affine, and CSS 3D on an SVG element is
-silently flattened to its affine part — a turned card comes out a parallelogram. So each plane
-is drawn once, flat, into `<defs>`, and a mesh of triangles draws it again, each through a
-`<use>` carrying the one affine map that agrees with the projection at that triangle's three
-corners. Every kind of artwork goes through untouched — text, images, gradients, effects, masks,
-imported SVG — and the exporter writes the identical structure from the same helpers, so every
-file format, the eyedropper and the clipboard show exactly what the canvas does.
+silently flattened to its affine part — a turned card comes out a parallelogram. An HTML
+element, though, does get real perspective from CSS, and one inside a `<foreignObject>` still
+sits in the SVG's own painting order, under its clips, its opacity and its blend modes. So on
+the canvas each plane is an inline `<svg>` of its flat artwork inside a `<div>` that carries the
+homography as `matrix3d`, and the browser draws it: in one pass, straight through the
+projection, sharp at any zoom, with every kind of artwork — text, images, gradients, effects,
+masks, imported SVG — untouched.
 
-Two details decide whether that looks right. **The triangles are cut out with crisp-edged
+A file cannot rely on that. An exported SVG is rasterised through an `<img>` and has to open in
+tools that know nothing of HTML, so the exporter draws each plane once, flat, into `<defs>`, and
+a mesh of triangles draws it again, each through a `<use>` carrying the one affine map that
+agrees with the projection at that triangle's three corners. It is the same homography, so the
+file matches the canvas to within a fraction of a pixel.
+
+The mesh drew the canvas too at first, and it is why that stopped: every triangle redraws the
+whole picture through a mask of its own, so a tilted photograph turned zooming into a
+slideshow. Measured on one 3000px photo, zooming ran at 87ms a frame with the mesh against a
+steady 16.7 with the browser drawing, and panning spiked past 300ms against never missing a
+frame. WebKit is the one engine that still gets the mesh on the canvas: it draws HTML inside a
+`<foreignObject>` in the wrong place once a 3D transform composites it — measured, at the page's
+corner, ignoring every transform above it and over everything else. Every browser on iOS is
+WebKit, so the check is on the engine, not the name.
+
+Two details decide whether the mesh looks right. **The triangles are cut out with crisp-edged
 masks, not clip paths.** A clip path is always antialiased, so two triangles sharing an edge
 each cover its pixels only partly, and the seams show through as a faint lattice over the whole
 object — 4–8% of the pixels of a translucent fill, measured. A mask is drawn like a shape, so it
@@ -1585,11 +1601,12 @@ artwork's edges stay smooth. **The mesh is as coarse as the eye allows,** becaus
 redraws the artwork. How far a triangle's affine map strays grows with how much the perspective
 divide changes across it, relative to itself, so grid lines are spaced geometrically in that
 divide — small cells where the plane comes toward you, large where it recedes — and the smallest
-grid within half a screen pixel is found by a staircase search. It is re-cut only when the zoom
-moves a whole √2 step. A card needs a few dozen triangles; the canvas caps any one plane at 256
-and an export at 1024. Depth with no tilt is a plain scale about the pivot and gets no mesh at
-all, and an object's own shadow and blur are applied once to its projected picture rather than
-once per triangle.
+grid within a fraction of a pixel is found by a staircase search. A card needs a few dozen
+triangles; an export allows a third of a pixel and caps any one plane at 1024, while WebKit's
+canvas settles for three quarters of a pixel and 96, re-cut only when the zoom moves a whole √2
+step. Depth with no tilt is a plain scale about the pivot, which one SVG transform draws
+exactly, so it gets neither a mesh nor HTML. On every path an object's own shadow and blur are
+applied once, to its projected picture.
 
 **Interaction.** Everything that turns a point into a node runs the projection backwards. A
 click inverts the homography and tests the flat shape, so a point inside the flat rectangle but

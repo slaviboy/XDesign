@@ -16,11 +16,13 @@
  */
 
 /**
- * How a plane in perspective is written as SVG.
+ * How a plane in perspective is written as plain SVG.
  *
- * Shared by the live renderer and the SVG exporter, for the same reason
- * effects.ts and paint.ts are: the canvas and the file come from one piece of
- * code, so a tilted card cannot look one way on screen and another in a PNG.
+ * The exporter always writes it this way — a file is rasterised through an
+ * <img> and opened by tools that know nothing of HTML — and so does the canvas
+ * in WebKit, the one engine that cannot draw it with CSS perspective instead
+ * (see CSS_PERSPECTIVE in NodeRenderer). Shared, for the same reason effects.ts
+ * and paint.ts are: two renderers built from one piece of code cannot drift.
  *
  * The flat artwork is written ONCE, into <defs>, and every triangle of the
  * mesh draws it again through a <use> carrying that triangle's affine map,
@@ -53,11 +55,16 @@ export const planeContentId = (nodeId: string): string => `p3d-${nodeId}`
 export const planeMaskId = (nodeId: string, index: number): string => `p3d-${nodeId}-${index}`
 
 /**
- * How finely to cut. The canvas redraws every triangle whenever anything near
- * it changes, so it settles for half a pixel and a cap; an export is drawn
- * once and can afford to be finer.
+ * How finely to cut.
+ *
+ * The canvas only cuts a mesh where the browser cannot draw perspective
+ * itself (WebKit — see CSS_PERSPECTIVE in NodeRenderer), and there every
+ * triangle redraws the whole picture on every repaint: a large photograph in
+ * two hundred triangles is a canvas that no longer pans. So the canvas
+ * settles for three quarters of a pixel and a tight cap. An export is drawn
+ * once, and can afford to be finer.
  */
-export const CANVAS_MESH = { tolerance: 0.5, maxTriangles: 256 } as const
+export const CANVAS_MESH = { tolerance: 0.75, maxTriangles: 96 } as const
 export const EXPORT_MESH = { tolerance: 0.35, maxTriangles: 1024 } as const
 
 /**

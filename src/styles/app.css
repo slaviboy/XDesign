@@ -292,6 +292,22 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .size-badge rect { fill: var(--accent); }
 .size-badge text { fill: #fff; font-size: 10px; font-family: var(--font-ui); }
 
+/* A plane in perspective on the canvas: HTML inside the SVG, so that CSS
+   matrix3d can draw it in real perspective (see CSS_PERSPECTIVE in
+   NodeRenderer). None of it takes the pointer — the canvas hit-tests from the
+   document, not from the DOM — and nothing may promote it to a compositing
+   layer, which would rasterise it once and blur it as you zoom in. */
+.plane-3d { overflow: visible; pointer-events: none; }
+.plane-3d-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  user-select: none;
+}
+.plane-3d-art { display: block; overflow: visible; }
+
 /* The 3D gizmo: Adobe's atom, a ring with two orbits round a dot. The rings
    turn the object and the centre pushes it in depth, so the centre grows its
    up-and-down arrows only when the pointer is on it — the "anchor icon" the
