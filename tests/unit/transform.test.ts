@@ -18,7 +18,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { applyToPoint, invert, multiply, isOrthogonal } from '@/geometry/Matrix'
 import { localMatrix, worldMatrix, geometryBounds } from '@/document/SceneGraph'
-import { transformFromMatrix } from '@/document/DocumentModel'
+import { resizeBoxInPlace, transformFromMatrix } from '@/document/DocumentModel'
 import { createDocument, createRect, createEllipse, createPath } from '@/document/NodeFactory'
 import { addNode, groupNodes, ungroupNode } from '@/document/DocumentModel'
 import { replaceDocument, getDoc, transaction } from '@/state/DocumentStore'
@@ -45,6 +45,28 @@ describe('transformFromMatrix', () => {
     expect(back.rotation).toBeCloseTo(t.rotation, 6)
     expect(back.scaleX).toBeCloseTo(t.scaleX, 6)
     expect(back.scaleY).toBeCloseTo(t.scaleY, 6)
+  })
+
+  it('resizes a box without moving anything drawn in it, however it is turned', () => {
+    // The pivot is a fraction of the box, so a new size is a new pivot — and a
+    // bare new size moved every point of a rotated path when an edit was saved.
+    for (let i = 0; i < 200; i++) {
+      const t = {
+        x: Math.random() * 400 - 200, y: Math.random() * 400 - 200,
+        width: 10 + Math.random() * 300, height: 10 + Math.random() * 300,
+        rotation: Math.random() * 720 - 360,
+        scaleX: 0.2 + Math.random() * 2, scaleY: 0.2 + Math.random() * 2,
+        skewX: Math.random() * 40 - 20, skewY: 0, originX: Math.random(), originY: Math.random(),
+      }
+      const resized = resizeBoxInPlace(t, 10 + Math.random() * 300, 10 + Math.random() * 300)
+      const before = localMatrix(t)
+      const after = localMatrix(resized)
+      for (let k = 0; k < 6; k++) expect(after[k]).toBeCloseTo(before[k]!, 6)
+      // Nothing but the box and where it sits: the turn itself is untouched.
+      expect(resized.rotation).toBe(t.rotation)
+      expect(resized.scaleX).toBe(t.scaleX)
+      expect(resized.skewX).toBe(t.skewX)
+    }
   })
 
   it('round-trips for many random transforms', () => {

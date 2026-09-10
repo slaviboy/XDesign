@@ -43,7 +43,7 @@ import {
   type PenSubpath,
 } from '../geometry/PathPoints'
 import { ancestorIds, nodePathData, worldMatrix } from '../document/SceneGraph'
-import { convertNodeToPath } from '../document/DocumentModel'
+import { convertNodeToPath, resizeBoxInPlace } from '../document/DocumentModel'
 import { liveTransform } from '../canvas/LiveTransform'
 import { geomKey } from '../canvas/liveKeys'
 import { breakHistoryCoalescing, transaction, getDoc } from '../state/DocumentStore'
@@ -818,7 +818,12 @@ export function updateInsertPreview(e: CanvasPointerEvent, ctx: ToolContext): vo
  * Write the edited points back as path data.
  *
  * The node's transform.width/height are refreshed from the new geometry bounds so
- * the selection frame and the inspector's W/H keep matching what is drawn.
+ * the selection frame and the inspector's W/H keep matching what is drawn — and
+ * the position with them, so that the matrix does not change. The box's middle
+ * is what the node turns about; refitting it without that moved a rotated path
+ * as a whole the moment an edit was saved, every point and not just the one
+ * that was dragged. It also keeps `edit.world` true across the commit, which a
+ * press that inserts a point and then drags it relies on.
  */
 function commitPath(label: string): void {
   const nodeId = edit.nodeId
@@ -836,11 +841,11 @@ function commitPath(label: string): void {
       if (node.type !== 'path') return false
       node.d = d
       const b = pathBounds(d)
-      node.transform = {
-        ...node.transform,
-        width: Math.max(0.5, b.width || node.transform.width),
-        height: Math.max(0.5, b.height || node.transform.height),
-      }
+      node.transform = resizeBoxInPlace(
+        node.transform,
+        Math.max(0.5, b.width || node.transform.width),
+        Math.max(0.5, b.height || node.transform.height),
+      )
       return undefined
     },
     { coalesceKey: `path:${nodeId}` },

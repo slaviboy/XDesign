@@ -97,6 +97,29 @@ export function transformFromMatrix(
   }
 }
 
+/**
+ * The same transform on a box of a different size, with nothing drawn in it
+ * moved.
+ *
+ * A node turns and scales about a point of its box — originX/originY of its
+ * width and height — so its matrix depends on the size: a new width moves the
+ * pivot, and for a node that is turned or scaled, a moved pivot is a moved
+ * node. Writing the size on its own is what made a rotated path jump the moment
+ * a point edit was saved, by however far refitting the box moved its middle.
+ *
+ * Solved for x and y directly, from the same `x + c − L·c` expansion as
+ * transformFromMatrix, rather than by decomposing a matrix: rotation, scale and
+ * skew stay exactly the numbers they were, so nothing drifts however many edits
+ * go through here.
+ */
+export function resizeBoxInPlace(t: Transform, width: number, height: number): Transform {
+  // Holding x + c − L·c fixed while c becomes c′ gives x′ = x + d − L·d, where
+  // d = c − c′ is how far the pivot moved in the node's own units.
+  const d = { x: t.originX * (t.width - width), y: t.originY * (t.height - height) }
+  const Ld = applyToVector(linearPart(t), d)
+  return { ...t, width, height, x: t.x + d.x - Ld.x, y: t.y + d.y - Ld.y }
+}
+
 /** Rewrite a node's transform so its world matrix becomes `world`. */
 export function setWorldMatrix(doc: DesignDocument, id: NodeId, world: Mat2D): void {
   const node = doc.nodes[id]

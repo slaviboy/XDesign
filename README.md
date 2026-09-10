@@ -597,6 +597,23 @@ Clicking an open end with the pen goes further and *resumes* the path into the p
 every further click appends and Enter finishes it. Extending once and then starting an unrelated
 object beside it is not what "continue this line" means.
 
+### Refitting a path's box must not move its pivot
+
+Saving a point edit refits the path's width and height to its new outline, so the frame and the
+inspector's W/H keep describing what is drawn. The Pen does the same as it adds points to a path
+it has picked up. Both used to write the new size and nothing else — and a node turns about a
+point of its box, `originX`/`originY` of its width and height. A new size is a new pivot. For an
+unrotated shape the pivot moving changes nothing, which is why this hid: rotate the shape first,
+and every point jumped the moment the edit was saved, the dragged one included, by however far
+refitting had moved the box's middle.
+
+`resizeBoxInPlace` changes the size and solves for the position that keeps the matrix exactly
+where it was, from the same `x + c − L·c` expansion `transformFromMatrix` inverts. It solves for
+`x` and `y` directly rather than decomposing a matrix, so rotation, scale and skew are left as the
+numbers they were and cannot drift over a long run of edits. Keeping the matrix fixed also keeps
+the editor's cached world matrix true across a save — which a press that inserts a point and then
+drags it depends on, since the drag carries on from coordinates taken before the insert was saved.
+
 ### The colour picker keeps one canonical state
 
 HSV is held locally and everything else is a projection of it, because HSV is not recoverable from

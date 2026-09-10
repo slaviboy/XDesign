@@ -53,7 +53,7 @@ import {
 } from '../geometry/PathPoints'
 import { createPath } from '../document/NodeFactory'
 import { isEffectivelyLocked, hitTest, hitTestAll, worldMatrix } from '../document/SceneGraph'
-import { convertNodeToPath, removeNodes } from '../document/DocumentModel'
+import { convertNodeToPath, removeNodes, resizeBoxInPlace } from '../document/DocumentModel'
 import { insertNode } from '../history/Commands'
 import { getDoc, transaction } from '../state/DocumentStore'
 import {
@@ -551,11 +551,14 @@ function commitBuilding(label: string, closed: boolean): void {
           if (target.type !== 'path') return false
           target.d = d
           target.closed = closed
-          target.transform = {
-            ...target.transform,
-            width: Math.max(0.5, bounds.width || target.transform.width),
-            height: Math.max(0.5, bounds.height || target.transform.height),
-          }
+          // Refitted without moving the matrix: the points were just put into
+          // local space through it, and a rotated path turns about the box's
+          // middle, so a bare new size would shift everything already drawn.
+          target.transform = resizeBoxInPlace(
+            target.transform,
+            Math.max(0.5, bounds.width || target.transform.width),
+            Math.max(0.5, bounds.height || target.transform.height),
+          )
           // The joined-on paths go in the SAME transaction, so one undo puts
           // both objects back rather than leaving a merged path and a ghost.
           if (merged.length) removeNodes(draft, merged)

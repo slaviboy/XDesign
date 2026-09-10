@@ -25,7 +25,7 @@
 
 import { test, expect } from '@playwright/test'
 import {
-  CANVAS, clickCanvas, dragOnCanvas, drawShape, nodesOfType, openApp, readField, selectTool,
+  CANVAS, clickCanvas, dragOnCanvas, drawShape, nodesOfType, openApp, readField, selectTool, setField,
 } from './helpers'
 
 /** A line from (200,200) to (400,200), left selected. */
@@ -268,4 +268,80 @@ test('the arrow keys nudge the selected points, not the whole object', async ({ 
   // Shift takes the larger step.
   await page.keyboard.press('Shift+ArrowRight')
   expect(await pathData(page)).toBe('M12 0 L333.3333 0 L333.3333 200 L0 200 L12 0 Z')
+})
+
+// ------------------------------------------------------- a turned object --
+
+/** Every anchor's centre on screen, in path order. */
+async function anchorCentres(page: import('@playwright/test').Page) {
+  // After the commit's re-render, not before it.
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  return anchors(page).evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    }),
+  )
+}
+
+const apart = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y)
+
+test('moving a point of a rotated shape leaves every other point where it was', async ({ page }) => {
+  // The saved edit refitted the box to the new outline and left the position
+  // alone. A shape turns about the middle of its box, so a new size is a new
+  // pivot — and for a turned shape, a moved pivot moved the whole thing the
+  // moment the pointer came up. Unturned, the pivot moving changes nothing,
+  // which is why it only ever showed after a rotation.
+  await drawShape(page, 'rect', { x: 250, y: 220 }, { x: 370, y: 380 })
+  await setField(page, '∠', 30)
+  await selectTool(page, 'direct-select')
+  await clickCanvas(page, { x: 310, y: 300 })
+  await expect(anchors(page)).toHaveCount(4)
+
+  const before = await anchorCentres(page)
+  const grabbed = before[0]!
+  const to = { x: grabbed.x - 45, y: grabbed.y - 30 }
+  await page.mouse.move(grabbed.x, grabbed.y)
+  await page.mouse.down()
+  await page.mouse.move(to.x, to.y, { steps: 8 })
+  await page.mouse.up()
+
+  const after = await anchorCentres(page)
+  expect(apart(after[0]!, to), 'the point that was dragged is where it was dropped').toBeLessThan(1.5)
+  for (let i = 1; i < 4; i++) {
+    expect(apart(after[i]!, before[i]!), `point ${i} stays put`).toBeLessThan(1)
+  }
+
+  // And a segment dragged afterwards moves only its own two ends.
+  const edge = { x: (after[1]!.x + after[2]!.x) / 2, y: (after[1]!.y + after[2]!.y) / 2 }
+  await page.mouse.move(edge.x, edge.y)
+  await page.mouse.down()
+  await page.mouse.move(edge.x + 30, edge.y + 10, { steps: 8 })
+  await page.mouse.up()
+  const moved = await anchorCentres(page)
+  expect(apart(moved[0]!, after[0]!), 'point 0 stays put').toBeLessThan(1)
+  expect(apart(moved[3]!, after[3]!), 'point 3 stays put').toBeLessThan(1)
+})
+
+test('the Pen carries on drawing a rotated path without moving what is already there', async ({ page }) => {
+  await drawLine(page)
+  await setField(page, '∠', 30)
+  await selectTool(page, 'pen')
+  await expect(anchors(page)).toHaveCount(2)
+  const before = await anchorCentres(page)
+
+  // Pick up the far end and add two points, each of which grows the box.
+  const end = before[1]!
+  await page.mouse.click(end.x, end.y)
+  await page.mouse.click(end.x + 60, end.y + 70)
+  await page.mouse.click(end.x + 130, end.y + 10)
+  await page.keyboard.press('Enter')
+
+  await selectTool(page, 'direct-select')
+  const canvas = (await page.locator(CANVAS).boundingBox())!
+  await clickCanvas(page, { x: (before[0]!.x + end.x) / 2 - canvas.x, y: (before[0]!.y + end.y) / 2 - canvas.y })
+  await expect(anchors(page)).toHaveCount(4)
+  const after = await anchorCentres(page)
+  expect(apart(after[0]!, before[0]!), 'the start of the line').toBeLessThan(1)
+  expect(apart(after[1]!, before[1]!), 'the end it was continued from').toBeLessThan(1)
 })
