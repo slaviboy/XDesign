@@ -20,8 +20,9 @@
  *
  * A preferences file is what makes a second computer feel like the first one.
  * It carries the choices that are about the person rather than the artwork:
- * the interface language, the theme, spell check, how a marquee selects, the
- * default artboard grid, and the whole keymap.
+ * the interface language, the theme, spell check, how a marquee selects,
+ * whether Export remembers its settings, the default artboard grid, and the
+ * whole keymap.
  *
  * It also carries the canvas settings the Preferences dialog shows — grid size,
  * snapping, the guide colour. Those live in the DOCUMENT rather than in
@@ -50,6 +51,7 @@ import {
   type MarqueeMode, type ToolHighlight,
 } from '../state/EditorStore'
 import { applyKeymapOverrides, keymapOverrides, type KeymapOverrides } from '../shortcuts/keymap'
+import { isRememberingExportSettings, setRememberExportSettings } from '../export/ExportSettings'
 import { getDoc } from '../state/DocumentStore'
 import { updateSettings } from '../history/Commands'
 import type { ArtboardGrid, DesignDocument, GuideDragMode, RGBA } from '../document/types'
@@ -79,6 +81,8 @@ export interface PreferencesFile {
   spellCheck?: boolean
   marqueeMode?: MarqueeMode
   toolHighlight?: ToolHighlight
+  /** Whether the Export dialog opens with the last export's settings. */
+  rememberExport?: boolean
   defaultGrid?: ArtboardGrid | null
   shortcuts?: KeymapOverrides
   canvas?: CanvasPreferences
@@ -99,13 +103,14 @@ export type PreferenceSection =
   | 'spellCheck'
   | 'marqueeMode'
   | 'toolHighlight'
+  | 'rememberExport'
   | 'defaultGrid'
   | 'shortcuts'
   | 'canvas'
 
 export const PREFERENCE_SECTIONS: readonly PreferenceSection[] = [
-  'language', 'theme', 'spellCheck', 'marqueeMode', 'toolHighlight', 'defaultGrid',
-  'shortcuts', 'canvas',
+  'language', 'theme', 'spellCheck', 'marqueeMode', 'toolHighlight', 'rememberExport',
+  'defaultGrid', 'shortcuts', 'canvas',
 ]
 
 /** Which sections a parsed file has something to say about. */
@@ -116,6 +121,7 @@ export function sectionsInFile(file: PreferencesFile): PreferenceSection[] {
   if (typeof file.spellCheck === 'boolean') present.push('spellCheck')
   if (file.marqueeMode === 'touch' || file.marqueeMode === 'enclose') present.push('marqueeMode')
   if (file.toolHighlight === 'fill' || file.toolHighlight === 'tint') present.push('toolHighlight')
+  if (typeof file.rememberExport === 'boolean') present.push('rememberExport')
   // A file that deliberately carries "no default grid" is still saying
   // something about the default grid, so null counts as present.
   if (file.defaultGrid === null || isArtboardGrid(file.defaultGrid)) present.push('defaultGrid')
@@ -154,6 +160,9 @@ export function collectPreferences(
   if (wanted.has('spellCheck')) file.spellCheck = isSpellCheckEnabled()
   if (wanted.has('marqueeMode')) file.marqueeMode = editorStore.getState().marqueeMode
   if (wanted.has('toolHighlight')) file.toolHighlight = editorStore.getState().toolHighlight
+  // The switch, not the settings it remembers: those are a record of the last
+  // export, not a choice anyone made about how the app should behave.
+  if (wanted.has('rememberExport')) file.rememberExport = isRememberingExportSettings()
   if (wanted.has('defaultGrid')) file.defaultGrid = readDefaultGrid()
   if (wanted.has('shortcuts')) file.shortcuts = keymapOverrides()
   if (wanted.has('canvas')) {
@@ -233,6 +242,10 @@ export function applyPreferences(
   if (wanted.has('toolHighlight') && (file.toolHighlight === 'fill' || file.toolHighlight === 'tint')) {
     setToolHighlight(file.toolHighlight)
     applied.push('active tool')
+  }
+  if (wanted.has('rememberExport') && typeof file.rememberExport === 'boolean') {
+    setRememberExportSettings(file.rememberExport)
+    applied.push('export settings')
   }
   if (wanted.has('defaultGrid') && isArtboardGrid(file.defaultGrid)) {
     saveDefaultGrid(file.defaultGrid)

@@ -245,5 +245,7 @@
   "label.mixed": "Multiple",
   "label.toolHighlight": "Outil actif",
   "prefs.toolHighlightFill": "Fond plein",
-  "prefs.toolHighlightTint": "Icône colorée"
+  "prefs.toolHighlightTint": "Icône colorée",
+  "prefs.export": "Exportation",
+  "label.rememberExport": "Mémoriser les derniers réglages d’exportation"
 }

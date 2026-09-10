@@ -20,3 +20,10 @@ processed by scripts/build-dictionaries.mjs.
 Web fonts are supplied at build time by the @fontsource packages listed in
 package.json; each family carries its own upstream license (SIL Open Font
 License or Apache License 2.0).
+
+The HEIF encoder is supplied at build time by the elheif package (MIT), which
+compiles libheif (LGPL-3.0), libde265 (LGPL-3.0) and kvazaar (BSD-3-Clause) to
+WebAssembly. It is emitted as a file of its own (assets/heif.worker-*.js) and
+can be replaced with a rebuild of those libraries. HEVC, the codec it writes,
+is covered by patents; distributing an encoder for it commercially may require
+a patent licence.

@@ -245,5 +245,7 @@
   "label.mixed": "Variado",
   "label.toolHighlight": "Ferramenta ativa",
   "prefs.toolHighlightFill": "Fundo preenchido",
-  "prefs.toolHighlightTint": "Ícone colorido"
+  "prefs.toolHighlightTint": "Ícone colorido",
+  "prefs.export": "Exportação",
+  "label.rememberExport": "Lembrar as últimas configurações de exportação"
 }

@@ -36,6 +36,7 @@ import { ShortcutEditor } from './ShortcutEditor'
 import { DialogShell } from './DialogShell'
 import { LANGUAGES, getLanguage, setLanguage, t, type LanguageCode } from '../i18n'
 import { canSpellCheck, isSpellCheckEnabled, setSpellCheckEnabled } from '../text/spellcheck'
+import { isRememberingExportSettings, setRememberExportSettings } from '../export/ExportSettings'
 import { useLanguage } from '../state/hooks-i18n'
 import { InfoIcon } from './icons'
 import { NumberField, Select, TextField } from './primitives'
@@ -190,6 +191,7 @@ export function PreferencesDialog() {
   void useLanguage()
   const language = getLanguage()
   const [spellCheck, setSpellCheck] = useState(() => isSpellCheckEnabled())
+  const [rememberExport, setRememberExport] = useState(() => isRememberingExportSettings())
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
 
   useEffect(() => {
@@ -373,6 +375,25 @@ export function PreferencesDialog() {
             title="How the toolbar marks the active tool"
           />
         </div>
+      </PreferenceRow>
+
+      <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>{t('prefs.export')}</h4>
+      <PreferenceRow
+        name="remember-export"
+        info="The Export dialog opens with the choices your last export was made with — the format, and for it the scale, quality, background, and how images and text are handled — rather than starting from PNG at 1× every time. What to export and the file name are always chosen afresh. Settings are remembered when an export is written, so trying something and pressing Cancel changes nothing."
+      >
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={rememberExport}
+            data-testid="remember-export"
+            onChange={(e) => {
+              setRememberExportSettings(e.target.checked)
+              setRememberExport(e.target.checked)
+            }}
+          />
+          {t('label.rememberExport')}
+        </label>
       </PreferenceRow>
 
       <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>{t('prefs.storage')}</h4>

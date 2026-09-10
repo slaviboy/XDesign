@@ -245,5 +245,7 @@
   "label.mixed": "混在",
   "label.toolHighlight": "使用中のツール",
   "prefs.toolHighlightFill": "背景を塗る",
-  "prefs.toolHighlightTint": "アイコンに色"
+  "prefs.toolHighlightTint": "アイコンに色",
+  "prefs.export": "書き出し",
+  "label.rememberExport": "前回の書き出し設定を記憶する"
 }

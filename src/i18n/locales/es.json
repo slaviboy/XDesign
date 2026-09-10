@@ -245,5 +245,7 @@
   "label.mixed": "Variado",
   "label.toolHighlight": "Herramienta activa",
   "prefs.toolHighlightFill": "Fondo relleno",
-  "prefs.toolHighlightTint": "Icono coloreado"
+  "prefs.toolHighlightTint": "Icono coloreado",
+  "prefs.export": "Exportar",
+  "label.rememberExport": "Recordar la última configuración de exportación"
 }

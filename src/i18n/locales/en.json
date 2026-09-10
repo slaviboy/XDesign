@@ -245,5 +245,7 @@
   "label.mixed": "Mixed",
   "label.toolHighlight": "Active tool",
   "prefs.toolHighlightFill": "Filled background",
-  "prefs.toolHighlightTint": "Coloured icon"
+  "prefs.toolHighlightTint": "Coloured icon",
+  "prefs.export": "Export",
+  "label.rememberExport": "Remember last export settings"
 }

@@ -240,8 +240,15 @@ what you copied was text, the characters themselves. Copying inside the app stil
 gradient, group and pixel: the copy carries its own identity, so pasting it back is recognised
 as the original rather than re-imported as flattened markup.
 
-**Export** — SVG, PNG and JPEG, of a selection, an artboard, the whole document, or every
-layer marked for export, at 0.1×–10× scale.
+**Export** — PNG, JPEG, SVG and HEIF, of a selection, an artboard, the whole document, or
+every layer marked for export, at 0.1×–10× scale. The background is transparent, or a colour
+you pick the way you pick a fill — JPEG, having no transparency, always has one. Type a name
+for the file and the field shows what will be added after it (`@2x.png`), so the name in your
+Downloads folder is the one you saw. Tick Preview to see the file before it is written: it is
+the real export, so it shows the crop, the background and a JPEG's compression, with the size
+of the file beneath. The dialog opens with the settings your last export was made with —
+format, scale, quality, background, and how images and text are handled — which Preferences
+can switch off; what to export and what to call it are always chosen afresh.
 
 **Two pointers that hand the object back and forth** — Direct Selection reaches inside a
 group to the leaf and shows its points; clicking an edge selects that SEGMENT so it can be
@@ -272,7 +279,8 @@ visible everywhere the app mentions it.
 
 **Take your settings with you** — Export Preferences writes a small, readable `.xprefs`
 file holding the interface language, the theme, spell check, marquee mode, how the toolbar
-marks the active tool, the default artboard grid, the canvas settings, and the whole keymap. Both directions open a dialog with
+marks the active tool, whether Export remembers its settings, the default artboard grid, the
+canvas settings, and the whole keymap. Both directions open a dialog with
 a checkbox per section, each saying what it actually holds — "Deutsch", "3 of 55 changed", "7
 settings" — so you can take the keymap without the theme, or send someone your shortcuts and
 nothing else. Import offers only the sections its file contains, because a checkbox for
@@ -420,6 +428,39 @@ libraries removed ~1.4 MB from the build.
 
 System fonts can be used, but their bytes are not readable by the page, so they can only be
 referenced by name. The dialog says so when a system font is in the export.
+
+### HEIF is encoded by the app, because no browser will
+
+`canvas.toBlob('image/heic')` does not fail: by the specification, a type the browser cannot
+write quietly falls back to PNG, so it hands back a PNG with a HEIF's name on it. No browser
+encodes HEIF. So the app does — libheif with the kvazaar HEVC encoder, compiled to WebAssembly
+(the `elheif` package), running in a worker of its own. The binary is inlined in the script, so
+there is nothing to fetch and HEIF works offline like the rest of the export; the worker is its
+own 1.5 MB chunk, loaded the first time someone exports a HEIF and never before, and precached
+with everything else.
+
+Three things about it are not obvious, and each was found by checking the output with a decoder
+that shares no code with the encoder — macOS's own:
+
+- **The encoder hands back a view into its own memory, not a copy.** The next call writes over
+  it. Keeping the result for a moment and encoding again produced a file that looked like a
+  HEIF and would not open. The bytes are copied out the moment they arrive.
+- **The decoder's view is longer than the image.** The pixels are packed four bytes to a pixel
+  from the start, but the view runs on past the last row into the decoder's neighbouring
+  memory — twice the image's length, seven times for a tiny one. Only the image is taken.
+- **HEVC has a size limit.** Its highest level, 6.2, allows 35.6 million samples a picture.
+  The encoder will go past it with a warning, but it writes one picture rather than a grid of
+  tiles, so a decoder that honours the level refuses the file. The export stops first, with
+  a message that says so, rather than writing something that will not open elsewhere.
+
+The preview needs the decoder as well, since only Safari can show a HEIF in an `<img>`. That
+turns out to be the more honest preview anyway: it shows the compressed pixels decoded from the
+bytes just written, not the picture before it was compressed.
+
+libheif and libde265 are LGPL-3.0 and kvazaar is BSD-3-Clause; the wrapper is MIT. The encoder
+ships as a separate chunk rather than being folded into the app's own code, which keeps it a
+replaceable library in the sense the LGPL asks for. HEVC itself is covered by patents, which is
+a question for anyone distributing the app commercially, not one a licence file answers.
 
 ### The line tool carried its direction in a signed box
 

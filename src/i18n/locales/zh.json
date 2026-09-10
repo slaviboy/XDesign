@@ -245,5 +245,7 @@
   "label.mixed": "多种",
   "label.toolHighlight": "当前工具",
   "prefs.toolHighlightFill": "填充背景",
-  "prefs.toolHighlightTint": "图标着色"
+  "prefs.toolHighlightTint": "图标着色",
+  "prefs.export": "导出",
+  "label.rememberExport": "记住上次的导出设置"
 }

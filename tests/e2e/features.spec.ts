@@ -1119,7 +1119,7 @@ test('every preference explains itself behind an (i)', async ({ page }) => {
 
   // One button per setting, and nothing explained until asked.
   const buttons = page.locator('.dialog .info-button')
-  await expect(buttons).toHaveCount(12)
+  await expect(buttons).toHaveCount(13)
   await expect(page.locator('.dialog .pref-note')).toHaveCount(0)
 
   const snap = page.locator('[data-testid="info-snap-objects"]')

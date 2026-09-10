@@ -35,9 +35,14 @@
  *    instead so drawImage never lands on a half-ready bitmap.
  *  - The canvas is sized at the final pixel dimensions rather than ctx.scale()-ing
  *    a small one, which would resample and soften the output.
+ *
+ * HEIF is drawn the same way and then handed to an encoder of our own, because
+ * no browser's canvas will write one. See HeifEncoder.
  */
 
-export type RasterFormat = 'png' | 'jpeg'
+import { encodeHeif, HEIF_MAX_PIXELS } from './HeifEncoder'
+
+export type RasterFormat = 'png' | 'jpeg' | 'heif'
 
 export interface RasterOptions {
   /** Output pixel dimensions. */
@@ -100,6 +105,13 @@ export async function rasterizeSvg(svg: string, options: RasterOptions): Promise
         `Try a smaller scale.`,
     )
   }
+  if (options.format === 'heif' && width * height > HEIF_MAX_PIXELS) {
+    throw new RasterizeError(
+      `That export would be ${width}×${height} pixels. A HEIF image can have at most ` +
+        `${(HEIF_MAX_PIXELS / 1e6).toFixed(1)} million, or it will not open elsewhere. ` +
+        `Try a smaller scale.`,
+    )
+  }
 
   const image = await loadSvgImage(svg)
 
@@ -120,6 +132,13 @@ export async function rasterizeSvg(svg: string, options: RasterOptions): Promise
 
     ctx.drawImage(image as CanvasImageSource, 0, 0, width, height)
 
+    if (options.format === 'heif') {
+      try {
+        return await encodeHeif(ctx.getImageData(0, 0, width, height))
+      } catch (cause) {
+        throw new RasterizeError('Export failed while encoding the HEIF image.', { cause })
+      }
+    }
     return await canvasToBlob(canvas, options.format, options.quality ?? 0.92)
   } finally {
     if ('src' in image && typeof image.src === 'string' && image.src.startsWith('blob:')) {
@@ -169,7 +188,7 @@ function createCanvas(width: number, height: number): HTMLCanvasElement | Offscr
 
 async function canvasToBlob(
   canvas: HTMLCanvasElement | OffscreenCanvas,
-  format: RasterFormat,
+  format: 'png' | 'jpeg',
   quality: number,
 ): Promise<Blob> {
   const mime = format === 'png' ? 'image/png' : 'image/jpeg'

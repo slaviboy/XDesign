@@ -245,5 +245,7 @@
   "label.mixed": "Gemischt",
   "label.toolHighlight": "Aktives Werkzeug",
   "prefs.toolHighlightFill": "Gefüllter Hintergrund",
-  "prefs.toolHighlightTint": "Eingefärbtes Symbol"
+  "prefs.toolHighlightTint": "Eingefärbtes Symbol",
+  "prefs.export": "Exportieren",
+  "label.rememberExport": "Letzte Exporteinstellungen merken"
 }

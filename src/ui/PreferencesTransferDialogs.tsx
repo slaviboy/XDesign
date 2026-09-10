@@ -51,6 +51,7 @@ const SECTION_LABELS: Record<PreferenceSection, MessageKey> = {
   spellCheck: 'label.spellCheck',
   marqueeMode: 'label.marqueeSelects',
   toolHighlight: 'label.toolHighlight',
+  rememberExport: 'label.rememberExport',
   defaultGrid: 'prefs.section.defaultGrid',
   shortcuts: 'shortcuts.title',
   canvas: 'prefs.canvas',
@@ -78,6 +79,8 @@ function describeSection(file: PreferencesFile, section: PreferenceSection): str
           : t('menu.themeSystem')
     case 'spellCheck':
       return file.spellCheck ? t('prefs.on') : t('prefs.off')
+    case 'rememberExport':
+      return file.rememberExport ? t('prefs.on') : t('prefs.off')
     case 'marqueeMode':
       return file.marqueeMode === 'enclose' ? t('prefs.marqueeEnclose') : t('prefs.marqueeTouch')
     case 'toolHighlight':

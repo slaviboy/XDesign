@@ -184,8 +184,9 @@ test('preferences export and import move settings between machines', async ({ pa
 
   // Every section is offered, ticked, and says what it holds.
   const rows = page.locator('.prefs-transfer-list .prefs-transfer-row')
-  await expect(rows).toHaveCount(8)
+  await expect(rows).toHaveCount(9)
   await expect(rows.filter({ hasText: 'Keyboard Shortcuts' })).toContainText('1 of')
+  await expect(rows.filter({ hasText: 'Remember last export settings' })).toContainText('On')
 
   const download = page.waitForEvent('download')
   await page.locator('.dialog-footer .button.primary').click()
@@ -214,7 +215,7 @@ test('preferences export and import move settings between machines', async ({ pa
   await page.locator('[data-testid="menu-import-prefs"]').click()
   await (await chooser).setFiles({ name: 'prefs.xprefs', mimeType: 'application/json', buffer: Buffer.from(text) })
 
-  await expect(page.locator('.prefs-transfer-list .prefs-transfer-row')).toHaveCount(8)
+  await expect(page.locator('.prefs-transfer-list .prefs-transfer-row')).toHaveCount(9)
   await page.locator('.dialog-footer .button.primary').click()
 
   await expect(page.locator('.notification').last()).toContainText('shortcuts')

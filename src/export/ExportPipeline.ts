@@ -33,7 +33,7 @@ import { exportNodesToSvg, type ImageHandling, type TextHandling } from '../svg/
 import { rasterizeSvg, RasterizeError } from './Rasterizer'
 import type { DesignDocument, NodeId, RGBA } from '../document/types'
 
-export type ExportFormat = 'svg' | 'png' | 'jpeg'
+export type ExportFormat = 'svg' | 'png' | 'jpeg' | 'heif'
 export type ExportArea = 'selection' | 'artboard' | 'document' | 'custom' | 'marked'
 
 export interface ExportRequest {
@@ -46,13 +46,38 @@ export interface ExportRequest {
   scale: number
   /** JPEG only, 0..1. */
   quality?: number
-  /** null exports a transparent background (PNG/SVG only). */
+  /**
+   * null exports a transparent background. JPEG has no transparency, so there
+   * it means white, and a translucent colour is laid over white.
+   */
   background?: RGBA | null
   imageHandling?: ImageHandling
   textHandling?: TextHandling
   padding?: number
+  /** The name before the scale and extension, which are always added. */
   fileName?: string
 }
+
+/** Everything but SVG comes out as pixels, and so has a scale. */
+export function isRasterFormat(format: ExportFormat): boolean {
+  return format !== 'svg'
+}
+
+/** JPEG is the one format that cannot be transparent. */
+export function supportsTransparency(format: ExportFormat): boolean {
+  return format !== 'jpeg'
+}
+
+const EXTENSIONS: Record<ExportFormat, string> = {
+  svg: 'svg',
+  png: 'png',
+  jpeg: 'jpg',
+  // The HEVC-coded kind of HEIF, which is what the encoder writes and what
+  // Apple's software and Windows' HEIF extension look for by name.
+  heif: 'heic',
+}
+
+const WHITE: RGBA = { r: 255, g: 255, b: 255, a: 1 }
 
 export interface ExportOutput {
   blob: Blob
@@ -105,7 +130,10 @@ export function resolveExportBounds(
 }
 
 /** Nodes to include, given the requested area. */
-export function resolveExportNodes(doc: DesignDocument, request: ExportRequest): NodeId[] {
+export function resolveExportNodes(
+  doc: DesignDocument,
+  request: Pick<ExportRequest, 'area' | 'nodeIds'>,
+): NodeId[] {
   switch (request.area) {
     case 'artboard':
       return request.nodeIds.filter((id) => doc.nodes[id]?.type === 'artboard')
@@ -149,16 +177,23 @@ export async function runExport(
     // does not inherit the page's document.fonts, so a name reference would
     // silently substitute.
     textHandling: request.format === 'svg' ? (request.textHandling ?? 'embed-font') : 'embed-font',
-    background: request.format === 'jpeg' ? (request.background ?? { r: 255, g: 255, b: 255, a: 1 }) : request.background ?? null,
+    // The background is drawn INTO the SVG, for every format, and nowhere else.
+    // The rasterizer used to paint it underneath as well, which went unnoticed
+    // while the only choice was opaque white: a half-transparent colour painted
+    // twice comes out three-quarters opaque.
+    background: supportsTransparency(request.format)
+      ? (request.background ?? null)
+      : (request.background ?? WHITE),
     padding,
   })
 
-  const baseName = sanitizeFileName(request.fileName ?? defaultName(doc, request, nodeIds))
+  const name = request.fileName?.trim() || defaultName(doc, request, nodeIds)
+  const fileName = sanitizeFileName(baseNameOf(name)) + exportFileSuffix(request.format, scale)
 
   if (request.format === 'svg') {
     return {
       blob: new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
-      fileName: `${baseName}.svg`,
+      fileName,
       width: bounds.width + padding * 2,
       height: bounds.height + padding * 2,
       warnings,
@@ -179,17 +214,15 @@ export async function runExport(
     height: pixel.height,
     format: request.format,
     quality: request.quality ?? 0.92,
-    background:
-      request.format === 'jpeg'
-        ? '#ffffff'
-        : request.background
-          ? `rgba(${request.background.r},${request.background.g},${request.background.b},${request.background.a})`
-          : null,
+    // Only JPEG gets a ground of its own: it has no alpha, so whatever the SVG
+    // leaves see-through would otherwise come out black. Everything else has
+    // its background in the SVG already.
+    background: supportsTransparency(request.format) ? null : '#ffffff',
   })
 
   return {
     blob,
-    fileName: `${baseName}${scale !== 1 ? `@${formatScale(scale)}x` : ''}.${request.format === 'jpeg' ? 'jpg' : 'png'}`,
+    fileName,
     width: pixel.width,
     height: pixel.height,
     warnings,
@@ -206,9 +239,27 @@ function formatScale(scale: number): string {
   return Number.isInteger(scale) ? String(scale) : String(Number(scale.toFixed(2)))
 }
 
+/**
+ * What the pipeline puts after a file's name: the scale, for pixels, and the
+ * extension. The dialog shows it after the name field, so the whole name is on
+ * screen before anything is written.
+ */
+export function exportFileSuffix(format: ExportFormat, scale: number): string {
+  const s = clampScale(scale)
+  return `${isRasterFormat(format) && s !== 1 ? `@${formatScale(s)}x` : ''}.${EXTENSIONS[format]}`
+}
+
+/** The name an export gets when nobody types one. */
+export function defaultExportName(
+  doc: DesignDocument,
+  request: Pick<ExportRequest, 'area' | 'nodeIds'>,
+): string {
+  return defaultName(doc, request, resolveExportNodes(doc, request))
+}
+
 function defaultName(
   doc: DesignDocument,
-  request: ExportRequest,
+  request: Pick<ExportRequest, 'area'>,
   nodeIds: readonly NodeId[],
 ): string {
   if (request.area === 'artboard' || nodeIds.length === 1) {
@@ -219,8 +270,30 @@ function defaultName(
   return `${doc.name}-${request.area}`
 }
 
+/**
+ * A typed name, less a scale and extension the pipeline is about to add anyway
+ * — someone who types "hero.png" means hero.png, not hero.png.png.
+ */
+function baseNameOf(name: string): string {
+  return name.replace(/(@\d+(\.\d+)?x)?\.(svg|png|jpe?g|heic|heif)$/i, '')
+}
+
+/**
+ * Only what a file system will not take, so a name in any script survives.
+ *
+ * The rule used to keep [A-Za-z0-9._ -] and replace everything else, which was
+ * harmless while names only came from layers but turned a name typed in
+ * Bulgarian or Japanese into a row of dashes.
+ */
 function sanitizeFileName(name: string): string {
-  return name.replace(/[^A-Za-z0-9._ -]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80) || 'export'
+  const cleaned = name
+    .replace(/[\\/:*?"<>|\p{Cc}]+/gu, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    // A leading dot hides the file on macOS and Linux; Windows drops a trailing one.
+    .replace(/^\.+|\.+$/g, '')
+  // By code point, so the cut cannot split an emoji into half a character.
+  return Array.from(cleaned).slice(0, 80).join('').trim() || 'export'
 }
 
 /**

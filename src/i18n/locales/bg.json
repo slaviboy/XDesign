@@ -245,5 +245,7 @@
   "label.mixed": "Смесено",
   "label.toolHighlight": "Активен инструмент",
   "prefs.toolHighlightFill": "Запълнен фон",
-  "prefs.toolHighlightTint": "Оцветена икона"
+  "prefs.toolHighlightTint": "Оцветена икона",
+  "prefs.export": "Експортиране",
+  "label.rememberExport": "Запомняне на последните настройки за експортиране"
 }
