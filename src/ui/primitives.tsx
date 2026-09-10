@@ -343,7 +343,10 @@ export function Select<T extends string | number>({
   title,
 }: {
   value: T
-  options: Array<{ value: T; label: string } | { group: string; options: Array<{ value: T; label: string }> }>
+  options: Array<
+    | { value: T; label: string; disabled?: boolean }
+    | { group: string; options: Array<{ value: T; label: string }> }
+  >
   onChange: (v: T) => void
   disabled?: boolean
   title?: string
@@ -369,7 +372,7 @@ export function Select<T extends string | number>({
             ))}
           </optgroup>
         ) : (
-          <option key={String(opt.value)} value={opt.value}>{opt.label}</option>
+          <option key={String(opt.value)} value={opt.value} disabled={opt.disabled}>{opt.label}</option>
         ),
       )}
     </select>

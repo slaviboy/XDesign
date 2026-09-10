@@ -93,7 +93,7 @@ describe('remembering export settings', () => {
   it('lets one bad field cost only itself', () => {
     const settings = sanitizeExportSettings({
       ...custom,
-      format: 'webp',
+      format: 'bmp',
       scale: 7,
       quality: 'high',
       background: { enabled: 'yes', color: RED },
@@ -142,7 +142,12 @@ describe('export file names', () => {
     expect(exportFileSuffix('png', 2)).toBe('@2x.png')
     expect(exportFileSuffix('jpeg', 1.5)).toBe('@1.5x.jpg')
     expect(exportFileSuffix('heif', 3)).toBe('@3x.heic')
+    expect(exportFileSuffix('webp', 2)).toBe('@2x.webp')
     expect(exportFileSuffix('svg', 4)).toBe('.svg')
+  })
+
+  it('remembers WebP like any other format', () => {
+    expect(sanitizeExportSettings({ format: 'webp' }).format).toBe('webp')
   })
 
   function docWithRect(name: string): NodeId {
@@ -169,6 +174,7 @@ describe('export file names', () => {
     const id = docWithRect('Hero')
     expect(await svgNamed(id, 'banner.svg')).toBe('banner.svg')
     expect(await svgNamed(id, 'banner@2x.PNG')).toBe('banner.svg')
+    expect(await svgNamed(id, 'banner.webp')).toBe('banner.svg')
   })
 
   it('keeps a name in any script, and replaces only what a file system refuses', async () => {

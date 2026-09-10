@@ -33,7 +33,7 @@ import { exportNodesToSvg, type ImageHandling, type TextHandling } from '../svg/
 import { rasterizeSvg, RasterizeError } from './Rasterizer'
 import type { DesignDocument, NodeId, RGBA } from '../document/types'
 
-export type ExportFormat = 'svg' | 'png' | 'jpeg' | 'heif'
+export type ExportFormat = 'svg' | 'png' | 'jpeg' | 'heif' | 'webp'
 export type ExportArea = 'selection' | 'artboard' | 'document' | 'custom' | 'marked'
 
 export interface ExportRequest {
@@ -44,7 +44,7 @@ export interface ExportRequest {
   /** Required when area is 'custom'. */
   customBounds?: Bounds
   scale: number
-  /** JPEG only, 0..1. */
+  /** JPEG and WebP, 0..1. */
   quality?: number
   /**
    * null exports a transparent background. JPEG has no transparency, so there
@@ -68,6 +68,11 @@ export function supportsTransparency(format: ExportFormat): boolean {
   return format !== 'jpeg'
 }
 
+/** The lossy formats whose encoder takes a quality. HEIF's does not. */
+export function hasQuality(format: ExportFormat): boolean {
+  return format === 'jpeg' || format === 'webp'
+}
+
 const EXTENSIONS: Record<ExportFormat, string> = {
   svg: 'svg',
   png: 'png',
@@ -75,6 +80,7 @@ const EXTENSIONS: Record<ExportFormat, string> = {
   // The HEVC-coded kind of HEIF, which is what the encoder writes and what
   // Apple's software and Windows' HEIF extension look for by name.
   heif: 'heic',
+  webp: 'webp',
 }
 
 const WHITE: RGBA = { r: 255, g: 255, b: 255, a: 1 }
@@ -275,7 +281,7 @@ function defaultName(
  * — someone who types "hero.png" means hero.png, not hero.png.png.
  */
 function baseNameOf(name: string): string {
-  return name.replace(/(@\d+(\.\d+)?x)?\.(svg|png|jpe?g|heic|heif)$/i, '')
+  return name.replace(/(@\d+(\.\d+)?x)?\.(svg|png|jpe?g|heic|heif|webp)$/i, '')
 }
 
 /**

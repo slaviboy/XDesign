@@ -782,6 +782,9 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
+/* One cell for everything, so the stand-in and the file sit exactly on top of
+   each other and swapping them moves nothing. */
+.export-preview-frame > * { grid-area: 1 / 1; }
 .export-preview-frame img {
   max-width: 100%;
   max-height: 100%;
@@ -791,6 +794,7 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   outline: 1px solid var(--border-strong);
   transition: opacity 120ms;
 }
+.export-preview-frame img.off { visibility: hidden; }
 /* Dimmed rather than removed while the next one renders, so the picture does
    not blink out on every change of a setting. */
 .export-preview-frame.pending img { opacity: 0.5; }

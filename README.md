@@ -240,15 +240,17 @@ what you copied was text, the characters themselves. Copying inside the app stil
 gradient, group and pixel: the copy carries its own identity, so pasting it back is recognised
 as the original rather than re-imported as flattened markup.
 
-**Export** — PNG, JPEG, SVG and HEIF, of a selection, an artboard, the whole document, or
-every layer marked for export, at 0.1×–10× scale. The background is transparent, or a colour
-you pick the way you pick a fill — JPEG, having no transparency, always has one. Type a name
-for the file and the field shows what will be added after it (`@2x.png`), so the name in your
-Downloads folder is the one you saw. Tick Preview to see the file before it is written: it is
-the real export, so it shows the crop, the background and a JPEG's compression, with the size
-of the file beneath. The dialog opens with the settings your last export was made with —
-format, scale, quality, background, and how images and text are handled — which Preferences
-can switch off; what to export and what to call it are always chosen afresh.
+**Export** — PNG, JPEG, SVG, HEIF and WebP, of a selection, an artboard, the whole document,
+or every layer marked for export, at 0.1×–10× scale. The file's name comes first: type one and
+the field shows what will be added after it (`@2x.png`), so the name in your Downloads folder
+is the one you saw. The background is transparent, or a colour you pick the way you pick a
+fill — JPEG, having no transparency, always has one. Tick Preview to see the file before it is
+written: it is rendered by the export itself, so it shows the crop, a JPEG's or a WebP's
+compression and the size of the file, and it follows the background the moment you change it,
+all the way through a drag in the colour picker. The dialog opens with the settings your last
+export was made with — format, scale, quality, background, and how images and text are
+handled — which Preferences can switch off; what to export and what to call it are always
+chosen afresh.
 
 **Two pointers that hand the object back and forth** — Direct Selection reaches inside a
 group to the leaf and shows its points; clicking an edge selects that SEGMENT so it can be
@@ -461,6 +463,36 @@ libheif and libde265 are LGPL-3.0 and kvazaar is BSD-3-Clause; the wrapper is MI
 ships as a separate chunk rather than being folded into the app's own code, which keeps it a
 replaceable library in the sense the LGPL asks for. HEVC itself is covered by patents, which is
 a question for anyone distributing the app commercially, not one a licence file answers.
+
+### WebP is the browser's, and asked for by writing one
+
+WebP needs no encoder of our own where the browser's canvas has one — Chrome, Edge and Firefox.
+Safari has displayed WebP for years but its canvas does not write it, and asking anyway does not
+fail: like any type a canvas cannot encode, it hands back a PNG. So the rasterizer checks the
+type of what came back rather than trusting it, and refuses to write a PNG under a `.webp`
+name; and the dialog asks the canvas once, by writing a single pixel, and disables WebP where
+the answer is no. Bundling an encoder for Safari, as HEIF has to, is possible — it has not been
+worth a second megabyte-class dependency yet.
+
+### The export preview lays the background under the picture
+
+The preview used to re-run the export on every change of setting, after a pause, dimming the
+old picture meanwhile. That is right for a scale or a quality, which change the picture. It was
+wrong for the background: ticking the box waited out the pause and a whole export, and dragging
+through the colour picker kept resetting the pause, so the picture sat dimmed until the pointer
+stopped.
+
+So the picture is now the export *without* its background, and the colour is painted behind it
+by the preview itself. A change of background repaints at once and renders nothing. For PNG and
+SVG that is exactly the file; for WebP and HEIF the artwork is compressed as the file compresses
+it, and the background around it is the flat colour it is in the file.
+
+The file itself is rendered alongside, for its size — and JPEG, which has no transparency and so
+cannot be split from its colour, is shown as that file once it has caught up. Until it does, a
+lossless stand-in of the same artwork over the new colour holds its place, and the two are
+stacked in one cell so the swap is between two pictures already decoded rather than a blank
+frame. Renders are keyed by what changes the picture and nothing else, so switching format and
+back reuses what is still right.
 
 ### The line tool carried its direction in a signed box
 

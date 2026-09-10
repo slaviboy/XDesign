@@ -50,7 +50,7 @@ export interface ExportSettings {
   /** Whether Custom… is chosen, and the value typed beside it. */
   useCustomScale: boolean
   customScale: number
-  /** JPEG quality, in percent. */
+  /** JPEG and WebP quality, in percent — one value, kept across the two. */
   quality: number
   background: ExportBackground
   imageHandling: ImageHandling
@@ -58,7 +58,7 @@ export interface ExportSettings {
   preview: boolean
 }
 
-export const EXPORT_FORMATS: readonly ExportFormat[] = ['png', 'jpeg', 'svg', 'heif']
+export const EXPORT_FORMATS: readonly ExportFormat[] = ['png', 'jpeg', 'svg', 'heif', 'webp']
 
 export const QUALITY_MIN = 20
 export const QUALITY_MAX = 100

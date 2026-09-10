@@ -31,9 +31,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   MAX_SCALE, MIN_SCALE, SCALE_PRESETS, clampScale, defaultExportName, downloadBlob, exportFileSuffix,
-  isRasterFormat, resolveExportBounds, runExport, supportsTransparency,
+  hasQuality, isRasterFormat, resolveExportBounds, runExport, supportsTransparency,
   type ExportArea, type ExportFormat, type ExportRequest,
 } from '../export/ExportPipeline'
+import { canEncodeWebp } from '../export/Rasterizer'
 import {
   QUALITY_MAX, QUALITY_MIN, QUALITY_STEP, initialExportSettings, rememberExportSettings,
   type ExportSettings,
@@ -146,7 +147,11 @@ export function ExportDialog() {
   // screen, so the dialog can tell which scale is too much.
   const heifTooLarge =
     format === 'heif' && !!outputSize && outputSize.width * outputSize.height > HEIF_MAX_PIXELS
-  const canExport = hasArea && !busy && !heifTooLarge
+  // The option is disabled where WebP cannot be written, so this is only the
+  // guard for arriving with it already chosen.
+  const webpOk = canEncodeWebp()
+  const webpBlocked = format === 'webp' && !webpOk
+  const canExport = hasArea && !busy && !heifTooLarge && !webpBlocked
 
   const doExport = async () => {
     setBusy(true)
@@ -181,35 +186,30 @@ export function ExportDialog() {
       <div className="dialog" style={{ width: 460 }} role="dialog" aria-label="Export">
         <div className="dialog-header">Export</div>
         <div className="dialog-body">
+          {/* First, because it is the one thing that is different every time. */}
           <div className="dialog-row">
-            <label>Area</label>
-            <div className="radio-group">
-              <RadioOption
-                label="Selection" checked={area === 'selection'}
-                disabled={selection.length === 0} onChange={() => setArea('selection')}
+            <label htmlFor="export-file-name">File name</label>
+            <div className="field export-file-name">
+              <input
+                id="export-file-name"
+                type="text"
+                value={fileName}
+                spellCheck={false}
+                data-testid="export-file-name"
+                onChange={(e) => setNameDraft(e.target.value)}
+                // An emptied field goes back to the default rather than
+                // exporting a file with no name.
+                onBlur={() => { if (nameDraft !== null && !nameDraft.trim()) setNameDraft(null) }}
+                onKeyDown={(e) => {
+                  e.stopPropagation()
+                  if (e.key === 'Enter' && canExport) void doExport()
+                }}
               />
-              <RadioOption
-                label="Artboard" checked={area === 'artboard'}
-                disabled={boards.length === 0} onChange={() => setArea('artboard')}
-              />
-              <RadioOption label="Document" checked={area === 'document'} onChange={() => setArea('document')} />
-              <RadioOption
-                label={`Marked (${marked.length})`} checked={area === 'marked'}
-                disabled={marked.length === 0} onChange={() => setArea('marked')}
-              />
+              {/* Added by the pipeline whatever is typed, so it is shown rather
+                  than discovered in the Downloads folder. */}
+              <span className="export-file-suffix">{exportFileSuffix(format, effectiveScale)}</span>
             </div>
           </div>
-
-          {area === 'artboard' && boards.length > 0 && (
-            <div className="dialog-row">
-              <label>Which</label>
-              <Select
-                value={artboardId}
-                options={boards.map((id) => ({ value: id, label: doc.nodes[id]?.name ?? id }))}
-                onChange={setArtboardId}
-              />
-            </div>
-          )}
 
           <div className="dialog-row">
             <label>Format</label>
@@ -220,6 +220,13 @@ export function ExportDialog() {
                 { value: 'jpeg', label: 'JPEG — compressed raster' },
                 { value: 'svg', label: 'SVG — vector' },
                 { value: 'heif', label: 'HEIF — high-efficiency raster' },
+                {
+                  value: 'webp',
+                  label: webpOk
+                    ? 'WebP — compressed raster, keeps transparency'
+                    : 'WebP — this browser cannot write it',
+                  disabled: !webpOk,
+                },
               ]}
               onChange={(v) => update({ format: v as ExportFormat })}
             />
@@ -254,7 +261,7 @@ export function ExportDialog() {
             </div>
           )}
 
-          {format === 'jpeg' && (
+          {hasQuality(format) && (
             <div className="dialog-row">
               <label>Quality</label>
               <div className="hstack">
@@ -333,28 +340,41 @@ export function ExportDialog() {
           )}
 
           <div className="dialog-row">
-            <label htmlFor="export-file-name">File name</label>
-            <div className="field export-file-name">
-              <input
-                id="export-file-name"
-                type="text"
-                value={fileName}
-                spellCheck={false}
-                data-testid="export-file-name"
-                onChange={(e) => setNameDraft(e.target.value)}
-                // An emptied field goes back to the default rather than
-                // exporting a file with no name.
-                onBlur={() => { if (nameDraft !== null && !nameDraft.trim()) setNameDraft(null) }}
-                onKeyDown={(e) => {
-                  e.stopPropagation()
-                  if (e.key === 'Enter' && canExport) void doExport()
-                }}
+            <label>Area</label>
+            <div className="radio-group">
+              <RadioOption
+                label="Selection" checked={area === 'selection'}
+                disabled={selection.length === 0} onChange={() => setArea('selection')}
               />
-              {/* Added by the pipeline whatever is typed, so it is shown rather
-                  than discovered in the Downloads folder. */}
-              <span className="export-file-suffix">{exportFileSuffix(format, effectiveScale)}</span>
+              <RadioOption
+                label="Artboard" checked={area === 'artboard'}
+                disabled={boards.length === 0} onChange={() => setArea('artboard')}
+              />
+              <RadioOption label="Document" checked={area === 'document'} onChange={() => setArea('document')} />
+              <RadioOption
+                label={`Marked (${marked.length})`} checked={area === 'marked'}
+                disabled={marked.length === 0} onChange={() => setArea('marked')}
+              />
             </div>
           </div>
+
+          {/* Beside the choice it refines, wherever that sits. */}
+          {area === 'artboard' && boards.length > 0 && (
+            <div className="dialog-row">
+              <label>Which</label>
+              <Select
+                value={artboardId}
+                options={boards.map((id) => ({ value: id, label: doc.nodes[id]?.name ?? id }))}
+                onChange={setArtboardId}
+              />
+            </div>
+          )}
+
+          {webpBlocked && (
+            <div className="multi-note" style={{ color: 'var(--error)', marginTop: 2 }}>
+              This browser cannot write WebP images. Chrome, Edge and Firefox can.
+            </div>
+          )}
 
           {format === 'heif' && (
             <div className="multi-note" style={{ marginTop: 2 }}>
@@ -443,43 +463,77 @@ function describeColor(color: ExportSettings['background']['color']): string {
 const PREVIEW_DELAY_MS = 250
 
 /**
- * The file an export would write, shown before it is written.
+ * A request as a key, holding only what changes the picture.
+ *
+ * By value, because the dialog rebuilds its request on every render. And
+ * without what the format ignores — the name, a quality only JPEG and WebP
+ * read, SVG's image and text handling, a raster's scale for SVG — so switching
+ * format and back does not throw away a render that is still right.
+ */
+function previewKey(request: ExportRequest): string {
+  const svg = request.format === 'svg'
+  return JSON.stringify({
+    ...request,
+    fileName: undefined,
+    quality: hasQuality(request.format) ? request.quality : undefined,
+    scale: svg ? undefined : request.scale,
+    imageHandling: svg ? request.imageHandling : undefined,
+    textHandling: svg ? request.textHandling : undefined,
+  })
+}
+
+/**
+ * The picture without its background, which the preview paints itself.
+ *
+ * JPEG cannot be see-through, so its stand-in is a lossless, transparent PNG of
+ * the same artwork at the same size.
+ */
+function artworkOf(request: ExportRequest): ExportRequest {
+  return supportsTransparency(request.format)
+    ? { ...request, background: null }
+    : { ...request, format: 'png', background: null }
+}
+
+function sameExceptBackground(a: string, b: string): boolean {
+  const strip = (key: string) => previewKey({ ...(JSON.parse(key) as ExportRequest), background: null })
+  return strip(a) === strip(b)
+}
+
+interface Rendered {
+  image: ExportPreviewImage
+  /** What it was rendered from, as a key. */
+  key: string
+}
+
+/**
+ * The latest render of one request, kept on screen until a newer one lands.
  *
  * Rendered after a pause in the changes, and superseded rather than queued: a
- * result that arrives after the settings have moved on is thrown away, so the
- * picture can never settle on a combination that is no longer selected.
+ * result that arrives after the request has moved on is thrown away, so this
+ * can never settle on a combination that is no longer selected.
  */
-function ExportPreview({ doc, request }: { doc: DesignDocument; request: ExportRequest | null }) {
-  const [image, setImage] = useState<ExportPreviewImage | null>(null)
-  const [pending, setPending] = useState(false)
-  const [failure, setFailure] = useState<string | null>(null)
-  const shownUrl = useRef<string | null>(null)
-  // By value, because the request object is rebuilt on every render of the
-  // dialog — and without the name, which changes the file but not the picture.
-  const key = request ? JSON.stringify({ ...request, fileName: undefined }) : null
+function useRendered(doc: DesignDocument, key: string | null) {
+  const [rendered, setRendered] = useState<Rendered | null>(null)
+  const [failure, setFailure] = useState<{ key: string; message: string } | null>(null)
+  const url = useRef<string | null>(null)
 
   useEffect(() => {
     if (!key) return
-    const wanted = JSON.parse(key) as ExportRequest
     let current = true
-    setPending(true)
     const timer = setTimeout(() => {
-      renderExportPreview(doc, wanted).then(
-        (result) => {
+      renderExportPreview(doc, JSON.parse(key) as ExportRequest).then(
+        (image) => {
           if (!current) {
-            URL.revokeObjectURL(result.url)
+            URL.revokeObjectURL(image.url)
             return
           }
-          if (shownUrl.current) URL.revokeObjectURL(shownUrl.current)
-          shownUrl.current = result.url
-          setImage(result)
-          setFailure(null)
-          setPending(false)
+          if (url.current) URL.revokeObjectURL(url.current)
+          url.current = image.url
+          setRendered({ image, key })
         },
         (e: unknown) => {
           if (!current) return
-          setFailure(e instanceof Error ? e.message : 'The preview could not be rendered.')
-          setPending(false)
+          setFailure({ key, message: e instanceof Error ? e.message : 'The preview could not be rendered.' })
         },
       )
     }, PREVIEW_DELAY_MS)
@@ -491,32 +545,107 @@ function ExportPreview({ doc, request }: { doc: DesignDocument; request: ExportR
 
   useEffect(
     () => () => {
-      if (shownUrl.current) URL.revokeObjectURL(shownUrl.current)
+      if (url.current) URL.revokeObjectURL(url.current)
     },
     [],
   )
 
-  // A picture of an area that no longer exists is not a preview of anything.
-  const shown = key !== null && failure === null ? image : null
+  return { rendered, failure: failure && failure.key === key ? failure.message : null }
+}
+
+/**
+ * The file an export would write, shown before it is written.
+ *
+ * The picture is the export WITHOUT its background, laid over the colour chosen,
+ * which the preview paints itself. So ticking the box or dragging through the
+ * colour picker repaints behind the artwork at once, where it used to re-run
+ * the export and dim the old picture until the new one arrived. For PNG and SVG
+ * that is exactly the file; for a lossy format the artwork is compressed as the
+ * file compresses it, and the background is the flat colour it is in the file.
+ *
+ * The file itself is rendered alongside, for its size, and for JPEG it IS the
+ * picture once it has caught up: JPEG has no transparency, so it cannot be
+ * split the same way. Until it catches up with a new colour, a lossless stand-in
+ * over that colour holds its place rather than the old colour, dimmed.
+ */
+function ExportPreview({ doc, request }: { doc: DesignDocument; request: ExportRequest | null }) {
+  const artKey = request ? previewKey(artworkOf(request)) : null
+  const fileKey = request ? previewKey(request) : null
+  // With no background to lay under it, the artwork is the file.
+  const sameRender = artKey === fileKey
+  const art = useRendered(doc, artKey)
+  const ownFile = useRendered(doc, sameRender ? null : fileKey)
+  const file = sameRender ? art : ownFile
+
+  if (!request || !fileKey) {
+    return (
+      <div className="export-preview" data-testid="export-preview-panel">
+        <div className="export-preview-frame">
+          <span className="export-preview-status">Nothing to preview.</span>
+        </div>
+      </div>
+    )
+  }
+
+  const opaque = !supportsTransparency(request.format)
+  const artCurrent = art.rendered?.key === artKey
+  const fileCurrent = file.rendered?.key === fileKey
+  // JPEG shows the file once it has caught up. Until then, if only the colour
+  // has moved, the stand-in over the new colour; for anything else the last
+  // file, marked out of date.
+  const fileShown =
+    opaque &&
+    !!file.rendered &&
+    (fileCurrent || !(artCurrent && sameExceptBackground(file.rendered.key, fileKey)))
+  const stale = fileShown ? !fileCurrent : !artCurrent
+  const shown = fileShown ? file.rendered : art.rendered
+  const failure = art.failure ?? file.failure
+
+  const bg = request.background
+  // JPEG lays a translucent colour over white, and so does its stand-in.
+  const backdrop = bg
+    ? opaque
+      ? `linear-gradient(${toCss(bg)}, ${toCss(bg)}), #ffffff`
+      : toCss(bg)
+    : undefined
+  const bytes = file.rendered?.image.bytes
 
   return (
-    <div className="export-preview" data-testid="export-preview-panel" aria-busy={pending}>
-      <div className={`export-preview-frame${pending ? ' pending' : ''}`}>
-        {shown ? (
-          <img src={shown.url} alt="Preview of the exported file" data-testid="export-preview-image" />
-        ) : (
-          <span className="export-preview-status">
-            {key === null ? 'Nothing to preview.' : (failure ?? 'Rendering preview…')}
-          </span>
+    <div className="export-preview" data-testid="export-preview-panel" aria-busy={stale}>
+      <div className={`export-preview-frame${stale ? ' pending' : ''}`}>
+        {(failure || !shown) && (
+          <span className="export-preview-status">{failure ?? 'Rendering preview…'}</span>
+        )}
+        {/* Stacked in one cell and swapped by visibility, so the change from
+            stand-in to file is a swap of two pictures already decoded, never a
+            blank frame while one loads. */}
+        {!failure && art.rendered && (
+          <img
+            src={art.rendered.image.url}
+            className={fileShown ? 'off' : undefined}
+            style={{ background: backdrop }}
+            alt="Preview of the exported file"
+            data-testid="export-preview-image"
+          />
+        )}
+        {!failure && opaque && file.rendered && (
+          <img
+            src={file.rendered.image.url}
+            className={fileShown ? undefined : 'off'}
+            alt="Preview of the exported file"
+            data-testid="export-preview-file"
+          />
         )}
       </div>
-      {shown && (
+      {shown && !failure && (
         <div className="multi-note">
-          {shown.reduced
+          {shown.image.reduced
             ? 'Shown smaller than it will be exported.'
-            : shown.bytes !== null
-              ? `File size: ${formatBytes(shown.bytes)}`
-              : 'Linked images are shown embedded.'}
+            : bytes === undefined
+              ? 'File size: …'
+              : bytes !== null
+                ? `File size: ${formatBytes(bytes)}`
+                : 'Linked images are shown embedded.'}
         </div>
       )}
     </div>

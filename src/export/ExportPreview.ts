@@ -19,9 +19,11 @@
  * What an export will look like, shown before it is written.
  *
  * The preview IS an export: the same request goes through the same pipeline,
- * and what is shown is the file that came out — the crop, the background, a
- * JPEG's compression. A picture assembled separately would be a second
- * renderer, and one that could disagree with the file without anyone noticing.
+ * and what is shown is the file that came out — the crop, a JPEG's or a WebP's
+ * compression. A picture assembled separately would be a second renderer, and
+ * one that could disagree with the file without anyone noticing. (The dialog
+ * asks for it without a background and paints the colour behind it itself, so
+ * a new colour needs no render at all — see ExportDialog.)
  *
  * Two departures, each because the real thing cannot be shown:
  *  - An SVG whose images are linked would show empty frames on its own, since

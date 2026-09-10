@@ -42,14 +42,48 @@
 
 import { encodeHeif, HEIF_MAX_PIXELS } from './HeifEncoder'
 
-export type RasterFormat = 'png' | 'jpeg' | 'heif'
+export type RasterFormat = 'png' | 'jpeg' | 'heif' | 'webp'
+
+/** The formats a canvas writes itself. */
+type CanvasFormat = 'png' | 'jpeg' | 'webp'
+
+const MIME: Record<CanvasFormat, string> = {
+  png: 'image/png',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+}
+
+const NAME: Record<CanvasFormat, string> = { png: 'PNG', jpeg: 'JPEG', webp: 'WebP' }
+
+let webpSupport: boolean | null = null
+
+/**
+ * Whether this browser's canvas can write WebP.
+ *
+ * Asked by writing one, because nothing else answers: a canvas given a type it
+ * cannot encode does not fail, it hands back a PNG — and Safari's canvas does
+ * not write WebP, though it has displayed it for years.
+ */
+export function canEncodeWebp(): boolean {
+  if (webpSupport === null) {
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = 1
+      canvas.height = 1
+      webpSupport = canvas.toDataURL(MIME.webp).startsWith(`data:${MIME.webp}`)
+    } catch {
+      webpSupport = false
+    }
+  }
+  return webpSupport
+}
 
 export interface RasterOptions {
   /** Output pixel dimensions. */
   width: number
   height: number
   format: RasterFormat
-  /** JPEG only, 0..1. */
+  /** JPEG and WebP, 0..1. */
   quality?: number
   /** Painted before the artwork. JPEG has no alpha, so it always gets one. */
   background?: string | null
@@ -188,22 +222,24 @@ function createCanvas(width: number, height: number): HTMLCanvasElement | Offscr
 
 async function canvasToBlob(
   canvas: HTMLCanvasElement | OffscreenCanvas,
-  format: 'png' | 'jpeg',
+  format: CanvasFormat,
   quality: number,
 ): Promise<Blob> {
-  const mime = format === 'png' ? 'image/png' : 'image/jpeg'
+  const mime = MIME[format]
 
+  let blob: Blob
   try {
     if ('convertToBlob' in canvas) {
-      return await canvas.convertToBlob({ type: mime, quality })
+      blob = await canvas.convertToBlob({ type: mime, quality })
+    } else {
+      blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error('toBlob returned null'))),
+          mime,
+          format === 'png' ? undefined : quality,
+        )
+      })
     }
-    return await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (blob) => (blob ? resolve(blob) : reject(new Error('toBlob returned null'))),
-        mime,
-        format === 'jpeg' ? quality : undefined,
-      )
-    })
   } catch (cause) {
     // A SecurityError here means something remote got into the artwork. The
     // importer's URI allowlist should make that impossible, so say so plainly.
@@ -215,6 +251,12 @@ async function canvasToBlob(
       { cause },
     )
   }
+  // An encoder the browser lacks falls back to PNG without a word. Writing that
+  // under a .webp name would be a file that lies about what it is.
+  if (blob.type !== mime) {
+    throw new RasterizeError(`This browser cannot write ${NAME[format]} images.`)
+  }
+  return blob
 }
 
 /** Natural pixel size of an image data URL, used when placing a dropped file. */
