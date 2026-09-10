@@ -27,9 +27,10 @@
  * the file name — belongs to that one export, and answering it from the last
  * one would write the wrong thing under the wrong name.
  *
- * Written when an export succeeds, not as the controls change: "the last export
- * settings" are the ones a file was actually made with, so trying something out
- * and pressing Cancel leaves them alone.
+ * Written as the controls change, not only when a file is exported: a format
+ * and scale chosen and then left, with the dialog cancelled, are still the ones
+ * someone wants to find next time, and making them export something to keep a
+ * setting would be a chore the preference exists to spare them.
  */
 
 import { SCALE_PRESETS, clampScale, type ExportFormat } from './ExportPipeline'
@@ -113,7 +114,7 @@ export function initialExportSettings(): ExportSettings {
   }
 }
 
-/** Called once a file has been written with these settings. */
+/** Called whenever the dialog's settings change. */
 export function rememberExportSettings(settings: ExportSettings): void {
   if (!isRememberingExportSettings()) return
   try {

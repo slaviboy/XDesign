@@ -69,7 +69,7 @@ describe('remembering export settings', () => {
     expect(initialExportSettings()).toEqual(DEFAULT_EXPORT_SETTINGS)
   })
 
-  it('opens with exactly what the last export used', () => {
+  it('opens with exactly what was last chosen', () => {
     rememberExportSettings(custom)
     expect(initialExportSettings()).toEqual(custom)
   })

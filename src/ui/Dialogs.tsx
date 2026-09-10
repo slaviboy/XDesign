@@ -380,7 +380,7 @@ export function PreferencesDialog() {
       <h4 style={{ margin: '16px 0 8px', fontSize: 12 }}>{t('prefs.export')}</h4>
       <PreferenceRow
         name="remember-export"
-        info="The Export dialog opens with the choices your last export was made with — the format, and for it the scale, quality, background, and how images and text are handled — rather than starting from PNG at 1× every time. What to export and the file name are always chosen afresh. Settings are remembered when an export is written, so trying something and pressing Cancel changes nothing."
+        info="The Export dialog opens with the choices you last made in it — the format, and for it the scale, quality, background, and how images and text are handled — rather than starting from PNG at 1× every time. They are kept as you change them, so they are there next time whether you exported or pressed Cancel. What to export and the file name are always chosen afresh. Turned off, the dialog starts from PNG and nothing is kept."
       >
         <label className="checkbox-row">
           <input

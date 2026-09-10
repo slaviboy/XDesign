@@ -24,7 +24,7 @@
  * decisions that determine whether the exported file looks right on someone
  * else's machine.
  *
- * It opens with the settings the last export was made with — see
+ * It opens with the settings last chosen in it, exported or not — see
  * ExportSettings for what that covers and what it deliberately does not.
  */
 
@@ -65,6 +65,13 @@ export function ExportDialog() {
   const [area, setArea] = useState<ExportArea>(defaultArea)
   const [settings, setSettings] = useState<ExportSettings>(initialExportSettings)
   const update = (patch: Partial<ExportSettings>) => setSettings((s) => ({ ...s, ...patch }))
+  // Remembered as it changes, so a choice survives Cancel as well as Export.
+  // Only a change: opening the dialog is not a choice, and writing then would
+  // record the defaults over nothing. (A no-op while Preferences has it off.)
+  const opened = useRef(settings)
+  useEffect(() => {
+    if (settings !== opened.current) rememberExportSettings(settings)
+  }, [settings])
   const {
     format, scale, customScale, useCustomScale, quality, background, imageHandling, textHandling, preview,
   } = settings
@@ -159,7 +166,6 @@ export function ExportDialog() {
     try {
       const output = await runExport(doc, request)
       downloadBlob(output.blob, output.fileName)
-      rememberExportSettings(settings)
       for (const warning of output.warnings) notify('warn', warning, undefined, 9000)
       if (output.linkedAssets.length) {
         for (const asset of output.linkedAssets) {
@@ -217,7 +223,7 @@ export function ExportDialog() {
               value={format}
               options={[
                 { value: 'png', label: 'PNG — lossless raster' },
-                { value: 'jpeg', label: 'JPEG — compressed raster' },
+                { value: 'jpeg', label: 'JPG — compressed raster' },
                 { value: 'svg', label: 'SVG — vector' },
                 { value: 'heif', label: 'HEIF — high-efficiency raster' },
                 {
@@ -289,7 +295,7 @@ export function ExportDialog() {
                 data-testid="export-background-toggle"
                 title={
                   !supportsTransparency(format)
-                    ? 'JPEG has no transparency, so it always has a background'
+                    ? 'JPG has no transparency, so it always has a background'
                     : backgroundOn
                       ? 'Export with a transparent background'
                       : 'Fill the background with a colour'

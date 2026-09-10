@@ -73,42 +73,48 @@ async function pixelOf(page: Page, buffer: Buffer, type: string, x: number, y: n
   )
 }
 
-test('opens with the settings the last export used', async ({ page }) => {
+const cancel = (page: Page) => page.locator('button:text-is("Cancel")').click()
+
+test('remembers the settings as they are changed, exported or not', async ({ page }) => {
   await oneRect(page)
 
-  await captureDownload(page, async () => {
-    await openExportDialog(page)
-    await formatSelect(page).selectOption('jpeg')
-    await scaleSelect(page).selectOption('2')
-    await quality(page).fill('45')
-    await exportButton(page).click()
-  })
+  // Chosen and then cancelled: a choice is a choice, and making someone export
+  // something to keep one would be the chore remembering exists to spare them.
+  await openExportDialog(page)
+  await formatSelect(page).selectOption('jpeg')
+  await scaleSelect(page).selectOption('2')
+  await quality(page).fill('45')
+  await cancel(page)
 
   await openExportDialog(page)
   await expect(formatSelect(page)).toHaveValue('jpeg')
   await expect(scaleSelect(page)).toHaveValue('2')
   await expect(quality(page)).toHaveValue('45')
 
-  // A cancelled dialog is not an export, so it changes nothing remembered.
-  await formatSelect(page).selectOption('svg')
-  await page.locator('button:text-is("Cancel")').click()
+  // Left by clicking outside the dialog, the same.
+  await pickBackground(page, '336699')
+  await page.mouse.click(5, 5)
+  await expect(dialog(page)).toHaveCount(0)
   await openExportDialog(page)
-  await expect(formatSelect(page)).toHaveValue('jpeg')
+  await expect(row(page, 'Background')).toContainText('#336699')
 
-  // And it survives a reload, which is the point of remembering it.
-  await page.reload()
-  await page.locator('[data-testid="canvas-root"]').waitFor()
-  await openExportDialog(page)
-  await expect(formatSelect(page)).toHaveValue('jpeg')
-})
-
-test('starts from the defaults when remembering is switched off', async ({ page }) => {
-  await oneRect(page)
+  // Exported, the same — and all of it survives a reload.
   await captureDownload(page, async () => {
-    await openExportDialog(page)
     await formatSelect(page).selectOption('svg')
     await exportButton(page).click()
   })
+  await page.reload()
+  await page.locator('[data-testid="canvas-root"]').waitFor()
+  await openExportDialog(page)
+  await expect(formatSelect(page)).toHaveValue('svg')
+  await expect(row(page, 'Background')).toContainText('#336699')
+})
+
+test('keeps nothing, and starts from PNG, while remembering is switched off', async ({ page }) => {
+  await oneRect(page)
+  await openExportDialog(page)
+  await formatSelect(page).selectOption('svg')
+  await cancel(page)
 
   await page.locator('[data-testid="app-menu"]').click()
   await page.locator('[data-testid="menu-preferences"]').click()
@@ -120,6 +126,31 @@ test('starts from the defaults when remembering is switched off', async ({ page 
 
   await openExportDialog(page)
   await expect(formatSelect(page)).toHaveValue('png')
+  // Changed while off: not kept.
+  await formatSelect(page).selectOption('jpeg')
+  await cancel(page)
+  await openExportDialog(page)
+  await expect(formatSelect(page)).toHaveValue('png')
+  await cancel(page)
+
+  // Switched back on, what comes back is what was kept while it was on.
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-preferences"]').click()
+  await remember.check()
+  await page.keyboard.press('Escape')
+  await openExportDialog(page)
+  await expect(formatSelect(page)).toHaveValue('svg')
+})
+
+test('offers PNG first, then JPG and SVG, and opens on PNG with nothing remembered', async ({ page }) => {
+  await oneRect(page)
+  await openExportDialog(page)
+  await expect(formatSelect(page)).toHaveValue('png')
+  const options = await formatSelect(page).locator('option').evaluateAll((els) =>
+    els.map((el) => ({ value: (el as HTMLOptionElement).value, label: el.textContent ?? '' })),
+  )
+  expect(options.map((o) => o.value)).toEqual(['png', 'jpeg', 'svg', 'heif', 'webp'])
+  expect(options.map((o) => o.label.split(' ')[0])).toEqual(['PNG', 'JPG', 'SVG', 'HEIF', 'WebP'])
 })
 
 test('exports under the name typed, with the scale and extension added', async ({ page }) => {

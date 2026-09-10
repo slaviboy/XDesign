@@ -247,10 +247,11 @@ is the one you saw. The background is transparent, or a colour you pick the way 
 fill — JPEG, having no transparency, always has one. Tick Preview to see the file before it is
 written: it is rendered by the export itself, so it shows the crop, a JPEG's or a WebP's
 compression and the size of the file, and it follows the background the moment you change it,
-all the way through a drag in the colour picker. The dialog opens with the settings your last
-export was made with — format, scale, quality, background, and how images and text are
-handled — which Preferences can switch off; what to export and what to call it are always
-chosen afresh.
+all the way through a drag in the colour picker. The dialog opens with the settings you last
+chose in it — format, scale, quality, background, and how images and text are handled — kept
+as you change them, so they are there next time whether you exported or cancelled. PNG is
+the default and first in the list, then JPG and SVG. Preferences can switch remembering off;
+what to export and what to call it are always chosen afresh.
 
 **Two pointers that hand the object back and forth** — Direct Selection reaches inside a
 group to the leaf and shows its points; clicking an edge selects that SEGMENT so it can be
