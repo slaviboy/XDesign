@@ -76,6 +76,13 @@ import {
   type GradientHandle,
 } from './GradientSession'
 import {
+  beginTransform3d,
+  cancelTransform3d,
+  commitTransform3d,
+  isTransform3dDragging,
+  updateTransform3d,
+} from './Transform3dSession'
+import {
   beginPathEditing,
   isPointEditable,
   endPathEditing,
@@ -102,7 +109,15 @@ import type { Mat2D, Vec2 } from '../geometry/Matrix'
 import type { DesignDocument, NodeId } from '../document/types'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
 
-type Phase = 'idle' | 'pending' | 'marquee' | 'transform' | 'radius' | 'star-ratio' | 'gradient'
+type Phase =
+  | 'idle'
+  | 'pending'
+  | 'marquee'
+  | 'transform'
+  | 'radius'
+  | 'star-ratio'
+  | 'gradient'
+  | 'gizmo'
 
 interface State {
   phase: Phase
@@ -308,6 +323,15 @@ export const selectionTool: Tool = {
       return
     }
 
+    // 1a-quater. The 3D gizmo. Before the generic branch below, which takes
+    // any handle it does not know for a resize handle.
+    if (e.targetHandle === 'gizmo') {
+      const ids = editor.selection.filter((id) => !isEffectivelyLocked(doc, id))
+      const mode = e.targetCorner === 'depth' ? 'depth' : 'rotate'
+      if (beginTransform3d(doc, ids, mode, e.screen, editor.viewport.zoom)) state.phase = 'gizmo'
+      return
+    }
+
     // 1b. A selection handle takes priority over anything underneath it.
     if (e.targetHandle) {
       const ids = editor.selection.filter((id) => !isEffectivelyLocked(doc, id))
@@ -405,6 +429,19 @@ export const selectionTool: Tool = {
       return
     }
 
+    if (state.phase === 'gizmo') {
+      // Same self-healing guard as the phases above.
+      if (!isTransform3dDragging() || e.buttons === 0) {
+        cancelTransform3d()
+        reset()
+        return
+      }
+      // Screen space: the gizmo is a constant size on screen, so the turn per
+      // pixel should not change with the zoom.
+      updateTransform3d(e.screen, e.shiftKey)
+      return
+    }
+
     if (editorStore.getState().nodeEditingId && pathEditPointerMove(e, ctx)) return
 
     if (state.phase === 'idle') {
@@ -473,6 +510,12 @@ export const selectionTool: Tool = {
 
     if (state.phase === 'star-ratio') {
       commitStarRatioDrag()
+      reset()
+      return
+    }
+
+    if (state.phase === 'gizmo') {
+      commitTransform3d()
       reset()
       return
     }
@@ -620,6 +663,11 @@ export const selectionTool: Tool = {
         reset()
         return true
       }
+      if (isTransform3dDragging()) {
+        cancelTransform3d()
+        reset()
+        return true
+      }
       if (isDragging()) {
         cancelDrag()
         reset()
@@ -648,6 +696,7 @@ export const selectionTool: Tool = {
     if (isRadiusDragging()) cancelRadiusDrag()
     if (isStarRatioDragging()) cancelStarRatioDrag()
     if (isGradientDragging()) cancelGradientDrag()
+    if (isTransform3dDragging()) cancelTransform3d()
     if (isDragging()) cancelDrag()
     // Point editing is NOT torn down here: `nodeEditingId` owns its lifetime, and
     // the Canvas subscriber ends it the moment setTool clears that. Ending it

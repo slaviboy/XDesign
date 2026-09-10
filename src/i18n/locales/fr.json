@@ -68,6 +68,8 @@
   "menu.rotate90cw": "Rotation 90° horaire",
   "menu.rotate90ccw": "Rotation 90° antihoraire",
   "menu.rotate180": "Rotation 180°",
+  "menu.reset3dTransforms": "Réinitialiser les transformations 3D",
+  "menu.show3dTransforms": "Afficher les transformations 3D",
   "menu.lock": "Verrouiller",
   "menu.unlock": "Déverrouiller",
   "menu.hide": "Masquer",

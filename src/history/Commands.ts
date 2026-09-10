@@ -64,6 +64,7 @@ import {
   paintOrderIndex,
   worldMatrix,
 } from '../document/SceneGraph'
+import { is3dAffected, Z_DEPTH_MAX, Z_DEPTH_MIN } from '../document/Scene3D'
 import { outlineStroke } from '../geometry/StrokeOutline'
 import { intrinsicTextSize } from '../text/TextLayout'
 import { preloadFontsFor } from '../text/FontRegistry'
@@ -89,8 +90,11 @@ import type {
   Style,
   TextStyle,
   Transform,
+  Transform3D,
 } from '../document/types'
 import {
+  is3dTransform,
+  supports3d,
   BLUR_AMOUNT_MAX,
   BLUR_BRIGHTNESS_MAX,
   DEFAULT_BLUR,
@@ -394,6 +398,9 @@ export function outlineStrokeSelection(): NodeId[] {
         fillOpacity: node.style.strokeOpacity,
       })
       path.name = keepsFill ? `${node.name} Outline` : node.name
+      // Same box, same pivot, so the same tilt lands the outline exactly on
+      // the border it replaces.
+      if (node.transform3d) path.transform3d = { ...node.transform3d }
 
       const parentId = node.parentId ?? draft.rootId
       const parent = draft.nodes[parentId]
@@ -561,11 +568,110 @@ export function rotateSelection(degrees: number): boolean {
 }
 
 export function flipSelection(axis: 'h' | 'v'): boolean {
-  const ids = editableSelection()
-  if (ids.length === 0) return false
+  const doc = getDoc()
+  const selected = editableSelection()
+  // Adobe: "Vector editing and object flipping is not supported for 3D
+  // transformed objects." A mirrored plane seen in perspective would need a
+  // mirrored camera too, and the rest of the selection still flips.
+  const ids = selected.filter((id) => !is3dAffected(doc, id))
+  if (ids.length === 0) {
+    if (selected.length) notify('info', 'Objects with 3D transforms cannot be flipped.')
+    return false
+  }
   return transaction(axis === 'h' ? 'Flip Horizontal' : 'Flip Vertical', (draft) => {
     flipNodes(draft, ids, axis)
   })
+}
+
+/** Whether any selected object is drawn in perspective, which rules out flipping. */
+export function selectionHas3d(): boolean {
+  const doc = getDoc()
+  return editorStore.getState().selection.some((id) => is3dAffected(doc, id))
+}
+
+// ---------------------------------------------------------------------------
+// 3D transforms
+// ---------------------------------------------------------------------------
+
+/** Degrees folded into (-180, 180], so a turn never reads as 540°. */
+function wrapDegrees(deg: number): number {
+  if (!Number.isFinite(deg)) return 0
+  const r = ((((deg + 180) % 360) + 360) % 360) - 180
+  return r === -180 ? 180 : r
+}
+
+/**
+ * A 3D transform tidied for storage: angles wrapped, depth held in front of
+ * the eye, and null when nothing is left — so resetting every field removes
+ * the property rather than leaving a zeroed one behind.
+ */
+export function normalizeTransform3d(t: Transform3D): Transform3D | null {
+  const rotateX = wrapDegrees(t.rotateX)
+  const rotateY = wrapDegrees(t.rotateY)
+  const z = clamp(t.z, Z_DEPTH_MIN, Z_DEPTH_MAX)
+  const clean = {
+    rotateX: Math.abs(rotateX) < 1e-9 ? 0 : rotateX,
+    rotateY: Math.abs(rotateY) < 1e-9 ? 0 : rotateY,
+    z: Math.abs(z) < 1e-9 ? 0 : z,
+  }
+  return is3dTransform(clean) ? clean : null
+}
+
+/**
+ * Set the X rotation, Y rotation or Z depth of the selection.
+ *
+ * A patch merges into what each object already has, so typing a Y rotation
+ * into a multiple selection leaves every object's own X rotation and depth
+ * where they were. Artboards are skipped: Adobe applies 3D Transforms to an
+ * artboard's content, never to the artboard.
+ */
+export function setTransform3d(patch: Partial<Transform3D>, coalesceKey?: string): boolean {
+  const doc = getDoc()
+  const ids = editableSelection().filter((id) => supports3d(doc.nodes[id]))
+  if (ids.length === 0) return false
+  return transaction(
+    '3D Transform',
+    (draft) => {
+      let touched = false
+      for (const id of ids) {
+        const node = draft.nodes[id]
+        if (!node) continue
+        const base = node.transform3d ?? { rotateX: 0, rotateY: 0, z: 0 }
+        const next = normalizeTransform3d({ ...base, ...patch })
+        if (next) node.transform3d = next
+        else if (node.transform3d) delete node.transform3d
+        else continue
+        touched = true
+      }
+      return touched ? undefined : false
+    },
+    { coalesceKey },
+  )
+}
+
+/**
+ * Adobe's "Reset 3D Transforms": the selection goes back to flat.
+ *
+ * Only the selected objects themselves — a card inside a turned stack keeps
+ * its own depth when the stack is reset, which is what lets the stack be
+ * turned again later without rebuilding it.
+ */
+export function reset3dTransforms(): boolean {
+  const doc = getDoc()
+  const ids = editableSelection().filter((id) => !!doc.nodes[id]?.transform3d)
+  if (ids.length === 0) return false
+  return transaction('Reset 3D Transforms', (draft) => {
+    for (const id of ids) {
+      const node = draft.nodes[id]
+      if (node) delete node.transform3d
+    }
+  })
+}
+
+/** Whether Reset 3D Transforms would change anything. */
+export function canReset3d(): boolean {
+  const doc = getDoc()
+  return editableSelection().some((id) => !!doc.nodes[id]?.transform3d)
 }
 
 /** Write transform fields directly — how the inspector's X/Y/W/H/rotation work. */

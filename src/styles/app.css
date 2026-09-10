@@ -292,6 +292,27 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .size-badge rect { fill: var(--accent); }
 .size-badge text { fill: #fff; font-size: 10px; font-family: var(--font-ui); }
 
+/* The 3D gizmo: Adobe's atom, a ring with two orbits round a dot. The rings
+   turn the object and the centre pushes it in depth, so the centre grows its
+   up-and-down arrows only when the pointer is on it — the "anchor icon" the
+   help describes. A white halo under every stroke keeps it readable over
+   artwork of any colour. */
+.gizmo-hit { fill: transparent; cursor: move; }
+.gizmo-glyph circle, .gizmo-glyph ellipse {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  paint-order: stroke;
+  filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);
+}
+.gizmo-3d.active .gizmo-glyph { opacity: 0.85; }
+.gizmo-depth { cursor: ns-resize; }
+.gizmo-centre-hit { fill: transparent; }
+.gizmo-centre { fill: #fff; stroke: var(--accent); stroke-width: 2; }
+.gizmo-arrows { fill: var(--accent); stroke: #fff; stroke-width: 0.75; paint-order: stroke; opacity: 0; }
+.gizmo-depth:hover .gizmo-arrows, .gizmo-3d.depth .gizmo-arrows { opacity: 1; }
+.gizmo-3d.depth .gizmo-glyph { opacity: 0.35; }
+
 .shape-preview { fill: rgba(20, 115, 230, 0.10); stroke: var(--accent); stroke-width: 1; }
 .insert-preview { fill: none; stroke: var(--accent); stroke-width: 1.5; }
 .pen-path { fill: none; stroke: var(--accent); stroke-width: 1.5; }
@@ -1232,6 +1253,38 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
 .transform-grid > .tf-rot { grid-area: 1 / 4; }
 .transform-grid > .tf-h   { grid-area: 2 / 1; }
 .transform-grid > .tf-y   { grid-area: 2 / 3; }
+
+/* With the 3D controls shown, Adobe's layout: the X and Y rotations take the
+   right-hand column beside X and Y, and a third row holds the depth under
+   them with the ordinary — Z — rotation beside it. */
+.transform-grid.with-3d { grid-template-rows: repeat(3, var(--control-height)); }
+.transform-grid.with-3d > .tf-rx  { grid-area: 1 / 4; }
+.transform-grid.with-3d > .tf-ry  { grid-area: 2 / 4; }
+.transform-grid.with-3d > .tf-z   { grid-area: 3 / 3; }
+.transform-grid.with-3d > .tf-rot { grid-area: 3 / 4; }
+
+/* A small button living in a section's title row: the Transform section's
+   3D cube. Pressed reads as the accent, like every other toggle. */
+.section-action {
+  width: 22px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  margin: -3px -2px -3px 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.section-action:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+/* Pressed stays pressed under the pointer: the hover rule above outranks a
+   bare `.active`, and a toggle that looks off while you point at it lies. */
+.section-action.active,
+.section-action.active:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.section-action:disabled { opacity: 0.3; cursor: default; }
+.section-action svg { display: block; pointer-events: none; }
 
 .aspect-lock {
   grid-row: 1 / span 2;

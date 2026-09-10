@@ -129,6 +129,9 @@ export function replaceImageWithTrace(nodeId: NodeId, result: TraceResult): Node
     group.name = image.name ? `${image.name} Trace` : 'Image Trace'
     group.style.opacity = image.style.opacity
     group.style.blendMode = image.style.blendMode
+    // The group has the image's box, so it has its pivot too, and the same
+    // tilt puts the trace exactly where the picture was.
+    if (image.transform3d) group.transform3d = { ...image.transform3d }
 
     for (const path of paths) {
       path.parentId = group.id

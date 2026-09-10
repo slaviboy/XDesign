@@ -68,6 +68,8 @@
   "menu.rotate90cw": "Rodar 90° à direita",
   "menu.rotate90ccw": "Rodar 90° à esquerda",
   "menu.rotate180": "Rodar 180°",
+  "menu.reset3dTransforms": "Redefinir transformações 3D",
+  "menu.show3dTransforms": "Mostrar transformações 3D",
   "menu.lock": "Bloquear",
   "menu.unlock": "Desbloquear",
   "menu.hide": "Ocultar",

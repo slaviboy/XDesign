@@ -27,9 +27,10 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from 'react'
 import { useStore } from 'zustand'
 import { liveTransform } from '../canvas/LiveTransform'
+import { getLiveTransform3d, subscribeLive3d } from '../tools/Transform3dSession'
 import { documentStore, type DocumentState } from './DocumentStore'
 import { editorStore, type EditorState } from './EditorStore'
-import type { DesignNode, NodeId } from '../document/types'
+import type { DesignNode, NodeId, Transform3D } from '../document/types'
 
 export function useDocumentStore<T>(selector: (s: DocumentState) => T): T {
   return useStore(documentStore, selector)
@@ -107,6 +108,34 @@ export function useLiveTransformTick(): number {
   const [tick, bump] = useReducer((n: number) => n + 1, 0)
   useEffect(() => liveTransform.subscribe(bump), [])
   return tick
+}
+
+/**
+ * Re-render whenever the 3D gizmo publishes new live values.
+ *
+ * The gizmo's counterpart to useLiveTransformTick: it changes how things are
+ * PROJECTED, which no attribute write can express, so the few components that
+ * draw in perspective re-render instead — the store is still never written.
+ */
+export function useLive3dTick(): number {
+  const [tick, bump] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => subscribeLive3d(bump), [])
+  return tick
+}
+
+/**
+ * A node's in-flight 3D transform while the gizmo holds it, else undefined.
+ *
+ * Per node, through useSyncExternalStore, so a gesture re-renders only the
+ * nodes it is turning — this is how a flat object switches to being drawn in
+ * perspective the moment the gizmo tilts it, without the whole canvas waking.
+ */
+export function useLiveTransform3d(id: NodeId): Transform3D | undefined {
+  return useSyncExternalStore(
+    subscribeLive3d,
+    () => getLiveTransform3d(id),
+    () => undefined,
+  )
 }
 
 export function useHistoryState() {

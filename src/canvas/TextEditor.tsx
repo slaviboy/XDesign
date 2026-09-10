@@ -36,7 +36,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { multiply, type Mat2D } from '../geometry/Matrix'
+import { mat3FromMat2D, mat3Multiply, toCssMatrix3d } from '../geometry/Perspective'
 import { worldMatrix } from '../document/SceneGraph'
+import { is3dAffected, nodeMapping } from '../document/Scene3D'
 import { viewportMatrix } from './Viewport'
 import { setText } from '../history/Commands'
 import { indexAtPoint } from '../text/TextGeometry'
@@ -84,6 +86,16 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
     if (!node) return [1, 0, 0, 1, 0, 0]
     return multiply(viewportMatrix(viewport), worldMatrix(doc, nodeId))
   }, [doc, nodeId, node, viewport])
+
+  // Text in perspective is typed in perspective. An HTML element, unlike an
+  // SVG one, gets real perspective from CSS, so the textarea is given the very
+  // homography the canvas draws the text with and lies exactly on it.
+  const cssTransform = useMemo(() => {
+    if (!node || !is3dAffected(doc, nodeId)) return `matrix(${matrix.join(',')})`
+    return toCssMatrix3d(
+      mat3Multiply(mat3FromMat2D(viewportMatrix(viewport)), nodeMapping(doc, nodeId).toWorld),
+    )
+  }, [doc, nodeId, node, viewport, matrix])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -269,7 +281,7 @@ export function TextEditor({ nodeId }: { nodeId: NodeId }) {
         left: 0,
         top: 0,
         transformOrigin: '0 0',
-        transform: `matrix(${matrix.join(',')})`,
+        transform: cssTransform,
         width: `${Math.max(node.transform.width, 8)}px`,
         height: `${Math.max(node.transform.height, ts.fontSize * ts.lineHeight)}px`,
         fontFamily: fontStack(ts.fontFamily),

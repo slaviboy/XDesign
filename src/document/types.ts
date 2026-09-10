@@ -98,6 +98,29 @@ export const DEFAULT_TRANSFORM: Transform = {
   originY: 0.5,
 }
 
+/**
+ * XD's 3D Transforms: a tilt about the object's own horizontal and vertical
+ * axes, and a depth toward or away from the viewer.
+ *
+ * The third rotation is the one every object already has — `transform.rotation`
+ * — so nothing here duplicates it. The tilt turns about the same pivot the 2D
+ * rotation does (originX/originY of the box), and the object is seen through a
+ * camera looking straight at that pivot: see Scene3D for the whole model.
+ *
+ * Kept beside `transform` rather than inside it on purpose. Move, rotate,
+ * group, ungroup, align, paste and every drag rebuild `transform` from a 2D
+ * matrix, which cannot hold a tilt; living next to it, the tilt survives all of
+ * them without a single one of those paths having to know it exists.
+ */
+export interface Transform3D {
+  /** Degrees about the horizontal axis. Positive tips the top edge away. */
+  rotateX: number
+  /** Degrees about the vertical axis. Positive turns the right edge away. */
+  rotateY: number
+  /** Depth in document units. Positive comes toward the viewer. */
+  z: number
+}
+
 // ---------------------------------------------------------------------------
 // Paint
 // ---------------------------------------------------------------------------
@@ -460,6 +483,13 @@ export interface BaseNode {
   visible: boolean
   locked: boolean
   transform: Transform
+  /**
+   * The 3D tilt and depth. Absent means flat, and so does all-zero: the field
+   * is removed rather than zeroed when a transform is reset, so a document
+   * with no 3D in it carries no trace of the feature. Never set on an artboard
+   * or the document root — 3D applies to an artboard's content, not to it.
+   */
+  transform3d?: Transform3D
   /** Shown with an export badge in the Layers panel; drives "export marked layers". */
   markedForExport: boolean
   /** Free-form; also where unmapped SVG attributes are parked on import. */
@@ -1167,6 +1197,33 @@ export function hasScalarCornerRadius(
 /** Any node that supports corner rounding at all. */
 export function supportsCornerRadius(node: DesignNode | undefined | null): boolean {
   return !!node && (hasCornerRadius(node) || hasScalarCornerRadius(node))
+}
+
+/**
+ * Whether a node can carry a 3D transform at all.
+ *
+ * Adobe: "3D Transforms cannot be applied to artboards, only to their
+ * content." The document root is not content either.
+ */
+export function supports3d(node: DesignNode | undefined | null): boolean {
+  return !!node && node.type !== 'document' && node.type !== 'artboard'
+}
+
+/** True when the tilt or depth would change anything at all. */
+export function is3dTransform(t: Transform3D | undefined | null): t is Transform3D {
+  return !!t && (t.rotateX !== 0 || t.rotateY !== 0 || t.z !== 0)
+}
+
+/**
+ * The 3D transform a node actually renders with, or undefined when it is flat.
+ *
+ * The one reader everything goes through, so an artboard that somehow carries
+ * the field — a hand-edited file, a paste from a future version — is still
+ * drawn flat, as Adobe says it must be.
+ */
+export function transform3dOf(node: DesignNode | undefined | null): Transform3D | undefined {
+  if (!node || !supports3d(node)) return undefined
+  return is3dTransform(node.transform3d) ? node.transform3d : undefined
 }
 
 /** The four corners of a box, in CornerRadii order. */

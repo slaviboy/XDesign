@@ -101,6 +101,16 @@ function readStoredToolHighlight(): ToolHighlight {
   }
 }
 
+export const SHOW_3D_STORAGE_KEY = 'xdesign.show3dControls'
+
+function readStoredShow3d(): boolean {
+  try {
+    return localStorage.getItem(SHOW_3D_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
 export interface Viewport {
   /** Screen-space translation of the document origin, in CSS pixels. */
   x: number
@@ -156,6 +166,15 @@ export interface EditorState {
   marqueeMode: MarqueeMode
   /** How the toolbar marks the active tool. See ToolHighlight. */
   toolHighlight: ToolHighlight
+  /**
+   * Whether the 3D Transforms fields and the on-canvas gizmo are shown.
+   *
+   * Adobe's cube button: it "only shows or hides the controls and the gizmo.
+   * It does not ... disable transformations already applied" — so it is a view
+   * preference, not document data, and a tilted object stays tilted with it
+   * off. Remembered between sessions, like the marquee mode.
+   */
+  show3dControls: boolean
   /**
    * The selected guide, if any.
    *
@@ -279,6 +298,7 @@ export const editorStore = createStore<EditorState>()(
     measureTo: null,
     marqueeMode: readStoredMarqueeMode(),
     toolHighlight: readStoredToolHighlight(),
+    show3dControls: readStoredShow3d(),
     selectedGuide: null,
     editingTextId: null,
     textSelection: null,
@@ -361,6 +381,20 @@ export function setToolHighlight(mode: ToolHighlight): void {
   } catch {
     // Storage blocked: the choice still applies for this session.
   }
+}
+
+/** Show or hide the 3D Transforms fields and gizmo — Adobe's cube button, and ⌘T. */
+export function setShow3dControls(show: boolean): void {
+  editorStore.setState({ show3dControls: show })
+  try {
+    localStorage.setItem(SHOW_3D_STORAGE_KEY, String(show))
+  } catch {
+    // Storage blocked: the choice still applies for this session.
+  }
+}
+
+export function toggle3dControls(): void {
+  setShow3dControls(!editorStore.getState().show3dControls)
 }
 
 /**

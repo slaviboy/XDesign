@@ -33,20 +33,43 @@
  */
 
 import { memo, useCallback, useMemo, type CSSProperties, type ReactNode } from 'react'
-import { toSvgMatrix, type Mat2D } from '../geometry/Matrix'
+import { meanScale, toSvgMatrix, type Mat2D } from '../geometry/Matrix'
+import type { Bounds } from '../geometry/Bounds'
+import { mat3ToMat2D, projectPathData } from '../geometry/Perspective'
 import {
   ellipsePath,
   linePath,
   polygonStarPath,
   rectPath,
 } from '../geometry/ShapeGeometry'
-import { localMatrix, maskOutlines } from '../document/SceneGraph'
-import { useDocumentStore, useEditorStore, useLiveTransformTick, useNode } from '../state/hooks'
+import { localMatrix, maskOutlines, worldMatrix } from '../document/SceneGraph'
+import { depthSorted, isPreserve3d, planeHomography } from '../document/Scene3D'
+import {
+  useDocument,
+  useDocumentStore,
+  useEditorStore,
+  useLive3dTick,
+  useLiveTransform3d,
+  useLiveTransformTick,
+  useNode,
+} from '../state/hooks'
 import { useTraceHidesSource } from './TracePreview'
 import { liveTransform } from './LiveTransform'
 import { gridStepForZoom } from './gridMath'
 import { clipKey, fxKey, geomKey } from './liveKeys'
-import { getLiveSize, getLiveSizing } from '../tools/DragSession'
+import { getLiveBox, getLiveSize, getLiveSizing } from '../tools/DragSession'
+import { liveDocument } from '../tools/liveDocument'
+import {
+  CANVAS_MESH,
+  meshZoomBucket,
+  planeContentId,
+  planeDomain,
+  planeMaskId,
+  planeMesh,
+  projectedRegion,
+  trianglePath,
+  triangleRegion,
+} from './perspectiveMarkup'
 import {
   ANGULAR_TILE,
   angularWedges,
@@ -59,10 +82,14 @@ import {
 import { toHex } from '../document/color'
 import {
   hasStyle,
+  is3dTransform,
+  isContainer,
   isMaskGroup,
   layoutColumns,
   repeatGridOffsets,
   repeatGridSize,
+  supports3d,
+  transform3dOf,
 } from '../document/types'
 import {
   activeBlur,
@@ -77,6 +104,7 @@ import type {
   ArtboardNode,
   BlurEffect,
   RepeatGridNode,
+  DesignDocument,
   DesignNode,
   GroupNode,
   ImageNode,
@@ -640,9 +668,11 @@ function SvgBody({ node }: { node: SvgNode }): ReactNode {
  * and would bloat the file by the repeat count.
  */
 function RepeatGridBody({ node, copy }: { node: RepeatGridNode; copy: CopyMode }): ReactNode {
+  const doc = useDocumentStore((s) => s.doc)
   const offsets = repeatGridOffsets(node)
   const size = repeatGridSize(node)
   const clipId = `rg-clip-${node.id}`
+  const ordered = depthSorted(doc, node.id, node.children)
 
   return (
     <>
@@ -654,7 +684,7 @@ function RepeatGridBody({ node, copy }: { node: RepeatGridNode; copy: CopyMode }
       <g clipPath={`url(#${clipId})`}>
         {offsets.map((offset, i) => (
           <g key={i} transform={`translate(${offset.x} ${offset.y})`}>
-            {node.children.map((childId) => (
+            {ordered.map((childId) => (
               // Cell 0 owns the live element refs; later cells are pure
               // repeats, so they must not re-register the same node id with
               // LiveTransform or a drag would write to whichever mounted last.
@@ -681,17 +711,27 @@ function RepeatGridBody({ node, copy }: { node: RepeatGridNode; copy: CopyMode }
  * keep duplicate artwork from registering itself with LiveTransform — only the
  * real child may own a node's live element.
  */
-function Children({ ids, copy = 'primary' }: { ids: readonly NodeId[]; copy?: CopyMode }): ReactNode {
+function Children({
+  ids,
+  parentId,
+  copy = 'primary',
+}: {
+  ids: readonly NodeId[]
+  /** The container, so a child's Z depth can put it in front of its siblings. */
+  parentId?: NodeId
+  copy?: CopyMode
+}): ReactNode {
   const doc = useDocumentStore((s) => s.doc)
   const out: ReactNode[] = []
+  const ordered = parentId ? depthSorted(doc, parentId, ids) : ids
 
-  ids.forEach((id, i) => {
+  ordered.forEach((id, i) => {
     const node = doc.nodes[id]
     const blur = node && node.visible && hasStyle(node) ? activeBlur(node.style, 'background') : null
     // Nothing painted yet is nothing to blur. And a backdrop inside a backdrop
     // is not drawn at all: one blurred panel does not blur through another.
     if (blur && node && i > 0 && copy === 'primary') {
-      out.push(<Backdrop key={`bd-${id}`} node={node} before={ids.slice(0, i)} blur={blur} />)
+      out.push(<Backdrop key={`bd-${id}`} node={node} doc={doc} before={ordered.slice(0, i)} blur={blur} />)
     }
     out.push(<NodeRenderer key={id} id={id} copy={copy} />)
   })
@@ -701,25 +741,33 @@ function Children({ ids, copy = 'primary' }: { ids: readonly NodeId[]; copy?: Co
 
 function Backdrop({
   node,
+  doc,
   before,
   blur,
 }: {
   node: DesignNode
+  doc: DesignDocument
   before: readonly NodeId[]
   blur: BlurEffect
 }): ReactNode {
   const clipId = backdropClipId(node.id)
   const filterId = backdropFilterId(node.id)
+  // A panel in perspective blurs what is behind the panel as it is SEEN, so
+  // the clip is its outline projected — still under the panel's own matrix.
+  const h = transform3dOf(node) ? planeHomography(doc, node.id) : null
   // The clip is drawn in the PARENT's space, so it does not travel inside the
   // panel's group and has to be moved and resized itself. Both keys: the
-  // node's own carries the matrix, its geometry key carries `d`.
-  const clipRef = useCallback(liveRefs([node.id, geomKey(node.id)], true), [node.id])
+  // node's own carries the matrix, its geometry key carries `d` — except for a
+  // projected outline, which a flat `d` written mid-resize would un-project.
+  const keys = h ? [node.id] : [node.id, geomKey(node.id)]
+  const clipRef = useCallback(liveRefs(keys, true), [node.id, !!h])
+  const outline = h ? projectPathData(shapePathData(node), h) : shapePathData(node)
 
   return (
     <>
       <defs>
         <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
-          <path ref={clipRef} d={shapePathData(node)} transform={toSvgMatrix(localMatrix(node.transform))} />
+          <path ref={clipRef} d={outline} transform={toSvgMatrix(localMatrix(node.transform))} />
         </clipPath>
         <filter
           id={filterId}
@@ -763,6 +811,7 @@ function GroupBody({ node, copy }: { node: GroupNode; copy: CopyMode }): ReactNo
   const content = (
     <Children
       copy={copy}
+      parentId={node.id}
       ids={node.children.filter((childId) => !masked || childId !== node.maskId)}
     />
   )
@@ -909,7 +958,7 @@ function ArtboardBody({ node, copy }: { node: ArtboardNode; copy: CopyMode }): R
       {/* Over the fill, under the artwork. */}
       <ArtboardGrid node={node} />
       <g clipPath={node.clipContent ? `url(#${clipId})` : undefined}>
-        <Children ids={node.children} copy={copy} />
+        <Children ids={node.children} parentId={node.id} copy={copy} />
       </g>
     </>
   )
@@ -918,6 +967,64 @@ function ArtboardBody({ node, copy }: { node: ArtboardNode; copy: CopyMode }): R
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
+
+/**
+ * What a node draws in its own local space, without its wrapper.
+ *
+ * Separate from NodeRenderer because a node in perspective draws the very
+ * same body — once, flat, into <defs> — and the mesh does the rest; the
+ * wrapper is the only part that differs.
+ */
+function NodeBody({
+  node,
+  copy,
+  geomRef,
+}: {
+  node: DesignNode
+  copy: CopyMode
+  geomRef: (el: SVGElement | null) => (() => void) | undefined
+}): ReactNode {
+  switch (node.type) {
+    case 'artboard':
+      return <ArtboardBody node={node} copy={copy} />
+    case 'group':
+      return <GroupBody node={node} copy={copy} />
+    case 'repeat-grid':
+      return <RepeatGridBody node={node} copy={copy} />
+    case 'text':
+      return <TextBody node={node} />
+    case 'image':
+      return <ImageBody node={node} geomRef={geomRef} />
+    case 'svg':
+      return <SvgBody node={node} />
+    case 'document':
+      return <Children ids={node.children} parentId={node.id} copy={copy} />
+    default:
+      return (
+        <PaintedPath
+          nodeId={node.id}
+          style={node.style}
+          d={shapePathData(node)}
+          width={node.transform.width}
+          height={node.transform.height}
+          geomRef={geomRef}
+        />
+      )
+  }
+}
+
+/** Opacity and blend mode, which belong on whatever group stands for the node. */
+function wrapperLook(node: DesignNode): { opacity?: number; style?: CSSProperties } {
+  const styled = hasStyle(node) ? node.style : null
+  const opacity = styled?.opacity ?? 1
+  return {
+    opacity: opacity === 1 ? undefined : opacity,
+    style:
+      styled && styled.blendMode !== 'normal'
+        ? ({ mixBlendMode: styled.blendMode } as CSSProperties)
+        : undefined,
+  }
+}
 
 export const NodeRenderer = memo(function NodeRenderer({
   id,
@@ -928,6 +1035,8 @@ export const NodeRenderer = memo(function NodeRenderer({
   copy?: CopyMode
 }): ReactNode {
   const node = useNode(id)
+  // Per node: only an object the gizmo is actually turning re-renders here.
+  const live3d = useLiveTransform3d(id)
 
   const live = copy !== 'repeat'
   const groupRef = useCallback(liveRef(id, live), [id, live])
@@ -938,57 +1047,22 @@ export const NodeRenderer = memo(function NodeRenderer({
   // Hidden nodes are not rendered at all, which also makes them unclickable.
   if (!node.visible) return null
 
+  // The gizmo's value wins while it holds the node, zero included — which is
+  // how a turned card goes back to flat the moment it is dragged back square.
+  const tilted = live3d !== undefined ? is3dTransform(live3d) : !!transform3dOf(node)
+  if (tilted && supports3d(node)) {
+    return <Object3D id={id} copy={copy} groupRef={groupRef} geomRef={geomRef} />
+  }
+
   const transform = toSvgMatrix(localMatrix(node.transform))
   const styled = hasStyle(node) ? node.style : null
-  const opacity = styled?.opacity ?? 1
-  const groupStyle: CSSProperties | undefined =
-    styled && styled.blendMode !== 'normal'
-      ? ({ mixBlendMode: styled.blendMode } as CSSProperties)
-      : undefined
   const filter = styled ? effectFilter(id, styled, node.transform) : null
-
-  let body: ReactNode
-  switch (node.type) {
-    case 'artboard':
-      body = <ArtboardBody node={node} copy={copy} />
-      break
-    case 'group':
-      body = <GroupBody node={node} copy={copy} />
-      break
-    case 'repeat-grid':
-      body = <RepeatGridBody node={node} copy={copy} />
-      break
-    case 'text':
-      body = <TextBody node={node} />
-      break
-    case 'image':
-      body = <ImageBody node={node} geomRef={geomRef} />
-      break
-    case 'svg':
-      body = <SvgBody node={node} />
-      break
-    case 'document':
-      body = <Children ids={node.children} copy={copy} />
-      break
-    default:
-      body = (
-        <PaintedPath
-          nodeId={id}
-          style={node.style}
-          d={shapePathData(node)}
-          width={node.transform.width}
-          height={node.transform.height}
-          geomRef={geomRef}
-        />
-      )
-  }
 
   return (
     <g
       ref={groupRef}
       transform={transform}
-      opacity={opacity === 1 ? undefined : opacity}
-      style={groupStyle}
+      {...wrapperLook(node)}
       filter={filter ? `url(#${effectFilterId(id)})` : undefined}
       data-node-id={copy === 'primary' ? id : undefined}
       data-node-type={copy === 'primary' ? node.type : undefined}
@@ -1009,10 +1083,227 @@ export const NodeRenderer = memo(function NodeRenderer({
           />
         </defs>
       )}
-      {body}
+      <NodeBody node={node} copy={copy} geomRef={geomRef} />
     </g>
   )
 })
+
+// ---------------------------------------------------------------------------
+// Perspective
+// ---------------------------------------------------------------------------
+
+type LiveRef = (el: SVGElement | null) => (() => void) | undefined
+
+/**
+ * A 3D object: see Scene3D for the model, perspectiveMarkup for the markup.
+ *
+ * Its wrapper is an ordinary <g transform> carrying the node's 2D matrix, and
+ * registered with LiveTransform exactly as a flat node's is — so moving or
+ * rotating a tilted card is still one attribute write per frame. Everything
+ * projected is drawn INSIDE that group, in the node's own space.
+ *
+ * Unlike a flat node, this re-renders during a gesture: a resize moves the
+ * pivot the camera looks at, and the gizmo changes the projection itself,
+ * neither of which is an attribute. It reads the document as the gesture
+ * would leave it (liveDocument), and writes nothing.
+ */
+function Object3D({
+  id,
+  copy,
+  groupRef,
+  geomRef,
+}: {
+  id: NodeId
+  copy: CopyMode
+  groupRef: LiveRef
+  geomRef: LiveRef
+}): ReactNode {
+  const stored = useDocument()
+  const liveTick = useLiveTransformTick()
+  const live3dTick = useLive3dTick()
+  const zoom = useEditorStore((s) => meshZoomBucket(s.viewport.zoom))
+  // The ticks are the dependency: mid-gesture the store has not changed, and
+  // they are the only signal that the live values have.
+  const doc = useMemo(() => liveDocument(stored), [stored, liveTick, live3dTick])
+
+  // The wrapper takes the COMMITTED matrix: during a drag LiveTransform owns
+  // that attribute, and rendering the live one here as well would fight it.
+  const committed = stored.nodes[id]
+  const node = doc.nodes[id]
+  if (!committed || !node) return null
+  // Screen pixels per unit inside the wrapper, which is what the mesh's
+  // tolerance is measured in.
+  const pxPerUnit = zoom * meanScale(worldMatrix(doc, id))
+
+  return (
+    <g
+      ref={groupRef}
+      transform={toSvgMatrix(localMatrix(committed.transform))}
+      {...wrapperLook(node)}
+      data-node-id={copy === 'primary' ? id : undefined}
+      data-node-type={copy === 'primary' ? node.type : undefined}
+      data-3d=""
+      pointerEvents={node.locked ? 'none' : undefined}
+    >
+      {isPreserve3d(doc, id) ? (
+        <SpaceChildren doc={doc} containerId={id} copy={copy} pxPerUnit={pxPerUnit} />
+      ) : (
+        <Plane doc={doc} node={node} copy={copy} geomRef={geomRef} pxPerUnit={pxPerUnit} />
+      )}
+    </g>
+  )
+}
+
+/**
+ * The children of a group that shares its 3D space, back to front by depth.
+ *
+ * None of them gets a transform of its own here: each one's place in the
+ * space is folded into its plane's projection, which lands in the space
+ * root's coordinates. Their groups carry identity, opacity and blend only.
+ */
+function SpaceChildren({
+  doc,
+  containerId,
+  copy,
+  pxPerUnit,
+}: {
+  doc: DesignDocument
+  containerId: NodeId
+  copy: CopyMode
+  pxPerUnit: number
+}): ReactNode {
+  const container = doc.nodes[containerId]
+  if (!container || !isContainer(container)) return null
+  return (
+    <>
+      {depthSorted(doc, containerId, container.children).map((childId) => (
+        <SpaceChild key={childId} doc={doc} id={childId} copy={copy} pxPerUnit={pxPerUnit} />
+      ))}
+    </>
+  )
+}
+
+function SpaceChild({
+  doc,
+  id,
+  copy,
+  pxPerUnit,
+}: {
+  doc: DesignDocument
+  id: NodeId
+  copy: CopyMode
+  pxPerUnit: number
+}): ReactNode {
+  const live = copy !== 'repeat'
+  // Geometry only: this group has no matrix for LiveTransform to write — a
+  // drag of this node re-renders the projection instead.
+  const geomRef = useCallback(liveRef(geomKey(id), live), [id, live])
+  const node = doc.nodes[id]
+  if (!node || !node.visible) return null
+  return (
+    <g
+      {...wrapperLook(node)}
+      data-node-id={copy === 'primary' ? id : undefined}
+      data-node-type={copy === 'primary' ? node.type : undefined}
+      data-3d=""
+      pointerEvents={node.locked ? 'none' : undefined}
+    >
+      {isPreserve3d(doc, id) ? (
+        <SpaceChildren doc={doc} containerId={id} copy={copy} pxPerUnit={pxPerUnit} />
+      ) : (
+        <Plane doc={doc} node={node} copy={copy} geomRef={geomRef} pxPerUnit={pxPerUnit} />
+      )}
+    </g>
+  )
+}
+
+/**
+ * One flat picture, projected.
+ *
+ * The body is drawn once, flat, into <defs>; the mesh draws it again per
+ * triangle. When the projection is affine — depth with no tilt — there is no
+ * mesh: one transform is exact, and the body is drawn in place.
+ *
+ * The node's own shadow and blur are applied to the projected result rather
+ * than inside the body, so they run once instead of once per triangle.
+ */
+function Plane({
+  doc,
+  node,
+  copy,
+  geomRef,
+  pxPerUnit,
+}: {
+  doc: DesignDocument
+  node: DesignNode
+  copy: CopyMode
+  geomRef: LiveRef
+  pxPerUnit: number
+}): ReactNode {
+  const h = planeHomography(doc, node.id)
+  const domain = planeDomain(doc, node, getLiveBox(node.id))
+  // Keyed by VALUE: during any gesture this re-renders every frame with fresh
+  // objects, and re-cutting a mesh that has not changed would be all waste.
+  const key = `${h ? h.join(' ') : ''}|${domain.x} ${domain.y} ${domain.width} ${domain.height}|${pxPerUnit}`
+  const mesh = useMemo(
+    () => (h ? planeMesh(h, domain, pxPerUnit, CANVAS_MESH) : null),
+    [key],
+  )
+  if (!h) return null
+
+  const styled = hasStyle(node) ? node.style : null
+  const fx = styled ? effectFilter(node.id, styled, node.transform) : null
+  const body = <NodeBody node={node} copy={copy} geomRef={geomRef} />
+  const fxDef = (region: Bounds) =>
+    fx && (
+      <filter
+        id={fx.id}
+        filterUnits="userSpaceOnUse"
+        x={region.x}
+        y={region.y}
+        width={region.width}
+        height={region.height}
+        dangerouslySetInnerHTML={{ __html: fx.primitives }}
+      />
+    )
+
+  if (!mesh) {
+    // Depth alone scales about the pivot: exact, and the effect stays in the
+    // node's own units exactly as it would for a flat node.
+    return (
+      <g transform={toSvgMatrix(mat3ToMat2D(h))}>
+        {fx && <defs>{fxDef(fx)}</defs>}
+        <g filter={fx ? `url(#${fx.id})` : undefined}>{body}</g>
+      </g>
+    )
+  }
+
+  const contentId = planeContentId(node.id)
+  const pad = 2 / (pxPerUnit || 1)
+  return (
+    <>
+      <defs>
+        <g id={contentId}>{body}</g>
+        {mesh.map((t, i) => {
+          const r = triangleRegion(t, pad)
+          return (
+            <mask key={i} id={planeMaskId(node.id, i)} maskUnits="userSpaceOnUse" x={r.x} y={r.y} width={r.width} height={r.height}>
+              <path d={trianglePath(t)} fill="#fff" shapeRendering="crispEdges" />
+            </mask>
+          )
+        })}
+        {fx && fxDef(projectedRegion(h, fx))}
+      </defs>
+      <g filter={fx ? `url(#${fx.id})` : undefined}>
+        {mesh.map((t, i) => (
+          <g key={i} mask={`url(#${planeMaskId(node.id, i)})`}>
+            <use href={`#${contentId}`} transform={toSvgMatrix(t.matrix)} />
+          </g>
+        ))}
+      </g>
+    </>
+  )
+}
 
 /** Renders the whole document. Mounted once by Canvas. */
 export const DocumentLayer = memo(function DocumentLayer(): ReactNode {
@@ -1020,12 +1311,13 @@ export const DocumentLayer = memo(function DocumentLayer(): ReactNode {
     const root = s.doc.nodes[s.doc.rootId]
     return root && 'children' in root ? root.children : undefined
   })
+  const rootId = useDocumentStore((s) => s.doc.rootId)
   const svgDefs = useDocumentStore((s) => s.doc.svgDefs)
   if (!rootChildren) return null
   return (
     <g className="document-layer">
       <ImportedDefs defs={svgDefs} />
-      <Children ids={rootChildren} />
+      <Children ids={rootChildren} parentId={rootId} />
     </g>
   )
 })

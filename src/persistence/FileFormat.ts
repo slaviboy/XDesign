@@ -37,12 +37,13 @@
 import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate'
 import {
   DEFAULT_SETTINGS,
+  supports3d,
   type DesignDocument, type DesignNode, type ImageAsset, type NodeId,
-  type ArtboardGrid, type Guide, type RGBA, type Swatch,
+  type ArtboardGrid, type Guide, type RGBA, type Swatch, type Transform3D,
 } from '../document/types'
 import { createDocumentRoot } from '../document/NodeFactory'
 import { artboardIds, createMatrixCache, geometryBounds } from '../document/SceneGraph'
-import { clampGrid } from '../history/Commands'
+import { clampGrid, normalizeTransform3d } from '../history/Commands'
 import { isSanitizerAvailable, sanitizeSvgFragment } from '../svg/SvgSanitizer'
 
 export const FORMAT_NAME = 'OfflineDesignDocument'
@@ -316,6 +317,7 @@ function buildDocument(
 
   repairHierarchy(nodes, rootId)
   sanitizeArtboardExtras(nodes)
+  sanitizeTransforms3d(nodes)
 
   const assets: Record<string, ImageAsset> = {}
   for (const asset of payload.assets ?? []) {
@@ -424,6 +426,34 @@ function sanitizeArtboardExtras(nodes: Record<NodeId, DesignNode>): void {
     const grid = readGrid(node.grid)
     if (grid) node.grid = grid
     else delete node.grid
+  }
+}
+
+/**
+ * The same distrust for 3D transforms, which also arrive inside `layers`.
+ *
+ * A string where an angle belongs would reach the projection as NaN and take
+ * the whole object off the canvas, so anything that is not three finite
+ * numbers is dropped — the object simply comes back flat. Angles are wrapped
+ * and the depth kept in front of the eye exactly as the inspector would; an
+ * all-zero transform is removed, and so is one on an artboard, which Adobe
+ * never lets carry 3D.
+ */
+function sanitizeTransforms3d(nodes: Record<NodeId, DesignNode>): void {
+  for (const node of Object.values(nodes)) {
+    const raw = (node as { transform3d?: unknown }).transform3d
+    if (raw === undefined) continue
+    const t = raw as Partial<Transform3D> | null
+    const valid =
+      !!t &&
+      typeof t === 'object' &&
+      [t.rotateX, t.rotateY, t.z].every((n) => typeof n === 'number' && Number.isFinite(n))
+    const normalized =
+      valid && supports3d(node)
+        ? normalizeTransform3d({ rotateX: t!.rotateX!, rotateY: t!.rotateY!, z: t!.z! })
+        : null
+    if (normalized) node.transform3d = normalized
+    else delete node.transform3d
   }
 }
 

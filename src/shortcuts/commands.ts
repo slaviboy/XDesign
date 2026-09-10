@@ -36,13 +36,15 @@
 
 import {
   deleteSelection, groupSelection, maskWithShape, moveSelection, orderCommand,
-  outlineStrokeSelection, removeGuide, selectAll, setGuidesLocked, setLocked,
-  setVisibility, ungroupSelection, updateSettings,
+  outlineStrokeSelection, removeGuide, reset3dTransforms, selectAll, setGuidesLocked,
+  setLocked, setVisibility, ungroupSelection, updateSettings,
 } from '../history/Commands'
 import { copySelection, cutSelection, duplicateInPlace } from '../state/Clipboard'
 import { armPasteFallback } from '../state/SystemClipboard'
 import { redo, undo, getDoc } from '../state/DocumentStore'
-import { clearSelection, editorStore, notify, setEditor, setTool } from '../state/EditorStore'
+import {
+  clearSelection, editorStore, notify, setEditor, setTool, toggle3dControls,
+} from '../state/EditorStore'
 import { togglePenCurvature } from '../tools/PenTool'
 import { traceStore } from '../state/TraceStore'
 import { cancelImageTrace } from '../history/TraceCommands'
@@ -230,6 +232,16 @@ export const COMMANDS: CommandSpec[] = [
     },
   },
   {
+    // Adobe: "Use ⌘T on macOS and Ctrl + T on Windows to show or hide 3D
+    // Transforms." A browser keeps that chord for a new tab, so in a tab it may
+    // never arrive; it is rebindable in the Shortcuts dialog like any other.
+    id: 'view.toggle3d',
+    group: 'View',
+    label: 'Show / hide 3D transforms',
+    defaultChord: 'Mod+T',
+    run: () => toggle3dControls(),
+  },
+  {
     id: 'view.shortcuts',
     group: 'View',
     label: 'Keyboard shortcuts',
@@ -247,6 +259,8 @@ export const COMMANDS: CommandSpec[] = [
   { id: 'transform.nudgeRightLarge', group: 'Transform', label: 'Nudge right 10px', defaultChord: 'Shift+ArrowRight', run: () => nudge(1, 0, true) },
   { id: 'transform.nudgeUpLarge', group: 'Transform', label: 'Nudge up 10px', defaultChord: 'Shift+ArrowUp', run: () => nudge(0, -1, true) },
   { id: 'transform.nudgeDownLarge', group: 'Transform', label: 'Nudge down 10px', defaultChord: 'Shift+ArrowDown', run: () => nudge(0, 1, true) },
+  // Adobe: "use ⌥⌘T on macOS and Alt + Ctrl + T on Windows to reset 3D Transforms."
+  { id: 'transform.reset3d', group: 'Transform', label: 'Reset 3D transforms', defaultChord: 'Mod+Alt+T', run: () => reset3dTransforms() },
 
   // ---- Selection ---------------------------------------------------------
   {

@@ -55,13 +55,24 @@ import {
 } from '../geometry/ShapeGeometry'
 import { transformPath } from '../geometry/PathUtils'
 import {
+  NEAR_W,
+  applyMat3,
+  homographyW,
+  invertMat3,
+  isAffineMat3,
+  mapPoint,
+  type Mat3,
+} from '../geometry/Perspective'
+import {
   localContentBox,
+  frameBounds,
   geometryBounds,
   localMatrix,
   worldMatrix,
   createMatrixCache,
   isEffectivelyLocked,
 } from '../document/SceneGraph'
+import { frameMatrix, is3dAffected, nodeMapping, patchDocument } from '../document/Scene3D'
 import { transformFromMatrix } from '../document/DocumentModel'
 import { transaction } from '../state/DocumentStore'
 import { adoptTextResize } from '../history/Commands'
@@ -114,12 +125,53 @@ interface NodeSnapshot {
    * reading the document — which a drag deliberately never does.
    */
   text?: { text: string; style: TextStyle; runs?: TextRun[] }
+  /** Set for a node drawn in perspective; see PerspectiveSnapshot. */
+  persp?: PerspectiveSnapshot
+}
+
+/**
+ * What a gesture needs to move something that is drawn in perspective.
+ *
+ * Its matrices are still 2D — that is what the drag edits and commits — but
+ * the pointer is on the PROJECTED object, so the pointer has to be run back
+ * through the projection before it can say anything about those matrices.
+ */
+interface PerspectiveSnapshot {
+  /** World -> the parent's local space, through the parent's own projection. */
+  parentFromWorld: Mat3 | null
+  /** False when the parent is flat and the plain inverse matrix already says it all. */
+  projectiveParent: boolean
+  /** World -> this node's local space, through its projection. */
+  fromWorld: Mat3 | null
+  /** Where the press landed, in this node's local space. */
+  startLocal: Vec2 | null
+  /** The projection's w at a local point: below NEAR_W it is behind the camera. */
+  horizon: (p: Vec2) => number
+  /**
+   * Set for a 3D object that resizes through its matrix — a group — sitting
+   * on a flat parent: the bounds of its PROJECTED contents in its own space.
+   *
+   * Its matrix is applied after its camera, so scaling it scales the picture
+   * on screen, not the flat artwork behind it. Resizing that picture's box is
+   * then exact — the handle stays under the pointer and the opposite side
+   * does not move — with no projection to run backwards at all.
+   */
+  frameBox: Bounds | null
+  /** The frame the selection box is drawn in, and that box, at the press. */
+  frame0: Mat2D
+  frameBox0: Bounds | null
 }
 
 export interface DragSessionState {
   mode: DragMode
   handle: ResizeHandle | null
   startDoc: Vec2
+  /**
+   * The document the gesture began on. Only read for things drawn in
+   * perspective, whose projection depends on a size and a pivot the drag is
+   * changing — never written, like everything else here.
+   */
+  doc: DesignDocument
   /** Selection bounds in world space at gesture start. */
   frame: Bounds
   nodes: NodeSnapshot[]
@@ -170,6 +222,14 @@ let liveMatrices = new Map<NodeId, Mat2D>()
 
 export function getLiveMatrix(id: NodeId): Mat2D | undefined {
   return liveMatrices.get(id)
+}
+
+/**
+ * Every in-flight world matrix. A new map per update, so its identity doubles
+ * as a version number for anything that memoises on the gesture.
+ */
+export function getLiveMatrices(): ReadonlyMap<NodeId, Mat2D> {
+  return liveMatrices
 }
 
 export function getLiveSize(id: NodeId): { width: number; height: number } | undefined {
@@ -262,6 +322,7 @@ export function beginDrag(
       vertexRadius: node.type === 'polygon' ? node.cornerRadius : undefined,
       effectMargin: hasStyle(node) ? effectMargin(node.style) : 0,
       text: node.type === 'text' ? { text: node.text, style: node.textStyle, runs: node.runs } : undefined,
+      persp: is3dAffected(doc, id) ? perspectiveSnapshot(doc, node, startDoc) : undefined,
     }
   })
 
@@ -269,6 +330,7 @@ export function beginDrag(
     mode,
     handle,
     startDoc,
+    doc,
     frame: unionAll(usable.map((id) => geometryBounds(doc, id, cache))),
     nodes,
     singleAxisResize: usable.length === 1,
@@ -287,6 +349,54 @@ export function beginDrag(
 
 export function getDragFrame(): Bounds | null {
   return session?.frame ?? null
+}
+
+function perspectiveSnapshot(doc: DesignDocument, node: DesignNode, startDoc: Vec2): PerspectiveSnapshot {
+  const parentMap = node.parentId && doc.nodes[node.parentId]
+    ? nodeMapping(doc, node.parentId).toWorld
+    : null
+  const mapping = nodeMapping(doc, node.id)
+  const toWorld = mapping.toWorld
+  const fromWorld = invertMat3(toWorld)
+  const projectiveParent = !!parentMap && !isAffineMat3(parentMap)
+  const ownCamera = mapping.space?.rootId === node.id
+  const frame0 = frameMatrix(doc, node.id)
+  return {
+    frame0,
+    frameBox0: frameBounds(doc, node.id, frame0),
+    parentFromWorld: parentMap ? invertMat3(parentMap) : null,
+    projectiveParent,
+    fromWorld,
+    startLocal: fromWorld ? finitePoint(applyMat3(fromWorld, startDoc.x, startDoc.y)) : null,
+    horizon: (p) => homographyW(toWorld, p.x, p.y),
+    frameBox:
+      ownCamera && !projectiveParent && scalesContentOnResize(node)
+        ? frameBounds(doc, node.id, worldMatrix(doc, node.id))
+        : null,
+  }
+}
+
+function finitePoint(p: { x: number; y: number }): Vec2 | null {
+  return Number.isFinite(p.x) && Number.isFinite(p.y) ? { x: p.x, y: p.y } : null
+}
+
+/** A world point in the parent's local space, through the parent's projection. */
+function inParent(snap: NodeSnapshot, p: Vec2): Vec2 | null {
+  const m = snap.persp?.parentFromWorld
+  return m ? finitePoint(applyMat3(m, p.x, p.y)) : null
+}
+
+/**
+ * A world matrix that applies a parent-space matrix to the node's local one.
+ *
+ * Moving or turning something on a tilted plane has to happen IN that plane —
+ * a drag across the screen is a shorter, foreshortened move across the card —
+ * so the change is worked out in the parent's own space and then re-expressed
+ * as the world matrix the rest of the session speaks.
+ */
+function inParentSpace(snap: NodeSnapshot, m: Mat2D): Mat2D {
+  const local = multiply(invert(snap.parentWorld), snap.world)
+  return multiply(snap.parentWorld, multiply(m, local))
 }
 
 // ---------------------------------------------------------------------------
@@ -346,8 +456,17 @@ function applyMove(
     else mx = 0
   }
   const m: Mat2D = [1, 0, 0, 1, mx, my]
-  for (const snap of session!.nodes) {
-    const world = multiply(m, snap.world)
+  const s = session!
+  for (const snap of s.nodes) {
+    let world = multiply(m, snap.world)
+    if (snap.persp?.projectiveParent) {
+      // On a tilted parent the same screen distance is a longer or shorter
+      // move across it, depending on where on it you are: run both ends of the
+      // drag back into the parent's plane and move by the difference there.
+      const from = inParent(snap, s.startDoc)
+      const to = inParent(snap, { x: s.startDoc.x + mx, y: s.startDoc.y + my })
+      if (from && to) world = inParentSpace(snap, translation(to.x - from.x, to.y - from.y))
+    }
     out.set(snap.id, world)
     pushLiveTransform(snap, world)
   }
@@ -370,7 +489,13 @@ function applyRotate(
 
   const m = rotationAbout(deg, cx, cy)
   for (const snap of s.nodes) {
-    const world = multiply(m, snap.world)
+    let world = multiply(m, snap.world)
+    if (snap.persp?.projectiveParent) {
+      // Turned in the parent's plane, about the point of it under the frame's
+      // centre — a turn on a tilted card, not a turn of the screen.
+      const c = inParent(snap, { x: cx, y: cy })
+      if (c) world = inParentSpace(snap, rotationAbout(deg, c.x, c.y))
+    }
     out.set(snap.id, world)
     pushLiveTransform(snap, world)
   }
@@ -400,8 +525,14 @@ function applyResize(
     // against the stored box scaled the artwork about a corner that was not on
     // it, so the contents slid sideways as they grew — worst from the handles
     // furthest from that corner. `content` is the box actually being dragged.
-    const content = snap.content
-    const local = applyToPoint(invert(snap.world), currentDoc)
+    // A tilted group resizes its projected picture, exactly; anything else in
+    // perspective resizes its flat box, through the projection. See
+    // PerspectiveSnapshot.frameBox.
+    const projected = snap.persp?.frameBox ?? null
+    const content = projected ?? snap.content
+    const local = snap.persp && !projected
+      ? perspectivePointer(snap, handle, currentDoc)
+      : applyToPoint(invert(snap.world), currentDoc)
     const box = resizeLocalBox(
       content.width,
       content.height,
@@ -409,6 +540,10 @@ function applyResize(
       { x: local.x - content.x, y: local.y - content.y },
       options,
     )
+    // Something in perspective cannot be mirrored (Adobe does not flip 3D
+    // objects either), so a handle dragged past the far edge collapses the box
+    // against the pinned side rather than turning it inside out.
+    if (snap.persp) collapseMirror(box, content, handle, options.fromCenter)
     // Re-anchor: the new local origin sits at (x0,y0) of the OLD local space,
     // and a negative signed extent mirrors the shape rather than inverting it.
     // For a group the extent goes into the scale as well, which is the only
@@ -422,14 +557,29 @@ function applyResize(
       translation(box.x0, box.y0),
       translation(content.x, content.y),
     )
-    const world = multiply(snap.world, reanchor)
-    out.set(snap.id, world)
+    let world = multiply(snap.world, reanchor)
     if (s.scalesContent) {
+      if (snap.persp && !projected) {
+        world = pinAnchor(s, snap, world, reanchor, handle, options, snap.transform.width, snap.transform.height)
+      }
+      out.set(snap.id, world)
       pushLiveTransform(snap, world)
       return
     }
-    const size = liveTextSize(snap, box)
+    let size = liveTextSize(snap, box)
+    if (snap.persp) {
+      // Text derives its height from its width, so it keeps the estimate; a
+      // shape is solved until its projected frame's edge is under the pointer.
+      const fitted = snap.text ? null : fitPerspectiveResize(s, snap, handle, options, currentDoc, size)
+      if (fitted) {
+        world = fitted.world
+        size = fitted.size
+      } else {
+        world = pinAnchor(s, snap, world, reanchor, handle, options, size.width, size.height)
+      }
+    }
     s.liveSizes.set(snap.id, size)
+    out.set(snap.id, world)
     pushLiveTransform(snap, world, size.width, size.height)
     return
   }
@@ -461,6 +611,180 @@ function applyResize(
     out.set(snap.id, world)
     pushLiveTransform(snap, world)
   }
+}
+
+/** See the call site: a mirrored extent becomes the thinnest box at the pinned side. */
+function collapseMirror(
+  box: LocalResizeBox,
+  content: Bounds,
+  handle: ResizeHandle,
+  fromCenter: boolean,
+): void {
+  const MIN = 0.5
+  if (box.sx < 0) {
+    box.sx = 1
+    box.width = MIN
+    box.x0 = fromCenter ? (content.width - MIN) / 2 : handle.includes('w') ? content.width - MIN : 0
+  }
+  if (box.sy < 0) {
+    box.sy = 1
+    box.height = MIN
+    box.y0 = fromCenter ? (content.height - MIN) / 2 : handle.includes('n') ? content.height - MIN : 0
+  }
+}
+
+/**
+ * Where a resize handle has been dragged to, in the node's own local space,
+ * for a node drawn in perspective.
+ *
+ * The handle is on the frame round the PROJECTED object, which is not on the
+ * object at all where the near side bulges past the far one, so the pointer
+ * itself cannot be run back through the projection — it would land beyond the
+ * edge and the box would jump on the first move. The motion can: the pointer's
+ * travel since the press, measured in the object's own plane, is added to
+ * where the grabbed handle nominally sits on the box.
+ */
+function perspectivePointer(snap: NodeSnapshot, handle: ResizeHandle, currentDoc: Vec2): Vec2 {
+  const c = snap.content
+  const grip = {
+    x: c.x + (handle.includes('w') ? 0 : handle.includes('e') ? c.width : c.width / 2),
+    y: c.y + (handle.includes('n') ? 0 : handle.includes('s') ? c.height : c.height / 2),
+  }
+  const p = snap.persp!
+  if (!p.fromWorld || !p.startLocal) return grip
+  const now = finitePoint(applyMat3(p.fromWorld, currentDoc.x, currentDoc.y))
+  // A point past the object's horizon has a preimage behind the camera, which
+  // means nothing for a drag; hold the last sensible answer instead.
+  if (!now || p.horizon(now) < NEAR_W) return grip
+  return { x: grip.x + now.x - p.startLocal.x, y: grip.y + now.y - p.startLocal.y }
+}
+
+/**
+ * Put the side opposite the handle back where it was on screen.
+ *
+ * A flat resize keeps that side still by construction. In perspective it does
+ * not: the camera looks at the box's centre, a new size moves the centre, and
+ * with it the whole projection shifts. So the resized node is projected once,
+ * the pinned point measured, and the node moved — in its parent's own plane —
+ * by however far that point strayed.
+ */
+function pinAnchor(
+  s: DragSessionState,
+  snap: NodeSnapshot,
+  world: Mat2D,
+  reanchor: Mat2D,
+  handle: ResizeHandle,
+  options: DragUpdateOptions,
+  width: number,
+  height: number,
+): Mat2D {
+  const node = s.doc.nodes[snap.id]
+  const p = snap.persp
+  if (!node || !p) return world
+  const c = snap.content
+  const fx = options.fromCenter ? 0.5 : handle.includes('w') ? 1 : handle.includes('e') ? 0 : 0.5
+  const fy = options.fromCenter ? 0.5 : handle.includes('n') ? 1 : handle.includes('s') ? 0 : 0.5
+  const pinned = { x: c.x + fx * c.width, y: c.y + fy * c.height }
+  const target = mapPoint(nodeMapping(s.doc, snap.id).toWorld, pinned.x, pinned.y)
+  if (!target) return world
+
+  // The same point in the resized node's own space: world = old · reanchor.
+  const inNew = applyToPoint(invert(reanchor), pinned)
+  const local = multiply(invert(snap.parentWorld), world)
+  const resized = {
+    ...node,
+    transform: transformFromMatrix(local, width, height, snap.transform.originX, snap.transform.originY),
+  } as DesignNode
+  const moved = patchDocument(s.doc, new Map([[snap.id, resized]]))
+  const landed = mapPoint(nodeMapping(moved, snap.id).toWorld, inNew.x, inNew.y)
+  if (!landed) return world
+  const a = inParent(snap, target)
+  const b = inParent(snap, landed)
+  if (!a || !b) return world
+  return multiply(snap.parentWorld, multiply(translation(a.x - b.x, a.y - b.y), local))
+}
+
+/**
+ * The size that puts a tilted shape's projected edge under the pointer.
+ *
+ * The frame round a tilted shape is the bounds of its projection, and a
+ * handle on it should behave like one on any frame: its edge goes where the
+ * pointer goes, the opposite edge stays. Growing the flat box by the
+ * pointer's travel does not quite do that, because growing it moves the
+ * centre the camera looks at and the whole projection breathes. So the width
+ * (and or height) is solved for directly: measure where the projected edge
+ * lands for a size, correct by the slope, repeat — a few cheap projections,
+ * converging in two or three steps because the relation is nearly linear.
+ */
+function fitPerspectiveResize(
+  s: DragSessionState,
+  snap: NodeSnapshot,
+  handle: ResizeHandle,
+  options: DragUpdateOptions,
+  currentDoc: Vec2,
+  estimate: { width: number; height: number },
+): { world: Mat2D; size: { width: number; height: number } } | null {
+  const p = snap.persp
+  const node = s.doc.nodes[snap.id]
+  if (!p || !p.frameBox0 || !node) return null
+  const inv = invert(p.frame0)
+  const now = applyToPoint(inv, currentDoc)
+  const start = applyToPoint(inv, s.startDoc)
+  const fb = p.frameBox0
+  const dx = now.x - start.x
+  const dy = now.y - start.y
+  const c = snap.content
+  // Which point of the box stays put, as a fraction of it.
+  const fx = options.fromCenter ? 0.5 : handle.includes('w') ? 1 : handle.includes('e') ? 0 : 0.5
+  const fy = options.fromCenter ? 0.5 : handle.includes('n') ? 1 : handle.includes('s') ? 0 : 0.5
+
+  const build = (width: number, height: number) => {
+    const reanchor = compose(
+      translation(-c.x, -c.y),
+      translation(fx * (c.width - width), fy * (c.height - height)),
+      translation(c.x, c.y),
+    )
+    const world = pinAnchor(s, snap, multiply(snap.world, reanchor), reanchor, handle, options, width, height)
+    const local = multiply(invert(snap.parentWorld), world)
+    const resized = {
+      ...node,
+      transform: transformFromMatrix(local, width, height, snap.transform.originX, snap.transform.originY),
+    } as DesignNode
+    const box = frameBounds(
+      patchDocument(s.doc, new Map([[snap.id, resized]])),
+      snap.id,
+      p.frame0,
+      (id) => (id === snap.id ? { x: c.x, y: c.y, width, height } : undefined),
+    )
+    return { world, box }
+  }
+  // How far the dragged edge is from where the pointer put it.
+  const offX = (b: Bounds) =>
+    handle.includes('e') ? b.x + b.width - (fb.x + fb.width + dx) : handle.includes('w') ? b.x - (fb.x + dx) : 0
+  const offY = (b: Bounds) =>
+    handle.includes('s') ? b.y + b.height - (fb.y + fb.height + dy) : handle.includes('n') ? b.y - (fb.y + dy) : 0
+
+  let width = estimate.width
+  let height = estimate.height
+  for (let iter = 0; iter < 4; iter++) {
+    const cur = build(width, height)
+    if (!cur.box) return null
+    const ex = offX(cur.box)
+    const ey = offY(cur.box)
+    if (Math.abs(ex) < 0.01 && Math.abs(ey) < 0.01) return { world: cur.world, size: { width, height } }
+    if (ex !== 0) {
+      const probe = build(width + 1, height).box
+      const slope = probe ? offX(probe) - ex : 0
+      if (Math.abs(slope) > 1e-6) width = Math.max(0.5, width - ex / slope)
+    }
+    if (ey !== 0) {
+      const probe = build(width, height + 1).box
+      const slope = probe ? offY(probe) - ey : 0
+      if (Math.abs(slope) > 1e-6) height = Math.max(0.5, height - ey / slope)
+    }
+  }
+  const last = build(width, height)
+  return last.box ? { world: last.world, size: { width, height } } : null
 }
 
 /**

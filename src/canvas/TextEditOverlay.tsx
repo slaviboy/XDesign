@@ -33,7 +33,9 @@
 
 import { memo } from 'react'
 import { worldMatrix } from '../document/SceneGraph'
+import { is3dAffected, nodeMapping } from '../document/Scene3D'
 import { toSvgMatrix } from '../geometry/Matrix'
+import { projectBox } from '../geometry/Perspective'
 import { caretRect, selectionRects } from '../text/TextGeometry'
 import { useDocument, useEditorStore } from '../state/hooks'
 
@@ -49,13 +51,31 @@ export const TextEditOverlay = memo(function TextEditOverlay() {
   if (node?.type !== 'text' || !node.runs?.length) return null
   if (!selection || selection.nodeId !== editingId) return null
 
-  const matrix = toSvgMatrix(worldMatrix(doc, editingId))
   const collapsed = selection.end === selection.start
   const rects = collapsed ? [] : selectionRects(node, selection.start, selection.end)
   // The caret sits at the moving end of the selection, which is where a
   // textarea puts it and where the next keystroke will land.
   const caret = collapsed ? caretRect(node, selection.start) : null
 
+  // Text in perspective: every rectangle is projected, as the glyphs are, so
+  // the highlight lies on the tilted line rather than floating flat above it.
+  if (is3dAffected(doc, editingId)) {
+    const map = nodeMapping(doc, editingId).toWorld
+    const quad = (r: { x: number; y: number; width: number; height: number }) =>
+      (projectBox(map, r) ?? []).map((p) => `${p.x},${p.y}`).join(' ')
+    return (
+      <g className="text-edit-overlay" pointerEvents="none">
+        {rects.map((r, i) => (
+          <polygon key={i} className="text-selection-rect" points={quad(r)} />
+        ))}
+        {caret && focused && (
+          <polygon className="text-caret" points={quad({ ...caret, width: Math.max(caret.width, 1) })} />
+        )}
+      </g>
+    )
+  }
+
+  const matrix = toSvgMatrix(worldMatrix(doc, editingId))
   return (
     <g className="text-edit-overlay" transform={matrix} pointerEvents="none">
       {rects.map((r, i) => (

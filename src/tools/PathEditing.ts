@@ -43,12 +43,13 @@ import {
   type PenSubpath,
 } from '../geometry/PathPoints'
 import { ancestorIds, nodePathData, worldMatrix } from '../document/SceneGraph'
+import { is3dAffected } from '../document/Scene3D'
 import { convertNodeToPath, resizeBoxInPlace } from '../document/DocumentModel'
 import { liveTransform } from '../canvas/LiveTransform'
 import { geomKey } from '../canvas/liveKeys'
 import { breakHistoryCoalescing, transaction, getDoc } from '../state/DocumentStore'
 import { buildAnchorSnapContext, snapPoint, type SnapContext } from './snapHelpers'
-import { hasStyle } from '../document/types'
+import { hasStyle, transform3dOf } from '../document/types'
 import { editorStore, refreshOverlay, setEditor } from '../state/EditorStore'
 import type { PointRef, SnapGuide } from '../state/EditorStore'
 import type { Bounds } from '../geometry/Bounds'
@@ -182,6 +183,12 @@ function showSnapGuides(lines: SnapGuide[]): void {
  */
 export function editableOutline(node: DesignNode | undefined): string | null {
   if (!node) return null
+  // Adobe: "Vector editing ... is not supported for 3D transformed objects."
+  // The points would be drawn and dragged through a flat matrix, off the
+  // tilted shape they belong to. Asked of the live document because only it
+  // knows whether something ABOVE the node is tilted; a node from anywhere
+  // else is simply not found there, and keeps its answer.
+  if (transform3dOf(node) || is3dAffected(getDoc(), node.id)) return null
   switch (node.type) {
     case 'path':
       return node.d

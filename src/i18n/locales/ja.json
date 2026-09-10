@@ -68,6 +68,8 @@
   "menu.rotate90cw": "時計回りに 90° 回転",
   "menu.rotate90ccw": "反時計回りに 90° 回転",
   "menu.rotate180": "180° 回転",
+  "menu.reset3dTransforms": "3D 変形をリセット",
+  "menu.show3dTransforms": "3D 変形を表示",
   "menu.lock": "ロック",
   "menu.unlock": "ロック解除",
   "menu.hide": "隠す",

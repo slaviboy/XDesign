@@ -32,14 +32,23 @@
 import { memo, useMemo } from 'react'
 import { applyToXY, meanScale, type Mat2D, type Vec2 } from '../geometry/Matrix'
 import { boundsFromPoints, type Bounds } from '../geometry/Bounds'
+import { projectBox } from '../geometry/Perspective'
 import {
   localContentBox,
   createMatrixCache,
+  frameBounds,
   geometryBounds,
   localGeometryBounds,
   localMatrix,
   worldMatrix,
 } from '../document/SceneGraph'
+import { frameMatrix, is3dAffected, localToWorld, nodeMapping, pivotOf } from '../document/Scene3D'
+import { liveDocument } from '../tools/liveDocument'
+import {
+  getLiveTransform3d,
+  getTransform3dMode,
+  isTransform3dDragging,
+} from '../tools/Transform3dSession'
 import { AnchorDot, HandleArm, HandleDot } from './overlayMarks'
 import { docToScreen } from './Viewport'
 import { intrinsicTextSize } from '../text/TextLayout'
@@ -65,13 +74,20 @@ import { multiply, toSvgMatrix } from '../geometry/Matrix'
 import { isGradient, sortedStops } from './paint'
 import { ANGULAR_RING, stopPointOnAxis } from '../tools/GradientSession'
 import { toCss } from '../document/color'
-import { cornerRadiusOf, isMaskGroup, supportsCornerRadius, type BoxCorner } from '../document/types'
+import {
+  cornerRadiusOf,
+  isMaskGroup,
+  supports3d,
+  supportsCornerRadius,
+  type BoxCorner,
+  type DesignDocument,
+} from '../document/types'
 import {
   ancestorIds,
   isEffectivelyLocked,
   worldMatrix as nodeWorldMatrix,
 } from '../document/SceneGraph'
-import { useDocument, useEditorStore, useLiveTransformTick } from '../state/hooks'
+import { useDocument, useEditorStore, useLive3dTick, useLiveTransformTick } from '../state/hooks'
 import { RESIZE_HANDLES, type ResizeHandle } from '../tools/DragSession'
 import type { NodeId } from '../document/types'
 import type { Viewport } from '../state/EditorStore'
@@ -139,12 +155,15 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
     return needed > node.transform.height + 0.5 ? node.id : null
   }, [doc, selection])
   const tick = useLiveTransformTick()
+  // The gizmo changes projections, not matrices, so it ticks separately.
+  const tick3d = useLive3dTick()
+  const gizmoActive = isTransform3dDragging()
 
   const frame = useMemo(
-    () => computeFrame(doc, selection, viewport, tick),
+    () => computeFrame(doc, selection, viewport, tick + tick3d),
     // `tick` intentionally participates: during a drag the document does not
     // change, and the tick is what tells us the live matrices moved.
-    [doc, selection, viewport, tick],
+    [doc, selection, viewport, tick, tick3d],
   )
 
   const hoverOutline = useMemo(() => {
@@ -182,7 +201,9 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
       {nodeEditingId ? (
         <PathPointOverlay viewport={viewport} tick={tick} />
       ) : (
-        frame && (
+        // Adobe drops the frame while the gizmo turns the object: its handles
+        // would only be something to knock into.
+        frame && !gizmoActive && (
           <TransformFrame
         frame={frame}
         dragging={dragging}
@@ -190,6 +211,11 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
         overflowId={overflowId}
       />
         )
+      )}
+
+      {/* After the frame, so where the two overlap the gizmo wins the press. */}
+      {!nodeEditingId && !gradientEditing && frame && (
+        <Gizmo3D doc={doc} selection={selection} viewport={viewport} frame={frame} tick={tick3d} />
       )}
 
       {/* After the frame, deliberately: a linear gradient's default endpoints sit
@@ -222,11 +248,15 @@ function computeFrame(
 ): Frame | null {
   if (selection.length === 0) return null
   const cache = createMatrixCache()
+  // What the gesture in flight would leave, for anything drawn in perspective
+  // — its frame depends on its size and pivot, not just on a matrix.
+  const scene = liveDocument(doc)
 
   if (selection.length === 1) {
     const id = selection[0]!
     const node = doc.nodes[id]
     if (!node) return null
+    if (is3dAffected(scene, id)) return frame3d(scene, id, viewport)
     // Live matrices win during a drag; the document has not been written yet.
     let world = getLiveMatrix(id) ?? cache.world(doc, id)
     // A resize in flight owns the box, corner included: a path's geometry need
@@ -268,6 +298,7 @@ function computeFrame(
   // Multi-selection uses an axis-aligned frame, which is what makes a mixed-
   // rotation selection resize predictably.
   const boxes = selection.map((id) => {
+    if (is3dAffected(scene, id)) return geometryBounds(scene, id)
     const live = getLiveMatrix(id)
     if (live) {
       const node = doc.nodes[id]
@@ -302,6 +333,37 @@ function computeFrame(
   }
 }
 
+/**
+ * The frame of one node drawn in perspective.
+ *
+ * The bounds of its projected artwork, in the space of the 3D object that
+ * owns the camera — so it is the rectangle Adobe draws round a tilted card,
+ * and it still turns with that object's 2D rotation, which is all the handle
+ * placement below assumes.
+ */
+function frame3d(doc: DesignDocument, id: NodeId, viewport: Viewport): Frame | null {
+  const frame = frameMatrix(doc, id)
+  const box = frameBounds(doc, id, frame, getLiveBox)
+  if (!box) return null
+  const corners = [
+    applyToXY(frame, box.x, box.y),
+    applyToXY(frame, box.x + box.width, box.y),
+    applyToXY(frame, box.x + box.width, box.y + box.height),
+    applyToXY(frame, box.x, box.y + box.height),
+  ].map((p) => docToScreen(viewport, p))
+  return {
+    corners,
+    screenBounds: boundsFromPoints(corners),
+    // In document units: the frame's own matrix can carry a scale (a resized
+    // group keeps its resize there), and the badge should read what is drawn.
+    size: {
+      width: box.width * Math.hypot(frame[0], frame[1]),
+      height: box.height * Math.hypot(frame[2], frame[3]),
+    },
+    rotation: (Math.atan2(corners[1]!.y - corners[0]!.y, corners[1]!.x - corners[0]!.x) * 180) / Math.PI,
+  }
+}
+
 function outlineFor(
   doc: ReturnType<typeof useDocument>,
   id: NodeId,
@@ -309,6 +371,11 @@ function outlineFor(
 ): Vec2[] | null {
   const node = doc.nodes[id]
   if (!node) return null
+  // A tilted object outlines as the shape it is on screen: its box, projected.
+  if (is3dAffected(doc, id) && node.type !== 'group') {
+    const quad = projectBox(nodeMapping(doc, id).toWorld, localGeometryBounds(node))
+    return quad ? quad.map((p) => docToScreen(viewport, p)) : null
+  }
   const world: Mat2D = worldMatrix(doc, id)
   const b = node.type === 'group' || node.type === 'artboard'
     ? null
@@ -467,6 +534,99 @@ function signed(n: number): string {
   return n > 0 ? `+${n}` : String(n)
 }
 
+// ---------------------------------------------------------------------------
+// 3D gizmo
+// ---------------------------------------------------------------------------
+
+/** Radius of the gizmo's ring, in screen pixels. */
+const GIZMO_RADIUS = 15
+/** The centre's grab radius: depth. Everything out to the ring's edge turns. */
+const GIZMO_CENTRE = 6
+
+/**
+ * Adobe's 3D gizmo: "available in the center of the current selected object".
+ *
+ * Drawn over the pivot the object turns about, projected — so on a tilted
+ * card it sits on the card's own centre rather than on the middle of its
+ * frame, which the near side has pulled over. Dragging the rings turns the
+ * selection; the centre, which grows a pair of arrows on hover, pushes it in
+ * depth. Shown only while the 3D controls are (⌘T, or the cube in the
+ * Transform section), and never for an artboard, which cannot take 3D.
+ *
+ * Both parts are ordinary `data-handle` targets, so the selection tool routes
+ * a press on them exactly as it routes one on a resize handle.
+ */
+function Gizmo3D({
+  doc,
+  selection,
+  viewport,
+  frame,
+  tick,
+}: {
+  doc: DesignDocument
+  selection: readonly NodeId[]
+  viewport: Viewport
+  frame: Frame
+  tick: number
+}) {
+  void tick
+  const show = useEditorStore((s) => s.show3dControls)
+  const dragging = useEditorStore((s) => s.isDragging)
+  const editingText = useEditorStore((s) => s.editingTextId)
+  const active = isTransform3dDragging()
+  if (!show || editingText || (dragging && !active)) return null
+  if (!selection.every((id) => supports3d(doc.nodes[id]) && !isEffectivelyLocked(doc, id))) return null
+
+  // One object: its own pivot, through its projection. Several: the middle of
+  // the frame they share.
+  let at: Vec2
+  if (selection.length === 1) {
+    const scene = liveDocument(doc)
+    const node = scene.nodes[selection[0]!]
+    const pivot = node ? localToWorld(scene, node.id, pivotOf(node)) : null
+    at = pivot ? docToScreen(viewport, pivot) : centreOf(frame)
+  } else {
+    at = centreOf(frame)
+  }
+
+  const mode = getTransform3dMode()
+  const live = active && selection.length === 1 ? getLiveTransform3d(selection[0]!) : undefined
+  const readout = live
+    ? mode === 'depth'
+      ? `Z ${Math.round(live.z)}`
+      : `X ${Math.round(live.rotateX)}°  Y ${Math.round(live.rotateY)}°`
+    : null
+
+  return (
+    <g className={`gizmo-3d${active ? ` active ${mode}` : ''}`} transform={`translate(${at.x} ${at.y})`}>
+      <circle
+        className="gizmo-hit"
+        r={GIZMO_RADIUS + 5}
+        data-handle="gizmo"
+        data-corner="rotate"
+        pointerEvents="all"
+      />
+      <g className="gizmo-glyph" pointerEvents="none">
+        <circle className="gizmo-ring" r={GIZMO_RADIUS} />
+        <ellipse className="gizmo-orbit" rx={GIZMO_RADIUS} ry={GIZMO_RADIUS * 0.4} transform="rotate(-35)" />
+        <ellipse className="gizmo-orbit" rx={GIZMO_RADIUS} ry={GIZMO_RADIUS * 0.4} transform="rotate(35)" />
+      </g>
+      <g className="gizmo-depth" data-handle="gizmo" data-corner="depth" pointerEvents="all">
+        <circle className="gizmo-centre-hit" r={GIZMO_CENTRE + 1} />
+        <circle className="gizmo-centre" r={3.5} pointerEvents="none" />
+        {/* The anchor Adobe shows on hover: this part moves the object along Z. */}
+        <path className="gizmo-arrows" d="M0 -14l-3.5 4.5h7zM0 14l-3.5 -4.5h7z" pointerEvents="none" />
+      </g>
+      {readout && <SizeBadge x={0} y={-GIZMO_RADIUS - 16} text={readout} />}
+    </g>
+  )
+}
+
+function centreOf(frame: Frame): Vec2 {
+  const [tl, , br] = frame.corners as [Vec2, Vec2, Vec2, Vec2]
+  return { x: (tl.x + br.x) / 2, y: (tl.y + br.y) / 2 }
+}
+
 /**
  * How far the selection is from whatever is hovered, while Alt is held.
  *
@@ -593,6 +753,9 @@ function RadiusHandles({
   // Honours a locked ANCESTOR, matching every other edit path — a child of a
   // locked group is still selectable from the Layers panel.
   if (isEffectivelyLocked(doc, nodeId)) return null
+  // On a tilted shape the handles would sit on the flat corners, off the
+  // shape; the Corner Radius fields still work.
+  if (is3dAffected(doc, nodeId)) return null
   // Inside a repeat grid only the first cell registers with LiveTransform, so a
   // radius drag could preview on one cell while committing to all of them.
   if (ancestorIds(doc, nodeId).some((a) => doc.nodes[a]?.type === 'repeat-grid')) return null
@@ -716,6 +879,8 @@ function GradientHandles({
   const node = doc.nodes[nodeId]
   if (!node || !('style' in node)) return null
   if (isEffectivelyLocked(doc, nodeId)) return null
+  // Placed through a flat matrix, the widget would float off a tilted shape.
+  if (is3dAffected(doc, nodeId)) return null
   // Note: no repeat-grid bail-out here, unlike RadiusHandles. That guard exists
   // because only cell 0 registers with LiveTransform; this widget writes to the
   // store, which every cell renders from, so it works inside a grid.

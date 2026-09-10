@@ -68,6 +68,8 @@
   "menu.rotate90cw": "Завъртане 90° надясно",
   "menu.rotate90ccw": "Завъртане 90° наляво",
   "menu.rotate180": "Завъртане 180°",
+  "menu.reset3dTransforms": "Нулиране на 3D трансформациите",
+  "menu.show3dTransforms": "Показване на 3D трансформациите",
   "menu.lock": "Заключване",
   "menu.unlock": "Отключване",
   "menu.hide": "Скриване",

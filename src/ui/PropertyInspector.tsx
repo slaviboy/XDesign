@@ -56,7 +56,12 @@ import {
   clearTextRunStyle,
   isCharacterStyle,
   setTextRunStyle,
+  setTransform3d,
 } from '../history/Commands'
+import { anyIn3d, is3dAffected, Z_DEPTH_MAX, Z_DEPTH_MIN } from '../document/Scene3D'
+import { liveDocument } from '../tools/liveDocument'
+import { getLiveTransform3d } from '../tools/Transform3dSession'
+import { shortcutLabel } from '../shortcuts/keymap'
 import { setRepeatGridParams } from '../history/RepeatGridCommands'
 import { canImageTrace, openImageTrace } from '../history/TraceCommands'
 import { importTextIntoSelection } from '../app/textImport'
@@ -78,17 +83,25 @@ import {
   saveDefaultGrid,
   setCornerRadiusMode,
   setEditor,
+  toggle3dControls,
 } from '../state/EditorStore'
 import { liveGuide } from '../tools/GuideDrag'
 import { t, type MessageKey } from '../i18n'
 import { useLanguage } from '../state/hooks-i18n'
-import { useDocument, useEditorStore, useLiveTransformTick, useSelectedNodes } from '../state/hooks'
+import {
+  useDocument,
+  useEditorStore,
+  useLive3dTick,
+  useLiveTransformTick,
+  useSelectedNodes,
+} from '../state/hooks'
 import { IconSelect, NumberField, Section, Select, TextField, common, IconButton } from './primitives'
 import { PaintPopover, PAINT_POPOVER_WIDTH } from './ColorPicker'
 import { useEyedropper } from './eyedropper'
 import {
   AlignBottomIcon, AlignCenterHIcon, AlignCenterVIcon, AlignLeftIcon, AlignRightIcon,
-  AlignTopIcon, DistributeHIcon, DistributeVIcon, FlipHIcon, FlipVIcon,
+  AlignTopIcon, CubeIcon, DistributeHIcon, DistributeVIcon, FlipHIcon, FlipVIcon,
+  RotateXIcon, RotateYIcon,
   AutoHeightIcon, AutoWidthIcon, CornersIndependentIcon, CornersUniformIcon,
   EyedropperIcon, FixedSizeIcon, ImportIcon,
   LinkBracket, MatchHeightIcon, MatchSizeIcon, MatchWidthIcon,
@@ -125,8 +138,13 @@ import {
   type TextTransform,
   runsIn,
   DEFAULT_TEXT_STYLE,
+  supports3d,
   type TextStyle,
+  type Transform3D,
 } from '../document/types'
+
+/** What a node without a 3D transform reads as in the 3D fields. */
+const FLAT_3D: Transform3D = { rotateX: 0, rotateY: 0, z: 0 }
 
 export function PropertyInspector() {
   const selected = useSelectedNodes()
@@ -313,6 +331,7 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
   // pre-drag values without this: it re-renders on each LiveTransform flush and
   // the helpers below prefer the in-flight matrices when a gesture is running.
   const liveTick = useLiveTransformTick()
+  const live3dTick = useLive3dTick()
   const [aspectLocked, setAspectLocked] = useState(false)
   const aspectRatioRef = useRef<number | null>(null)
   const styled = nodes.filter(hasStyle)
@@ -323,8 +342,9 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
   const bounds = useMemo(
     () => (nodes.length ? liveBounds(doc, nodes[0]!) : null),
     // liveTick participates: mid-drag the document has not changed, and the
-    // tick is the only signal that the live values moved.
-    [doc, nodes, liveTick],
+    // tick is the only signal that the live values moved. live3dTick is the
+    // same for the gizmo, which moves where a tilted object's bounds are.
+    [doc, nodes, liveTick, live3dTick],
   )
 
   const rotation = useMemo(
@@ -334,6 +354,22 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
       ),
     [doc, nodes, liveTick],
   )
+
+  // 3D Transforms. The fields follow the gizmo while it turns the object, the
+  // way the rotation field follows a rotate handle.
+  const show3d = useEditorStore((s) => s.show3dControls)
+  const can3d = nodes.every((n) => supports3d(n))
+  const show3dFields = show3d && can3d
+  const in3d = useMemo(() => anyIn3d(doc, nodes.map((n) => n.id)), [doc, nodes])
+  const t3 = useMemo(() => {
+    const of = (n: DesignNode) => getLiveTransform3d(n.id) ?? n.transform3d ?? FLAT_3D
+    return {
+      rotateX: common(nodes, (n) => round2(of(n).rotateX)),
+      rotateY: common(nodes, (n) => round2(of(n).rotateY)),
+      z: common(nodes, (n) => round2(of(n).z)),
+    }
+    // live3dTick participates for the same reason liveTick does above.
+  }, [nodes, live3dTick])
 
   const effectiveW = common(nodes, (n) => round2(liveEffectiveSize(doc, n).width))
   const effectiveH = common(nodes, (n) => round2(liveEffectiveSize(doc, n).height))
@@ -403,8 +439,30 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
         <span className="truncate">{multiple ? `${nodes.length} objects selected` : nodes[0]!.name}</span>
       </div>
 
-      <Section title={t('section.transform')}>
-        <div className="transform-grid">
+      <Section
+        title={t('section.transform')}
+        actions={
+          // Adobe's cube: it "only shows or hides the controls and the gizmo",
+          // so it is pressed or not for the app, not for the object.
+          <button
+            type="button"
+            className={`section-action${show3dFields ? ' active' : ''}`}
+            aria-label="3D Transforms"
+            aria-pressed={show3dFields}
+            data-testid="toggle-3d"
+            disabled={!can3d}
+            title={
+              can3d
+                ? `3D Transforms (${shortcutLabel('view.toggle3d')})`
+                : '3D Transforms apply to an artboard’s content, not to the artboard'
+            }
+            onClick={() => toggle3dControls()}
+          >
+            <CubeIcon size={14} />
+          </button>
+        }
+      >
+        <div className={`transform-grid${show3dFields ? ' with-3d' : ''}`}>
           <NumberField className="tf-w" label="W" value={effectiveW} min={0.5} onChange={(v) => applyWidth(v)} scrubStep={0.5} />
           <button
             type="button"
@@ -434,11 +492,48 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
 
           <NumberField className="tf-h" label="H" value={effectiveH} min={0.5} onChange={(v) => applyHeight(v)} scrubStep={0.5} />
           <NumberField className="tf-y" label="Y" value={y} onChange={applyY} scrubStep={0.5} />
+
+          {/* Adobe's arrangement: the X and Y rotations beside X and Y, the
+              depth under them, and the ordinary rotation — the Z rotation —
+              moving down beside it. */}
+          {show3dFields && (
+            <>
+              <NumberField
+                className="tf-rx"
+                label={<RotateXIcon size={13} />}
+                title="X rotation"
+                value={t3.rotateX}
+                suffix="°"
+                scrubStep={0.5}
+                onChange={(v, committing) => setTransform3d({ rotateX: v }, committing ? undefined : '3d-rx')}
+              />
+              <NumberField
+                className="tf-ry"
+                label={<RotateYIcon size={13} />}
+                title="Y rotation"
+                value={t3.rotateY}
+                suffix="°"
+                scrubStep={0.5}
+                onChange={(v, committing) => setTransform3d({ rotateY: v }, committing ? undefined : '3d-ry')}
+              />
+              <NumberField
+                className="tf-z"
+                label="Z"
+                title="Z depth"
+                value={t3.z}
+                min={Z_DEPTH_MIN}
+                max={Z_DEPTH_MAX}
+                scrubStep={0.5}
+                onChange={(v, committing) => setTransform3d({ z: v }, committing ? undefined : '3d-z')}
+              />
+            </>
+          )}
         </div>
 
         <div className="transform-actions">
-          <IconButton icon={<FlipHIcon />} label="Flip horizontal" onClick={() => flipSelection('h')} />
-          <IconButton icon={<FlipVIcon />} label="Flip vertical" onClick={() => flipSelection('v')} />
+          {/* Adobe: "object flipping is not supported for 3D transformed objects". */}
+          <IconButton icon={<FlipHIcon />} label="Flip horizontal" disabled={in3d} onClick={() => flipSelection('h')} />
+          <IconButton icon={<FlipVIcon />} label="Flip vertical" disabled={in3d} onClick={() => flipSelection('v')} />
           <span className="transform-actions-gap" />
           <IconButton
             icon={<MatchWidthIcon />}
@@ -568,6 +663,11 @@ function artboardOrigin(doc: DesignDocument, node: DesignNode | undefined): Vec2
  * single readout path rather than a special case bolted on beside one.
  */
 function liveBounds(doc: DesignDocument, node: DesignNode): Bounds {
+  // In perspective the bounds depend on the size and pivot and tilt as well
+  // as the matrix, so they are measured on the document as the gesture would
+  // leave it — the same one the canvas is drawing.
+  const scene = liveDocument(doc)
+  if (is3dAffected(scene, node.id)) return geometryBounds(scene, node.id)
   const live = getLiveMatrix(node.id)
   if (!live) return geometryBounds(doc, node.id)
 

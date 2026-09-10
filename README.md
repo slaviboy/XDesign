@@ -145,6 +145,22 @@ rotation cursor oriented to the corner and the object's own angle.
 **Transform panel** — W/H with an aspect-ratio lock, X/Y, rotation, flips, and match
 width / height / size across a selection. Every readout tracks a drag in real time.
 
+**3D Transforms** — the cube at the top of the Transform section (or `⌘T`) shows an X rotation, a
+Y rotation and a Z depth beside the fields already there, and puts Adobe's gizmo on the selected
+object: drag its rings to turn the object about its own horizontal and vertical axes, drag its
+centre up to bring it toward you or down to push it away, with `Shift` snapping angles to 15° and
+depth to 10. The object is drawn in real perspective — a card turned about Y has a taller near
+edge and a shorter far one — and everything that looks at it agrees: the selection frame is the
+bounds of what is on screen, a click lands on the tilted shape rather than where it would be flat,
+and PNG, JPEG, WebP, HEIF, SVG, the eyedropper and a copied picture all show the same projection.
+A tilted group shares its space with what is inside it, so a stack of cards at different depths
+fans out when the stack is turned, and siblings paint by depth rather than by layer order, which
+is XD's rule. Text in perspective is typed in perspective. Right-click ▸ Transform ▸ Reset 3D
+Transforms (`⌥⌘T`) puts an object back to flat; hiding the controls leaves every tilt where it is.
+As in XD, an artboard cannot be tilted, and a tilted object cannot be flipped or point-edited.
+`⌘T` is also the browser's new-tab chord, so in an ordinary tab it may never reach the page — the
+cube and View ▸ Show 3D Transforms do the same, and the shortcut can be rebound.
+
 **Gradients** — linear, radial and angular, each with an on-canvas editor while the picker is
 open: a segment with draggable endpoints for a linear gradient, a centre and a radius handle for a
 radial one, a centre and an angle handle for an angular one. Stops ride the widget too — click it to
@@ -1517,6 +1533,86 @@ than leaving two things on one key and picking between them by array order — a
 says which one it displaced, because a shortcut that silently stops working is worse than
 one that visibly has none.
 
+### 3D Transforms are the flat artwork, projected — and SVG cannot project
+
+**The model.** `transform3d` — an X rotation, a Y rotation and a depth — sits *beside*
+`transform`, not inside it. Move, rotate, group, ungroup, align, paste and every drag rebuild
+`transform` from a 2D matrix, which cannot hold a tilt; living next to it, the tilt survives
+all of them without one of those paths knowing it exists. The Z rotation is the rotation the
+node already had. All-zero is stored as absent, so a document with no 3D in it carries no trace
+of the feature, and the file format needed no new version.
+
+**The camera.** Each 3D object is seen through a camera of its own, 800 units in front of its
+pivot and looking straight at it — CSS's `perspective(800px)`, about the same point its 2D
+rotation turns about. That is what Adobe's illustrations show: a card pushed back in Z shrinks
+about its own centre, wherever it sits, and a tilted card looks the same wherever it is moved.
+It is also what keeps the 2D machinery honest. The whole projection happens inside the node's
+local space, before its own matrix, so moving or rotating a tilted card is still one attribute
+write per frame, and every gesture that edits `transform` works unchanged. The distance was
+matched by eye to Adobe's screenshots, where a portrait card turned 30° has its near edge about
+a fifth taller than its far one. Directions are CSS's, which are XD's: +X tips the top away,
++Y turns the right edge away, +Z comes toward you.
+
+**Shared space.** A plain group that is tilted, or sits inside one, passes its space down: its
+children are placed in it by their own matrices and tilts and seen through the one camera
+(CSS calls it `preserve-3d`). A mask group, a repeat grid, a group with a shadow or blur, and
+every leaf is instead a *plane* — drawn flat, then projected as one picture, because a clip and
+a filter both need a flat image to work on. Siblings paint back to front by depth, the depth of
+each one's pivot once every tilt above it is applied, which is Adobe's rule: "when you change
+the Z depth value for any object, XD does not support layer ordering methods". Equal depths
+keep their layer order, so a document without Z is untouched. Hit testing walks the same order,
+so a click takes the card that is drawn in front.
+
+**Drawing it.** A flat object seen in perspective is a *homography* of its flat rendering, and
+SVG has nothing that draws one: its transforms are affine, and CSS 3D on an SVG element is
+silently flattened to its affine part — a turned card comes out a parallelogram. So each plane
+is drawn once, flat, into `<defs>`, and a mesh of triangles draws it again, each through a
+`<use>` carrying the one affine map that agrees with the projection at that triangle's three
+corners. Every kind of artwork goes through untouched — text, images, gradients, effects, masks,
+imported SVG — and the exporter writes the identical structure from the same helpers, so every
+file format, the eyedropper and the clipboard show exactly what the canvas does.
+
+Two details decide whether that looks right. **The triangles are cut out with crisp-edged
+masks, not clip paths.** A clip path is always antialiased, so two triangles sharing an edge
+each cover its pixels only partly, and the seams show through as a faint lattice over the whole
+object — 4–8% of the pixels of a translucent fill, measured. A mask is drawn like a shape, so it
+honours `shape-rendering="crispEdges"`, and aliased triangles that share exact corners tile the
+plane with every pixel owned by exactly one of them: no seam pixels at all, at any zoom or pixel
+ratio. That exactness is the mesh's job — every vertex is projected once, and every cut at the
+near limit is computed from the shared edge in a fixed order, so neighbours meet bit for bit.
+The mesh reaches just past the artwork, so its own aliased boundary falls on empty space and the
+artwork's edges stay smooth. **The mesh is as coarse as the eye allows,** because every triangle
+redraws the artwork. How far a triangle's affine map strays grows with how much the perspective
+divide changes across it, relative to itself, so grid lines are spaced geometrically in that
+divide — small cells where the plane comes toward you, large where it recedes — and the smallest
+grid within half a screen pixel is found by a staircase search. It is re-cut only when the zoom
+moves a whole √2 step. A card needs a few dozen triangles; the canvas caps any one plane at 256
+and an export at 1024. Depth with no tilt is a plain scale about the pivot and gets no mesh at
+all, and an object's own shadow and blur are applied once to its projected picture rather than
+once per triangle.
+
+**Interaction.** Everything that turns a point into a node runs the projection backwards. A
+click inverts the homography and tests the flat shape, so a point inside the flat rectangle but
+outside the trapezoid on screen misses, and a point whose preimage is behind the camera is on
+nothing. Bounds are the projected box — its four corners are exact, since lines project to
+lines — which is what X and Y report, the way XD's do as a card turns; W and H stay the object's
+own size, the numbers an edit changes. The selection frame is those bounds in the frame of the
+object that owns the camera, so it still turns with that object's 2D rotation. A move across a
+tilted parent is measured in the parent's own plane, so what is dragged stays under the pointer.
+Resizing a tilted group scales its projected picture, which is exact; a tilted shape grows its
+own flat box — so its stroke and corners are not scaled — and since that moves the centre the
+camera looks at, the size is solved for until the projected edge is under the pointer, and the
+opposite side is put back where it was. The gizmo writes nothing until release, like every drag:
+the few nodes a gesture holds are patched into a layered copy of the document each frame, and the
+canvas, the frame and the inspector all read that one copy, so they cannot disagree.
+
+**What is not supported, and why.** Flipping and point-editing a tilted object, as in XD — a
+mirrored plane would need a mirrored camera, and the points would be dragged through a flat
+matrix. Corner-radius and gradient handles on one; the fields still work. Tilting an artboard.
+A background blur on an object inside a shared 3D space is not drawn. A boolean result is built
+flat from world outlines, so it comes out 2D, and ungrouping a tilted group drops the group's own
+tilt while its children keep theirs.
+
 ### `.xdesign` is a zip
 
 A ZIP holding `document.json` plus the raw bytes of every image under `assets/`. Base64
@@ -1550,8 +1646,8 @@ SVG Renderer (React, memoized per node)  ←  Interaction Engine (tools, pointer
 
 ```
 src/
-  document/    typed scene graph, transforms, colour — DOM-free
-  geometry/    matrices, bounds, path math, boolean ops, snapping — DOM-free
+  document/    typed scene graph, transforms, 3D spaces, colour — DOM-free
+  geometry/    matrices, perspective, bounds, path math, boolean ops, snapping — DOM-free
   state/       normalized stores, clipboard, React bindings
   history/     patch-based undo, commands
   canvas/      SVG renderer, overlays, viewport, live-transform fast path

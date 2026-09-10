@@ -68,6 +68,8 @@
   "menu.rotate90cw": "90° im Uhrzeigersinn drehen",
   "menu.rotate90ccw": "90° gegen den Uhrzeigersinn drehen",
   "menu.rotate180": "180° drehen",
+  "menu.reset3dTransforms": "3D-Transformationen zurücksetzen",
+  "menu.show3dTransforms": "3D-Transformationen einblenden",
   "menu.lock": "Sperren",
   "menu.unlock": "Entsperren",
   "menu.hide": "Ausblenden",

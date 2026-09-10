@@ -192,6 +192,38 @@ export const RotateIcon = (p: IconProps) => (
   </Icon>
 )
 
+/**
+ * The 3D Transforms toggle: Adobe's cube, drawn in the same isometric view —
+ * three visible faces meeting at the near corner.
+ */
+export const CubeIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 1.9l5.3 3v6.2L8 14.1l-5.3-3V4.9z" />
+    <path d="M2.7 4.9L8 8l5.3-3.1M8 8v6.1" />
+  </Icon>
+)
+
+/**
+ * Rotation about the horizontal axis: the axis, and an orbit looping over and
+ * under it, arrowed the way a positive angle turns — the top away from you.
+ */
+export const RotateXIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M1.6 8h2.2M12.2 8h2.2" />
+    <path d="M10.3 4.1A2.6 5 0 1 0 10.3 11.9" />
+    <path d="M10.3 11.9l.2-2.3M10.3 11.9l-2.2-.7" />
+  </Icon>
+)
+
+/** Rotation about the vertical axis: the same glyph, standing up. */
+export const RotateYIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 1.6v2.2M8 12.2v2.2" />
+    <path d="M4.1 5.7A5 2.6 0 1 0 11.9 5.7" />
+    <path d="M11.9 5.7l-2.3-.2M11.9 5.7l-.7 2.2" />
+  </Icon>
+)
+
 export const RotateLeftIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M2.9 8a5.1 5.1 0 101.6-3.7" />

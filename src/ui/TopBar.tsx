@@ -37,15 +37,16 @@ import { redo, undo } from '../state/DocumentStore'
 import {
   alignSelection, clearGuides, copyGuides, deleteSelection, distributeSelection,
   flipSelection, groupSelection, maskWithShape, orderCommand, outlineStrokeSelection,
-  pasteGuides, renameDocument, selectAll, setGuidesLocked, ungroupMask,
+  pasteGuides, renameDocument, reset3dTransforms, selectAll, setGuidesLocked, ungroupMask,
   ungroupSelection, updateSettings,
 } from '../history/Commands'
+import { anyIn3d } from '../document/Scene3D'
 import { copySelection, cutSelection, duplicateInPlace } from '../state/Clipboard'
 import { pasteFromSystem } from '../state/SystemClipboard'
 import { stepZoom, zoomTo, zoomToFit, zoomToSelection } from '../shortcuts/KeyboardManager'
 import { ZOOM_MENU_STEPS } from '../canvas/Viewport'
 import { canImageTrace, openImageTrace } from '../history/TraceCommands'
-import { openDialog, setEditor, type WorkspaceTab } from '../state/EditorStore'
+import { openDialog, setEditor, toggle3dControls, type WorkspaceTab } from '../state/EditorStore'
 import { useDocumentStore, useEditorStore } from '../state/hooks'
 import { artboardIds } from '../document/SceneGraph'
 import { t } from '../i18n'
@@ -86,6 +87,11 @@ export const TopBar = memo(function TopBar() {
       return n?.type === 'artboard' && !!n.guidesLocked
     })
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
+  const show3d = useEditorStore((s) => s.show3dControls)
+  // Recomputed from the document, so the menu never offers a reset that
+  // would do nothing or refuses one that would.
+  const has3d = selection.some((id) => !!doc.nodes[id]?.transform3d)
+  const in3d = anyIn3d(doc, selection)
   const tab = useEditorStore((s) => s.tab)
   const selectionCount = useEditorStore((s) => s.selection.length)
   const languageTick = useLanguage()
@@ -153,8 +159,14 @@ export const TopBar = memo(function TopBar() {
           { label: t('menu.sendBackward'), shortcut: shortcutLabel('arrange.backward'), disabled: !hasSelection, onSelect: () => orderCommand('backward') },
           { label: t('menu.sendToBack'), shortcut: shortcutLabel('arrange.back'), disabled: !hasSelection, onSelect: () => orderCommand('back') },
           { kind: 'separator' },
-          { label: t('menu.flipHorizontal'), disabled: !hasSelection, onSelect: () => flipSelection('h') },
-          { label: t('menu.flipVertical'), disabled: !hasSelection, onSelect: () => flipSelection('v') },
+          { label: t('menu.flipHorizontal'), disabled: !hasSelection || in3d, onSelect: () => flipSelection('h') },
+          { label: t('menu.flipVertical'), disabled: !hasSelection || in3d, onSelect: () => flipSelection('v') },
+          {
+            label: t('menu.reset3dTransforms'),
+            shortcut: shortcutLabel('transform.reset3d'),
+            disabled: !has3d,
+            onSelect: () => reset3dTransforms(),
+          },
         ],
       },
       {
@@ -185,6 +197,7 @@ export const TopBar = memo(function TopBar() {
           { label: t('menu.showGrid'), shortcut: shortcutLabel('view.toggleGrid'), checked: gridVisible, onSelect: () => updateSettings({ gridVisible: !gridVisible }) },
           { label: t('menu.showGuides'), shortcut: shortcutLabel('view.toggleGuides'), checked: guidesVisible, onSelect: () => updateSettings({ guidesVisible: !guidesVisible }) },
           { label: t('menu.snapping'), shortcut: shortcutLabel('view.toggleSnapping'), checked: snapEnabled, onSelect: () => setEditor({ snapEnabled: !snapEnabled }) },
+          { label: t('menu.show3dTransforms'), shortcut: shortcutLabel('view.toggle3d'), checked: show3d, onSelect: () => toggle3dControls() },
           { kind: 'separator' },
           // Adobe's Guides commands. With nothing selected they apply to every
           // artboard, which is what "Lock All Guides" means on a document.
@@ -236,6 +249,7 @@ export const TopBar = memo(function TopBar() {
   }, [
     gridVisible, guidesVisible, guideBoards, guidesLocked, languageTick,
     history.canRedo, history.canUndo, selectionCount, snapEnabled, themePreference,
+    show3d, has3d, in3d,
   ])
 
   return (

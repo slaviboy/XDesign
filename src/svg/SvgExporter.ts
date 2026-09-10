@@ -29,16 +29,41 @@
  * begin with.
  */
 
-import { toSvgMatrix, multiply, type Mat2D } from '../geometry/Matrix'
+import { meanScale, toSvgMatrix, multiply, type Mat2D } from '../geometry/Matrix'
 import type { Bounds } from '../geometry/Bounds'
 import { polygonStarPath, rectPath } from '../geometry/ShapeGeometry'
+import { mat3ScaleAt, mat3ToMat2D, projectPathData, type Mat3 } from '../geometry/Perspective'
 import { localMatrix, maskOutlines, nodePathData, worldMatrix } from '../document/SceneGraph'
+import {
+  depthSorted,
+  is3dAffected,
+  isPreserve3d,
+  nodeMapping,
+  planeHomography,
+} from '../document/Scene3D'
 import { toHex } from '../document/color'
 import { ANGULAR_TILE, angularWedges, gradientId, isGradient, sortedStops } from '../canvas/paint'
+import {
+  EXPORT_MESH,
+  planeContentId,
+  planeDomain,
+  planeMaskId,
+  planeMesh,
+  projectedRegion,
+  trianglePath,
+  triangleRegion,
+} from '../canvas/perspectiveMarkup'
 import { layoutText, lineOffsetX } from '../text/TextLayout'
 import { fontStack } from '../text/FontRegistry'
 import { canEmbed, embedFontCss } from '../text/FontEmbedder'
-import { hasStyle, isMaskGroup, repeatGridOffsets, repeatGridSize } from '../document/types'
+import {
+  hasStyle,
+  isContainer,
+  isMaskGroup,
+  repeatGridOffsets,
+  repeatGridSize,
+  transform3dOf,
+} from '../document/types'
 import {
   activeBlur,
   backgroundFillOpacity,
@@ -225,6 +250,15 @@ function emitNode(ctx: EmitContext, id: NodeId, isRoot: boolean): string {
   const node = ctx.doc.nodes[id]
   if (!node || !node.visible) return ''
 
+  // A root exported on its own from under someone else's camera — a label on
+  // a tilted card, a card in a turned stack — has no group of that camera's
+  // around it in the file, so it is drawn straight into the world through the
+  // whole projection instead.
+  if (isRoot && node.parentId && is3dAffected(ctx.doc, node.parentId)) {
+    return emitUnderCamera(ctx, id)
+  }
+  if (transform3dOf(node)) return emit3dObject(ctx, id, isRoot)
+
   // Roots carry their full world matrix; descendants carry only their local one,
   // since their ancestors' groups are emitted around them.
   const matrix: Mat2D = isRoot ? worldMatrix(ctx.doc, id) : localMatrix(node.transform)
@@ -266,6 +300,112 @@ function emitNode(ctx: EmitContext, id: NodeId, isRoot: boolean): string {
 /** Types whose body is always exactly one element that can carry a transform. */
 const LEAF_TYPES = new Set(['rect', 'ellipse', 'polygon', 'line', 'path', 'text', 'image'])
 
+// ---------------------------------------------------------------------------
+// Perspective — the same structure the canvas draws, from the same helpers
+// ---------------------------------------------------------------------------
+
+/** Identity, opacity and blend: what a group standing for a node carries. */
+function lookAttrs(node: DesignNode): string {
+  const styled = hasStyle(node) ? node.style : null
+  const opacity = styled && styled.opacity < 1 ? ` opacity="${round(styled.opacity, 3)}"` : ''
+  const blend =
+    styled && styled.blendMode !== 'normal' ? ` style="mix-blend-mode:${styled.blendMode}"` : ''
+  return ` id="${escapeAttr(safeId(node.id))}" data-name="${escapeAttr(node.name)}"${opacity}${blend}`
+}
+
+/**
+ * A 3D object: its ordinary matrix on the group, the projection inside it —
+ * exactly as the canvas draws it. See perspectiveMarkup.
+ */
+function emit3dObject(ctx: EmitContext, id: NodeId, isRoot: boolean): string {
+  const node = ctx.doc.nodes[id]!
+  const matrix: Mat2D = isRoot ? worldMatrix(ctx.doc, id) : localMatrix(node.transform)
+  // Output pixels per unit inside the group, which is what the mesh's
+  // tolerance is measured in.
+  const px = ctx.options.scale * meanScale(worldMatrix(ctx.doc, id))
+  const body = isPreserve3d(ctx.doc, id)
+    ? emitSpace(ctx, id, px)
+    : emitPlane(ctx, node, planeHomography(ctx.doc, id)!, px)
+  return `<g${lookAttrs(node)} transform="${toSvgMatrix(matrix)}">${body}</g>`
+}
+
+/** The children of a group sharing its 3D space, back to front by depth. */
+function emitSpace(ctx: EmitContext, containerId: NodeId, px: number): string {
+  const container = ctx.doc.nodes[containerId]
+  if (!container || !isContainer(container)) return ''
+  return depthSorted(ctx.doc, containerId, container.children)
+    .map((id) => {
+      const child = ctx.doc.nodes[id]
+      if (!child || !child.visible) return ''
+      const inner = isPreserve3d(ctx.doc, id)
+        ? emitSpace(ctx, id, px)
+        : emitPlane(ctx, child, planeHomography(ctx.doc, id)!, px)
+      return inner ? `<g${lookAttrs(child)}>${inner}</g>` : ''
+    })
+    .join('')
+}
+
+/**
+ * An exported root under another object's camera, drawn straight into world
+ * space: every plane in it projected by its full map to the world.
+ */
+function emitUnderCamera(ctx: EmitContext, id: NodeId): string {
+  const node = ctx.doc.nodes[id]
+  if (!node || !node.visible) return ''
+  if (isPreserve3d(ctx.doc, id) && isContainer(node)) {
+    const kids = depthSorted(ctx.doc, id, node.children).map((c) => emitUnderCamera(ctx, c)).join('')
+    return kids ? `<g${lookAttrs(node)}>${kids}</g>` : ''
+  }
+  const h = nodeMapping(ctx.doc, id).toWorld
+  const p = { x: node.transform.width / 2, y: node.transform.height / 2 }
+  const body = emitPlane(ctx, node, h, ctx.options.scale * mat3ScaleAt(h, p.x, p.y))
+  return body ? `<g${lookAttrs(node)}>${body}</g>` : ''
+}
+
+/**
+ * One flat picture, projected: the body once into <defs>, then one masked
+ * <use> per triangle — or, when the projection is affine, the body in place
+ * under one transform. The node's own shadow and blur are applied to the
+ * projected result, as on the canvas.
+ */
+function emitPlane(ctx: EmitContext, node: DesignNode, h: Mat3, px: number): string {
+  const { body, attrs = '' } = emitBody(ctx, node)
+  if (!body) return ''
+  const flat = `<g${attrs}>${body}</g>`
+  const key = safeId(node.id)
+  const styled = hasStyle(node) ? node.style : null
+  const fx = styled ? effectFilter(key, styled, node.transform) : null
+  const filterDef = (region: Bounds) =>
+    `<filter id="${fx!.id}" filterUnits="userSpaceOnUse" x="${round(region.x, 3)}" y="${round(region.y, 3)}"` +
+    ` width="${round(region.width, 3)}" height="${round(region.height, 3)}">${fx!.primitives}</filter>`
+
+  const mesh = planeMesh(h, planeDomain(ctx.doc, node), px, EXPORT_MESH)
+  if (!mesh) {
+    if (fx) ctx.defs.push(filterDef(fx))
+    const inner = fx ? `<g filter="url(#${fx.id})">${flat}</g>` : flat
+    return `<g transform="${toSvgMatrix(mat3ToMat2D(h))}">${inner}</g>`
+  }
+
+  const contentId = planeContentId(key)
+  ctx.defs.push(`<g id="${contentId}">${flat}</g>`)
+  const pad = 2 / (px || 1)
+  const use = `<use href="#${contentId}" xlink:href="#${contentId}"`
+  const triangles = mesh
+    .map((t, i) => {
+      const maskId = planeMaskId(key, i)
+      const r = triangleRegion(t, pad)
+      ctx.defs.push(
+        `<mask id="${maskId}" maskUnits="userSpaceOnUse" x="${r.x}" y="${r.y}" width="${r.width}" height="${r.height}">` +
+          `<path d="${trianglePath(t)}" fill="#fff" shape-rendering="crispEdges"/></mask>`,
+      )
+      return `<g mask="url(#${maskId})">${use} transform="${toSvgMatrix(t.matrix)}"/></g>`
+    })
+    .join('')
+  if (!fx) return triangles
+  ctx.defs.push(filterDef(projectedRegion(h, fx)))
+  return `<g filter="url(#${fx.id})">${triangles}</g>`
+}
+
 /** Put attributes on the body's own opening tag. */
 function injectAttrs(body: string, attrs: string): string {
   const at = body.indexOf(' ')
@@ -291,9 +431,15 @@ function injectAttrs(body: string, attrs: string): string {
  * `prefix` is markup painted before the children that is part of the backdrop
  * too, which is how an artboard's own background ends up inside the blur.
  */
-function emitChildren(ctx: EmitContext, children: readonly NodeId[], prefix = ''): string {
+function emitChildren(
+  ctx: EmitContext,
+  containerId: NodeId,
+  children: readonly NodeId[],
+  prefix = '',
+): string {
   let out = prefix
-  for (const id of children) {
+  // Paint order, which a Z depth can change — the file draws what the canvas does.
+  for (const id of depthSorted(ctx.doc, containerId, children)) {
     const child = ctx.doc.nodes[id]
     const blur = child && child.visible && hasStyle(child) ? activeBlur(child.style, 'background') : null
     // Nothing painted yet means nothing to blur, and a <use> of an empty group
@@ -314,7 +460,10 @@ function emitBackdropBlur(
   const groupId = `bd-${key}`
   const clipId = `bdclip-${key}`
   const filterId = `bdblur-${key}`
-  const d = nodePathData(child) ?? rectPath(child.transform.width, child.transform.height, 0)
+  const flat = nodePathData(child) ?? rectPath(child.transform.width, child.transform.height, 0)
+  // A panel in perspective blurs what is behind it as it is SEEN.
+  const h = transform3dOf(child) ? planeHomography(ctx.doc, child.id) : null
+  const d = h ? projectPathData(flat, h) : flat
 
   const primitives = [`<feGaussianBlur stdDeviation="${round(blurStdDeviation(blur.amount), 3)}"/>`]
   if (blur.brightness !== 0) {
@@ -352,7 +501,7 @@ function emitBackdropBlur(
 function emitBody(ctx: EmitContext, node: DesignNode): { body: string; attrs?: string } {
   switch (node.type) {
     case 'document':
-      return { body: emitChildren(ctx, node.children) }
+      return { body: emitChildren(ctx, node.id, node.children) }
 
     case 'artboard': {
       const { width, height } = node.transform
@@ -366,20 +515,20 @@ function emitBody(ctx: EmitContext, node: DesignNode): { body: string; attrs?: s
           `<clipPath id="${clipId}"><rect width="${round(width, 3)}" height="${round(height, 3)}"/></clipPath>`,
         )
         return {
-          body: `${bg}<g clip-path="url(#${clipId})">${emitChildren(ctx, node.children, bg)}</g>`,
+          body: `${bg}<g clip-path="url(#${clipId})">${emitChildren(ctx, node.id, node.children, bg)}</g>`,
         }
       }
       // The background is part of the backdrop a blurred child sees.
-      return { body: emitChildren(ctx, node.children, bg) }
+      return { body: emitChildren(ctx, node.id, node.children, bg) }
     }
 
     case 'group': {
       if (!isMaskGroup(node) || !ctx.doc.nodes[node.maskId]) {
-        return { body: emitChildren(ctx, node.children) }
+        return { body: emitChildren(ctx, node.id, node.children) }
       }
       // Adobe's mask: the topmost child clips the rest and is not itself drawn.
       const clipId = `maskclip-${safeId(node.id)}`
-      const kids = emitChildren(ctx, node.children.filter((c) => c !== node.maskId))
+      const kids = emitChildren(ctx, node.id, node.children.filter((c) => c !== node.maskId))
 
       // An imported <mask> modulates by luminance or alpha; it is not an
       // outline clip, and flattening it to one would change the artwork.
@@ -407,7 +556,7 @@ function emitBody(ctx: EmitContext, node: DesignNode): { body: string; attrs?: s
       // Emitted as real repeated vector, one <g> per cell. The source markup is
       // built once and reused, so a 10x10 grid does not serialise its contents
       // a hundred times over.
-      const cellMarkup = emitChildren(ctx, node.children)
+      const cellMarkup = emitChildren(ctx, node.id, node.children)
       if (!cellMarkup) return { body: '' }
       const size = repeatGridSize(node)
       const clipId = `rgclip-${safeId(node.id)}`

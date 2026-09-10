@@ -23,12 +23,13 @@
  */
 
 import {
-  alignSelection, canMaskSelection, canOutlineStrokeSelection, clearGuides, copyGuides,
-  deleteSelection, distributeSelection, flipSelection, groupSelection, hasCopiedGuides,
-  maskWithShape, orderCommand, outlineStrokeSelection, pasteGuides, rotateSelection,
-  setGuidesLocked, setLocked, setMarkedForExport, setVisibility, ungroupMask,
-  ungroupSelection,
+  alignSelection, canMaskSelection, canOutlineStrokeSelection, canReset3d, clearGuides,
+  copyGuides, deleteSelection, distributeSelection, flipSelection, groupSelection,
+  hasCopiedGuides, maskWithShape, orderCommand, outlineStrokeSelection, pasteGuides,
+  reset3dTransforms, rotateSelection, setGuidesLocked, setLocked, setMarkedForExport,
+  setVisibility, ungroupMask, ungroupSelection,
 } from '../history/Commands'
+import { anyIn3d } from '../document/Scene3D'
 import { runBooleanOperation } from '../history/BooleanCommands'
 import { canImageTrace, openImageTrace } from '../history/TraceCommands'
 import { copySelection, cutSelection, duplicateInPlace } from '../state/Clipboard'
@@ -148,6 +149,7 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
   const allLocked = has && nodes.every((n) => n!.locked)
   const allHidden = has && nodes.every((n) => !n!.visible)
   const allMarked = has && nodes.every((n) => n!.markedForExport)
+  const in3d = anyIn3d(doc, selection)
   const guideBoards = guideTargets(doc, selection, at)
 
   if (!has) {
@@ -219,12 +221,21 @@ export function buildContextMenu(at: Vec2): MenuItemSpec[] {
       kind: 'submenu',
       label: t('menu.transform'),
       items: [
-        { label: t('menu.flipHorizontal'), onSelect: () => flipSelection('h') },
-        { label: t('menu.flipVertical'), onSelect: () => flipSelection('v') },
+        // Adobe does not flip an object in 3D.
+        { label: t('menu.flipHorizontal'), disabled: in3d, onSelect: () => flipSelection('h') },
+        { label: t('menu.flipVertical'), disabled: in3d, onSelect: () => flipSelection('v') },
         { kind: 'separator' },
         { label: t('menu.rotate90cw'), onSelect: () => rotateSelection(90) },
         { label: t('menu.rotate90ccw'), onSelect: () => rotateSelection(-90) },
         { label: t('menu.rotate180'), onSelect: () => rotateSelection(180) },
+        { kind: 'separator' },
+        // Adobe: "Right-click the selected object and Reset 3D Transforms."
+        {
+          label: t('menu.reset3dTransforms'),
+          shortcut: shortcutLabel('transform.reset3d'),
+          disabled: !canReset3d(),
+          onSelect: () => reset3dTransforms(),
+        },
       ],
     },
     {

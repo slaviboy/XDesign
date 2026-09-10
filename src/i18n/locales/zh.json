@@ -68,6 +68,8 @@
   "menu.rotate90cw": "顺时针旋转 90°",
   "menu.rotate90ccw": "逆时针旋转 90°",
   "menu.rotate180": "旋转 180°",
+  "menu.reset3dTransforms": "重置 3D 变换",
+  "menu.show3dTransforms": "显示 3D 变换",
   "menu.lock": "锁定",
   "menu.unlock": "解锁",
   "menu.hide": "隐藏",
