@@ -25,7 +25,7 @@
 
 import { test, expect } from '@playwright/test'
 import {
-  CANVAS, RED_PNG_BASE64, captureDownload, drawShape, dropFiles, modifier,
+  CANVAS, RED_PNG_BASE64, captureDownload, clickCanvas, dragOnCanvas, drawShape, dropFiles, modifier,
   nodesOfType, openApp, openExportDialog, readField, selectTool, setField,
 } from './helpers'
 
@@ -183,6 +183,75 @@ test('W and H track a resize in real time', async ({ page }) => {
   const midDrag = await readField(page, 'W')
   await page.mouse.up()
   expect(midDrag).toBeGreaterThan(w0 + 60)
+})
+
+/**
+ * The selection frame's corners and the corners of the drawn path's own box,
+ * both in client pixels, TL TR BR BL — read off the elements themselves, so
+ * this is what is on screen rather than what either was computed from.
+ */
+async function frameAndShapeCorners(page: import('@playwright/test').Page) {
+  // Let the live flush and the overlay's redraw both land first.
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  return page.evaluate(() => {
+    const client = (el: SVGGraphicsElement, x: number, y: number) => {
+      const p = new DOMPoint(x, y).matrixTransform(el.getScreenCTM()!)
+      return { x: p.x, y: p.y }
+    }
+    const frame = document.querySelector('.selection-frame') as SVGPolygonElement
+    const frameCorners = Array.from({ length: frame.points.numberOfItems }, (_, i) => {
+      const p = frame.points.getItem(i)
+      return client(frame, p.x, p.y)
+    })
+    const path = document.querySelector('.document-layer [data-node-id] path') as SVGPathElement
+    const b = path.getBBox()
+    const shapeCorners = [
+      client(path, b.x, b.y),
+      client(path, b.x + b.width, b.y),
+      client(path, b.x + b.width, b.y + b.height),
+      client(path, b.x, b.y + b.height),
+    ]
+    return { frameCorners, shapeCorners }
+  })
+}
+
+const apart = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y)
+
+test('a rotated path whose points moved past its corner keeps its frame on it while resized', async ({ page }) => {
+  // A rectangle whose top-left point is dragged up and to the left, so its
+  // geometry no longer starts at its own origin, and then turned. Resizing it
+  // drew the frame a whole offset away from the shape until the mouse came up,
+  // and the corner that should have stayed put crept as the drag went on.
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 250, y: 220 }, { x: 370, y: 380 })
+  await selectTool(page, 'direct-select')
+  await clickCanvas(page, { x: 310, y: 300 })
+  await expect(page.locator('.path-points .anchor-point')).toHaveCount(4)
+  await dragOnCanvas(page, { x: 250, y: 220 }, { x: 200, y: 190 })
+  await selectTool(page, 'select')
+  await setField(page, '∠', 45)
+  await expect(nodesOfType(page, 'path')).toHaveCount(1)
+
+  const before = await frameAndShapeCorners(page)
+  const handle = await centreOf(page.locator('[data-handle="se"]'))
+  await page.mouse.move(handle.x, handle.y)
+  await page.mouse.down()
+  await page.mouse.move(handle.x + 40, handle.y + 70, { steps: 10 })
+
+  const during = await frameAndShapeCorners(page)
+  for (let i = 0; i < 4; i++) {
+    expect(apart(during.frameCorners[i]!, during.shapeCorners[i]!), `corner ${i} mid-drag`).toBeLessThan(1)
+  }
+  // The handle opposite the one being dragged is the one that must not move.
+  expect(apart(during.shapeCorners[0]!, before.shapeCorners[0]!), 'pinned corner').toBeLessThan(1)
+
+  await page.mouse.up()
+  // Letting go changes nothing: what was drawn during the drag is the result.
+  const after = await frameAndShapeCorners(page)
+  for (let i = 0; i < 4; i++) {
+    expect(apart(after.frameCorners[i]!, during.frameCorners[i]!), `frame corner ${i} on release`).toBeLessThan(1)
+    expect(apart(after.shapeCorners[i]!, during.shapeCorners[i]!), `shape corner ${i} on release`).toBeLessThan(1)
+  }
 })
 
 test('rotation tracks a corner rotation in real time', async ({ page }) => {

@@ -19,11 +19,12 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { applyToPoint, invert, multiply, isOrthogonal } from '@/geometry/Matrix'
 import { localMatrix, worldMatrix, geometryBounds } from '@/document/SceneGraph'
 import { transformFromMatrix } from '@/document/DocumentModel'
-import { createDocument, createRect, createEllipse } from '@/document/NodeFactory'
+import { createDocument, createRect, createEllipse, createPath } from '@/document/NodeFactory'
 import { addNode, groupNodes, ungroupNode } from '@/document/DocumentModel'
 import { replaceDocument, getDoc, transaction } from '@/state/DocumentStore'
 import { setSelection } from '@/state/EditorStore'
-import { beginDrag, updateDrag, commitDrag } from '@/tools/DragSession'
+import { beginDrag, updateDrag, commitDrag, getLiveBox, getLiveMatrix } from '@/tools/DragSession'
+import { pathBounds } from '@/geometry/PathUtils'
 import type { DesignDocument } from '@/document/types'
 
 function freshDoc(): DesignDocument {
@@ -131,6 +132,45 @@ describe('resize with rotation', () => {
     const anchorAfter = applyToPoint(worldMatrix(getDoc(), rect.id), { x: 0, y: 0 })
     expect(anchorAfter.x).toBeCloseTo(anchorBefore.x, 4)
     expect(anchorAfter.y).toBeCloseTo(anchorBefore.y, 4)
+  })
+
+  it('frames a path whose geometry starts off its origin where the path is, mid-drag and after', () => {
+    // A rectangle whose top-left point was dragged up and to the left, so its
+    // data begins at a negative offset. The frame used to be drawn from (0,0)
+    // for the whole drag, and the path was scaled about (0,0) — so the frame sat
+    // a whole offset away and the pinned corner crept, until the pointer came up.
+    const d = 'M-53.9714-26.111355L94.2773 0 94.2773 155.709535 0 155.709535-53.9714-26.111355Z'
+    const b = pathBounds(d)
+    const path = createPath(d, { x: 300, y: 200, width: b.width, height: b.height, rotation: 45.4 })
+    transaction('add', (draft) => { addNode(draft, path, draft.rootId) })
+
+    const doc = getDoc()
+    const M0 = worldMatrix(doc, path.id)
+    const corner = (m: typeof M0, box: typeof b, fx: number, fy: number) =>
+      applyToPoint(m, { x: box.x + box.width * fx, y: box.y + box.height * fy })
+    const pinned = corner(M0, b, 0, 0)
+    const pointer = corner(M0, b, 1.3, 1.2)
+
+    beginDrag(doc, [path.id], 'resize', corner(M0, b, 1, 1), 'se')
+    const mats = updateDrag(pointer, { constrain: false, fromCenter: false })
+
+    // Mid-drag: the frame's box, through the live matrix.
+    const live = getLiveMatrix(path.id)!
+    const box = getLiveBox(path.id)!
+    expect(corner(live, box, 0, 0).x).toBeCloseTo(pinned.x, 4)
+    expect(corner(live, box, 0, 0).y).toBeCloseTo(pinned.y, 4)
+    expect(corner(live, box, 1, 1).x).toBeCloseTo(pointer.x, 4)
+    expect(corner(live, box, 1, 1).y).toBeCloseTo(pointer.y, 4)
+
+    // After: the path's own geometry, which is what the frame measures at rest.
+    commitDrag(mats)
+    const M1 = worldMatrix(getDoc(), path.id)
+    const after = getDoc().nodes[path.id]!
+    const drawn = after.type === 'path' ? pathBounds(after.d) : b
+    expect(corner(M1, drawn, 0, 0).x).toBeCloseTo(pinned.x, 4)
+    expect(corner(M1, drawn, 0, 0).y).toBeCloseTo(pinned.y, 4)
+    expect(corner(M1, drawn, 1, 1).x).toBeCloseTo(pointer.x, 4)
+    expect(corner(M1, drawn, 1, 1).y).toBeCloseTo(pointer.y, 4)
   })
 })
 

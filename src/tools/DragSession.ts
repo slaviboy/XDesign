@@ -177,6 +177,22 @@ export function getLiveSize(id: NodeId): { width: number; height: number } | und
 }
 
 /**
+ * The in-flight box of a node being resized, in its local space.
+ *
+ * The SIZE alone is not enough to draw a frame from: a path whose points have
+ * been dragged above or left of where it started keeps geometry that begins at
+ * a negative offset, and the resize pins that corner where it is. Framing
+ * `(0, 0, width, height)` instead put the handles a whole offset away from the
+ * shape until the pointer came up and the document was measured again.
+ */
+export function getLiveBox(id: NodeId): Bounds | undefined {
+  const size = session?.liveSizes.get(id)
+  const snap = size && session!.nodes.find((n) => n.id === id)
+  if (!size || !snap) return undefined
+  return { x: snap.content.x, y: snap.content.y, width: size.width, height: size.height }
+}
+
+/**
  * The resize option a text node has taken on for the duration of this gesture.
  *
  * The renderer needs it as much as the size does: a box that is becoming Auto
@@ -640,7 +656,6 @@ export function usesIntrinsicSize(type: DesignNode['type']): boolean {
 }
 
 function livePathData(snap: NodeSnapshot, width: number, height: number): string | null {
-  const t = snap.transform
   switch (snap.type) {
     case 'rect':
       return rectPath(width, height, snap.cornerRadius ?? 0)
@@ -656,23 +671,53 @@ function livePathData(snap: NodeSnapshot, width: number, height: number): string
       )
     case 'path':
       if (!snap.d) return null
-      return transformPath(
-        snap.d,
-        scaling(t.width > 0 ? width / t.width : 1, t.height > 0 ? height / t.height : 1),
-      )
+      return transformPath(snap.d, geometryScale(snap, width, height))
     case 'image':
       // The clip the picture is drawn through, which is what gives it its
       // corner rounding.
       return rectPath(width, height, snap.cornerRadius ?? 0)
     case 'line': {
       if (!snap.line) return null
-      const kx = t.width > 0 ? width / t.width : 1
-      const ky = t.height > 0 ? height / t.height : 1
-      return linePath(snap.line.x1 * kx, snap.line.y1 * ky, snap.line.x2 * kx, snap.line.y2 * ky)
+      const line = scaledLine(snap.line, geometryScale(snap, width, height))
+      return linePath(line.x1, line.y1, line.x2, line.y2)
     }
     default:
       return null
   }
+}
+
+/**
+ * A resize as applied to a path's or a line's own coordinates: about the corner
+ * of the geometry, and by how far the geometry's box — the box the handles are
+ * on — has grown.
+ *
+ * About the corner because that is what applyResize's re-anchor assumes: it
+ * moves the content box's corner, not the local origin. The two only coincide
+ * for geometry that starts at (0, 0), and a path stops doing so the moment a
+ * point is dragged above or left of it. Scaling about the origin instead slid
+ * the "pinned" corner by the offset times the growth, so the shape crept away
+ * from the pointer while it was being dragged.
+ *
+ * By the content box rather than transform.width/height, because the handle
+ * that was grabbed sits on the content box; when the stored size disagreed with
+ * the geometry, the shape moved at a different rate from the pointer.
+ */
+function geometryScale(snap: NodeSnapshot, width: number, height: number): Mat2D {
+  const c = snap.content
+  return compose(
+    translation(-c.x, -c.y),
+    scaling(c.width > 0 ? width / c.width : 1, c.height > 0 ? height / c.height : 1),
+    translation(c.x, c.y),
+  )
+}
+
+function scaledLine(
+  line: NonNullable<NodeSnapshot['line']>,
+  m: Mat2D,
+): { x1: number; y1: number; x2: number; y2: number } {
+  const a = applyToPoint(m, { x: line.x1, y: line.y1 })
+  const b = applyToPoint(m, { x: line.x2, y: line.y2 })
+  return { x1: a.x, y1: a.y, x2: b.x, y2: b.y }
 }
 
 // ---------------------------------------------------------------------------
@@ -714,19 +759,15 @@ export function commitDrag(finalMatrices: Map<NodeId, Mat2D> | null): boolean {
         // A group records no size — its scale is in `local` — and falls through
         // to the branch below, which keeps width/height as they were.
         const size = recorded
-        const kx = snap.transform.width > 0 ? size.width / snap.transform.width : 1
-        const ky = snap.transform.height > 0 ? size.height / snap.transform.height : 1
 
         // Paths and lines have no parametric size to preserve, so the scale is
         // baked into their geometry (losslessly — svgpath keeps arcs as arcs).
+        // The same scale the preview drew, so letting go changes nothing.
         if (node.type === 'path' && snap.d) {
-          node.d = transformPath(snap.d, scaling(kx, ky))
+          node.d = transformPath(snap.d, geometryScale(snap, size.width, size.height))
         }
         if (node.type === 'line' && snap.line) {
-          node.x1 = snap.line.x1 * kx
-          node.y1 = snap.line.y1 * ky
-          node.x2 = snap.line.x2 * kx
-          node.y2 = snap.line.y2 * ky
+          Object.assign(node, scaledLine(snap.line, geometryScale(snap, size.width, size.height)))
         }
         node.transform = transformFromMatrix(
           local,

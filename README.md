@@ -319,6 +319,16 @@ is what the children inherit. Every other node keeps its size in width/height so
 corner radii and text layout do not scale with the box; an artboard and a repeat grid draw
 their own box, so they resize like a shape.
 
+The box being resized is the geometry's own, and it need not start at the local origin. A path
+begins life with its data rebased to `(0, 0)`, but drag a point above or left of that and the
+data starts at a negative offset — which is how a rectangle with one corner pulled out ends up.
+The re-anchor moves *that* box's corner, so the path's coordinates are scaled about that corner
+too, and the frame is drawn from the corner and the live size together. Both used to assume the
+origin: the path was scaled about `(0, 0)`, so the corner that should have stayed pinned crept
+by the offset times the growth, and the frame was drawn at `(0, 0, w, h)`, a whole offset away
+from the shape, until the mouse came up and the document was measured again. The drag session
+now publishes the in-flight box, corner included, and the frame and the inspector both read it.
+
 ### Three different bounding boxes
 
 Conflating these produces a whole family of "the export is clipped" bugs:

@@ -47,7 +47,14 @@ import { fitTextHeight } from '../history/Commands'
 import { measureBetween, type AxisDistance } from '../geometry/Distance'
 import { unionAll } from '../geometry/Bounds'
 import { angleBetween, rotationCursor } from './cursors'
-import { getDragMode, getLiveMatrix, getLiveRotation, getLiveSize, isDragging } from '../tools/DragSession'
+import {
+  getDragMode,
+  getLiveBox,
+  getLiveMatrix,
+  getLiveRotation,
+  getLiveSize,
+  isDragging,
+} from '../tools/DragSession'
 import { getEditingSubpaths } from '../tools/PathEditing'
 import { subpathsToPath } from '../geometry/PathPoints'
 import { transformPath } from '../geometry/PathUtils'
@@ -222,20 +229,20 @@ function computeFrame(
     if (!node) return null
     // Live matrices win during a drag; the document has not been written yet.
     let world = getLiveMatrix(id) ?? cache.world(doc, id)
-    const liveSize = getLiveSize(id)
+    // A resize in flight owns the box, corner included: a path's geometry need
+    // not start at its local origin, and the resize keeps it where it starts.
+    const liveBox = getLiveBox(id)
     // A group's stored box is written once and never refitted, so framing it
     // draws handles that are not on the artwork the moment a child moves.
     // Measuring the contents puts them back on it.
-    let local = liveSize
-      ? { x: 0, y: 0, width: liveSize.width, height: liveSize.height }
-      : localContentBox(doc, node)
+    let local = liveBox ?? localContentBox(doc, node)
 
     // A mask group shows only what its mask reveals, so the frame is the
     // mask's — framing the union would draw a rectangle round artwork that is
     // hidden. Composed from the group's live matrix rather than read off the
     // mask directly, so it still tracks a drag.
     const mask = isMaskGroup(node) ? doc.nodes[node.maskId] : undefined
-    if (mask && !liveSize) {
+    if (mask && !liveBox) {
       world = multiply(world, localMatrix(mask.transform))
       local = localContentBox(doc, mask)
     }

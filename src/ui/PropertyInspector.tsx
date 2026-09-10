@@ -66,7 +66,7 @@ import {
 import { applyToPoint, decompose, invert, multiply, type Mat2D, type Vec2 } from '../geometry/Matrix'
 import { transformBounds, unionAll, type Bounds } from '../geometry/Bounds'
 import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
-import { getLiveMatrix, getLiveSize, usesIntrinsicSize } from '../tools/DragSession'
+import { getLiveBox, getLiveMatrix, getLiveSize, usesIntrinsicSize } from '../tools/DragSession'
 import { isGradient as isGradientPaint } from '../canvas/paint'
 import { getLiveRadius } from '../tools/RadiusSession'
 import { getLiveStarRatio } from '../tools/StarRatioSession'
@@ -543,23 +543,6 @@ function liveLocalMatrix(doc: DesignDocument, node: DesignNode): Mat2D | null {
 }
 
 /**
- * How much an in-flight resize has scaled the node's local geometry.
- *
- * `null` when nothing is being resized, and also when the node's drawn geometry
- * does not follow its intrinsic box — a group keeps its children at their own
- * sizes during a resize, so scaling its readout would report a size that is not
- * on the canvas.
- */
-function liveGeometryScale(node: DesignNode): { kx: number; ky: number } | null {
-  const size = getLiveSize(node.id)
-  if (!size || !usesIntrinsicSize(node.type)) return null
-  return {
-    kx: node.transform.width > 0 ? size.width / node.transform.width : 1,
-    ky: node.transform.height > 0 ? size.height / node.transform.height : 1,
-  }
-}
-
-/**
  * The world position of the top-left corner of the artboard a node sits on.
  *
  * Zero for a node on the bare pasteboard, and zero for an artboard itself —
@@ -588,19 +571,16 @@ function liveBounds(doc: DesignDocument, node: DesignNode): Bounds {
   const live = getLiveMatrix(node.id)
   if (!live) return geometryBounds(doc, node.id)
 
-  const k = liveGeometryScale(node)
-  if (!k) return boundsWithWorld(doc, node, live)
+  // Only a node whose drawn geometry follows its box takes the resize's box. A
+  // group keeps its children at their own sizes during a resize, so reading its
+  // box would report a size that is not on the canvas.
+  const box = usesIntrinsicSize(node.type) ? getLiveBox(node.id) : undefined
+  if (!box) return boundsWithWorld(doc, node, live)
 
-  // A resize scales the local geometry about the local ORIGIN, not about the
-  // geometry's own bbox corner — which is exactly what livePathData draws — so
-  // the offset scales with it. Assuming the bbox started at (0,0) put X/Y adrift
-  // for any path whose data had drifted off the origin. Only nodes whose drawn
-  // geometry follows the intrinsic box reach here, so this is never a container.
-  const base = localGeometryBounds(node)
-  return transformBounds(
-    { x: base.x * k.kx, y: base.y * k.ky, width: base.width * k.kx, height: base.height * k.ky },
-    live,
-  )
+  // The same box the frame is drawn from, corner included. Assuming the
+  // geometry started at (0,0) put X/Y adrift for any path whose data had
+  // drifted off the origin.
+  return transformBounds(box, live)
 }
 
 /**
