@@ -295,6 +295,36 @@ test('the pen marks where a click would add a point', async ({ page }) => {
   await expect(page.locator('.insert-preview')).toHaveCount(0)
 })
 
+test('a click on a line cuts it exactly where the marker is', async ({ page }) => {
+  // A line from the Line tool, opened by picking the pen up with it selected.
+  await selectTool(page, 'line')
+  await dragOut(page, 200, 200, 500, 350)
+  await selectTool(page, 'pen')
+  await expect(page.locator('.anchor-point')).toHaveCount(2)
+
+  // Well off the middle: the only place the cut used to agree with the marker.
+  const hover = await pt(page, 200 + 300 * 0.15, 200 + 150 * 0.15)
+  await page.mouse.move(hover.x, hover.y)
+  const marker = page.locator('.insert-preview')
+  await expect(marker).toHaveCount(1)
+  // Filled, like the anchor it is about to become.
+  expect(await marker.evaluate((c) => getComputedStyle(c).fill)).toBe('rgb(255, 255, 255)')
+  const m = (await marker.boundingBox())!
+  const promised = { x: m.x + m.width / 2, y: m.y + m.height / 2 }
+
+  await page.mouse.down()
+  await page.mouse.up()
+  await expect(page.locator('.anchor-point')).toHaveCount(3)
+  const anchors = await page.locator('.anchor-point').evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    }),
+  )
+  const miss = Math.min(...anchors.map((a) => Math.hypot(a.x - promised.x, a.y - promised.y)))
+  expect(miss).toBeLessThan(1)
+})
+
 test('clicking a second path by its end joins the two into one object', async ({ page }) => {
   await click(page, 150, 150)
   await click(page, 250, 150)
@@ -461,13 +491,13 @@ test('the pen keeps one cursor whatever it is over', async ({ page }) => {
   // one; on an open end, where it carries on drawing; and on empty canvas.
   for (const [x, y] of [[320, 290], [320, 200], [200, 200], [600, 500]] as const) {
     const p = await pt(page, x, y)
-    await expect.poll(() => cursorAt(page, p), `at ${x},${y}`).toBe('crosshair')
+    await expect.poll(() => cursorAt(page, p), `at ${x},${y}`).toBe('default')
   }
 
   // And while drawing, over the path being built.
   await click(page, 600, 500)
   const next = await pt(page, 650, 520)
-  await expect.poll(() => cursorAt(page, next)).toBe('crosshair')
+  await expect.poll(() => cursorAt(page, next)).toBe('default')
 })
 
 test('the pen keeps its cursor over the frame of something it cannot edit', async ({ page }) => {
@@ -490,7 +520,7 @@ test('the pen keeps its cursor over the frame of something it cannot edit', asyn
   for (const handle of ['se', 'n']) {
     const box = (await page.locator(`.resize-handle[data-handle="${handle}"]`).boundingBox())!
     const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
-    await expect.poll(() => cursorAt(page, centre), handle).toBe('crosshair')
+    await expect.poll(() => cursorAt(page, centre), handle).toBe('default')
   }
   // The same handle still says "resize" to the Select tool, whose it is.
   await selectTool(page, 'select')

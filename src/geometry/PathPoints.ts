@@ -349,8 +349,15 @@ export function insertPointAt(sub: PenSubpath, index: number, t: number): number
   // shape is identical — but the result is emitted as two curves, and a line
   // wearing handles bends the moment either neighbour is dragged. Cutting a
   // line in half should leave two lines.
+  //
+  // WHERE on the line is the cubic's answer at t, not t of the way along. The
+  // t comes from closestSegment, which walks every segment as a cubic, and a
+  // line walked as a cubic with its handles on its anchors does not go at a
+  // steady pace: a quarter of the way along is t ≈ 0.33. Cutting at the plain
+  // fraction put the new point that far from where the preview drew it — the
+  // two only agreed at the middle.
   if (a.outX === null && a.outY === null && b.inX === null && b.inY === null) {
-    const s = lerp(p0, p3)
+    const s = cubicAt(p0, p1, p2, p3, t)
     pts.splice(index + 1, 0, corner(s.x, s.y))
     return index + 1
   }

@@ -701,9 +701,10 @@ function withHover(hover: Vec2): PenSubpath | null {
 
 export const penTool: Tool = {
   id: 'pen',
-  // One cursor whatever it is over, drawing or editing: the anchors, the end
-  // hints and the insert preview are what say what a press will do.
-  cursor: 'crosshair',
+  // The ordinary arrow, and only that, whatever it is over, drawing or editing:
+  // the anchors, the end hints and the insert preview are what say what a
+  // press will do.
+  cursor: 'default',
   fixedCursor: true,
   label: 'Pen',
   shortcut: 'P',

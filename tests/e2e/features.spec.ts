@@ -935,6 +935,28 @@ test('panning at a zoom other than 100% still tracks the cursor', async ({ page 
 
 // -------------------------------------------------- dragging by the label --
 
+test('picking up a shape tool puts the selection down', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 420, y: 320 })
+  await expect(page.locator('.selection-frame')).toHaveCount(1)
+
+  // From the toolbar, for each of the four.
+  for (const tool of ['rect', 'ellipse', 'polygon', 'line']) {
+    await page.locator('.layer-row', { hasText: 'Rectangle' }).first().click()
+    await expect(page.locator('.selection-frame'), tool).toHaveCount(1)
+    await selectTool(page, tool)
+    await expect(page.locator('.selection-frame'), tool).toHaveCount(0)
+    await expect(page.locator('.layer-row.selected'), tool).toHaveCount(0)
+    await selectTool(page, 'select')
+  }
+
+  // And from the keyboard, which is the same tool being picked up.
+  await page.locator('.layer-row', { hasText: 'Rectangle' }).first().click()
+  await page.locator(CANVAS).hover({ position: { x: 700, y: 500 } })
+  await page.keyboard.press('e')
+  await expect(page.locator('.selection-frame')).toHaveCount(0)
+})
+
 test('an artboard can be dragged by its name, whatever tool is selected', async ({ page }) => {
   await openApp(page)
   // Deliberately not a selection tool: the label is chrome, and belongs to no tool.

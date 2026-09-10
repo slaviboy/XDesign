@@ -25,7 +25,7 @@ import { boundsFromPoints, contains, intersects, transformBounds, union, roundOu
 import { rotation, translation, compose } from '@/geometry/Matrix'
 import { rectPath, ellipsePath, polygonStarPath, simplifyPoints, smoothPolylineToPath } from '@/geometry/ShapeGeometry'
 import { pathBounds, pathRenderBounds, strokeInflate, pathLength, pointAtLength, reversePath, splitSubpaths, toCubicSegments, distanceToPath, pathOverlapsBounds } from '@/geometry/PathUtils'
-import { pathToSubpaths, subpathsToPath, insertPointAt, deletePoint, togglePointType, isSmooth, closestSegment, corner, clearHandle } from '@/geometry/PathPoints'
+import { pathToSubpaths, subpathsToPath, insertPointAt, deletePoint, togglePointType, isSmooth, closestSegment, corner, clearHandle, segmentPoint } from '@/geometry/PathPoints'
 import { computeSnap, candidatesFromBounds, snapToGrid, snapValue } from '@/geometry/Snapping'
 
 describe('colour', () => {
@@ -298,6 +298,27 @@ describe('path points', () => {
     expect(points[0]!.outX).toBeNull()
     expect(points[2]!.inX).toBeNull()
     expect(subpathsToPath(subs)).not.toContain('C')
+  })
+
+  it('cuts a straight segment exactly where the preview marks it, not only at the middle', () => {
+    // The click is measured by closestSegment and drawn by segmentPoint; the cut
+    // has to land on that same spot. It used to take t as a plain fraction of the
+    // line, which only matches the cubic the other two walk at the halfway point.
+    for (const along of [0.1, 0.25, 0.5, 0.8]) {
+      const subs = pathToSubpaths('M0 0 L240 120')
+      const click = { x: 240 * along, y: 120 * along + 3 }
+      const near = closestSegment(subs, click)!
+      const preview = segmentPoint(subs[0]!, near.index, near.t)!
+      insertPointAt(subs[0]!, near.index, near.t)
+      const cut = subs[0]!.points[1]!
+      expect(cut.x, `at ${along}`).toBeCloseTo(preview.x, 6)
+      expect(cut.y, `at ${along}`).toBeCloseTo(preview.y, 6)
+      // Which is the foot of the perpendicular from the click: 3 units off a
+      // line of slope 1/2 lands 1.2 further along and 0.6 further across.
+      expect(cut.x, `at ${along}`).toBeCloseTo(240 * along + 1.2, 3)
+      expect(cut.y, `at ${along}`).toBeCloseTo(120 * along + 0.6, 3)
+      expect(cut.inX).toBeNull()
+    }
   })
 
   it('still splits a curve as a curve', () => {

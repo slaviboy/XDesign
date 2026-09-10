@@ -36,7 +36,7 @@ import {
 } from '../document/NodeFactory'
 import { insertNode } from '../history/Commands'
 import { buildSnapContext, resolveSnap, snapAngle, type SnapContext } from './snapHelpers'
-import { editorStore, refreshOverlay, setEditor, setTool } from '../state/EditorStore'
+import { editorStore, refreshOverlay, setEditor, setSelection, setTool } from '../state/EditorStore'
 import type { DesignNode, Transform } from '../document/types'
 import type { Vec2 } from '../geometry/Matrix'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
@@ -184,6 +184,17 @@ export function createShapeTool(kind: ShapeKind): Tool {
     cursor: 'crosshair',
     label: LABELS[kind].label,
     shortcut: LABELS[kind].shortcut,
+
+    /**
+     * Put down whatever is selected. Reaching for a drawing tool means drawing
+     * something new, and the object left selected kept its frame and handles
+     * up to be knocked into, and the inspector showing a shape that is not the
+     * one about to be drawn. From the toolbar and from the key alike: both are
+     * the tool being picked up.
+     */
+    onActivate(): void {
+      setSelection([])
+    },
 
     onPointerDown(e: CanvasPointerEvent, ctx: ToolContext): void {
       const editor = editorStore.getState()

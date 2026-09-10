@@ -24,7 +24,8 @@ npm run preview  # serve the production build
 
 **Drawing** — rectangle, ellipse, polygon, line, pen (real cubic Béziers), pencil
 (smoothed freehand), text, artboard. Every tool in the rail is implemented; none of them
-are decorative.
+are decorative. Picking up the rectangle, ellipse, polygon or line — from the rail or by its
+key — puts down whatever was selected: what comes next is a new shape.
 
 **One Polygon tool**, as in XD — there is no separate Triangle or Star tool, because there
 is no separate shape. Corner Count 3 is a triangle, Star Ratio below 100% is a star, and
@@ -40,8 +41,9 @@ the first point instead of closing on it, and suppresses anchor snapping. Anchor
 the anchors around them, with a guide to say so. Hovering a path shows handles over its start
 and end — clicking one carries it on, and on a closed path it reopens the ring. `Enter` or a
 double-click ends an open path; `Escape` steps back from drawing to editing to neither. The pen
-keeps its one crosshair whatever it is over, handles included: the anchors, the end handles and
-the insert preview are what say what a press will do.
+keeps the ordinary arrow whatever it is over, handles included: the anchors, the end handles and
+the insert preview — a white dot on the outline — are what say what a press will do, and a
+click on the outline puts the new anchor exactly on that dot.
 
 **Two pointers** — the filled arrow selects and moves whole objects; the hollow one
 (**Direct Selection**, `D`) goes straight to the leaf and shows its points. A single click on

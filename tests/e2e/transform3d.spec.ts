@@ -137,7 +137,8 @@ test('the gizmo belongs to the Select tool', async ({ page }) => {
   await expect(page.locator('.gizmo-3d')).toHaveCount(1)
   // Under any other tool a press on it would draw rather than turn, so it is
   // not offered — the object stays selected, and the gizmo comes back with Select.
-  await selectTool(page, 'ellipse')
+  // (The Pencil, because a shape tool puts the selection down altogether.)
+  await selectTool(page, 'pencil')
   await expect(page.locator('.gizmo-3d')).toHaveCount(0)
   await selectTool(page, 'select')
   await expect(page.locator('.gizmo-3d')).toHaveCount(1)
