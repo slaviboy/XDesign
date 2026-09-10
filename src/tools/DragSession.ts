@@ -157,9 +157,8 @@ interface PerspectiveSnapshot {
    * does not move — with no projection to run backwards at all.
    */
   frameBox: Bounds | null
-  /** The frame the selection box is drawn in, and that box, at the press. */
+  /** The frame the selection box is drawn in, at the press. */
   frame0: Mat2D
-  frameBox0: Bounds | null
 }
 
 export interface DragSessionState {
@@ -207,6 +206,11 @@ export interface DragSessionState {
    */
   liveSizing: Map<NodeId, TextSizing>
   moved: boolean
+  /**
+   * The size the last frame of a perspective resize settled on — where the
+   * next frame's solve starts. See fitPerspectiveResize.
+   */
+  lastFit: { width: number; height: number } | null
 }
 
 let session: DragSessionState | null = null
@@ -338,6 +342,7 @@ export function beginDrag(
     liveSizes: new Map(),
     liveSizing: new Map(),
     moved: false,
+    lastFit: null,
   }
 
   liveMatrices = new Map()
@@ -360,10 +365,8 @@ function perspectiveSnapshot(doc: DesignDocument, node: DesignNode, startDoc: Ve
   const fromWorld = invertMat3(toWorld)
   const projectiveParent = !!parentMap && !isAffineMat3(parentMap)
   const ownCamera = mapping.space?.rootId === node.id
-  const frame0 = frameMatrix(doc, node.id)
   return {
-    frame0,
-    frameBox0: frameBounds(doc, node.id, frame0),
+    frame0: frameMatrix(doc, node.id),
     parentFromWorld: parentMap ? invertMat3(parentMap) : null,
     projectiveParent,
     fromWorld,
@@ -705,16 +708,25 @@ function pinAnchor(
 }
 
 /**
- * The size that puts a tilted shape's projected edge under the pointer.
+ * The size that keeps the grabbed point of a tilted shape under the pointer.
  *
- * The frame round a tilted shape is the bounds of its projection, and a
- * handle on it should behave like one on any frame: its edge goes where the
- * pointer goes, the opposite edge stays. Growing the flat box by the
- * pointer's travel does not quite do that, because growing it moves the
- * centre the camera looks at and the whole projection breathes. So the width
- * (and or height) is solved for directly: measure where the projected edge
- * lands for a size, correct by the slope, repeat — a few cheap projections,
- * converging in two or three steps because the relation is nearly linear.
+ * Growing the flat box by the pointer's travel is not quite enough, because
+ * growing it moves the centre the camera looks at and the whole projection
+ * breathes. So the size is solved for: find the width and height at which the
+ * point of the box that was grabbed — the corner, or the middle of the edge,
+ * that the handle stands for — lands where the pointer has taken it, with the
+ * opposite side pinned where it was.
+ *
+ * Three things keep that steady, and each one was a visible bug without it.
+ * The target is that point on the SHAPE, not the edge of the frame round it:
+ * the frame is the bounds of the projected corners, which corner makes each
+ * edge changes as the shape grows, and a kinked target sent the solve
+ * overshooting — the box leapt, shrank back and leapt again. Width and height
+ * are solved TOGETHER, with the full two-by-two slope, since in perspective
+ * each moves both coordinates of the point. And every frame starts from where
+ * the last one finished, so the size can only move as continuously as the
+ * pointer does; a step that does not bring the point closer is halved until
+ * it does.
  */
 function fitPerspectiveResize(
   s: DragSessionState,
@@ -726,17 +738,28 @@ function fitPerspectiveResize(
 ): { world: Mat2D; size: { width: number; height: number } } | null {
   const p = snap.persp
   const node = s.doc.nodes[snap.id]
-  if (!p || !p.frameBox0 || !node) return null
-  const inv = invert(p.frame0)
-  const now = applyToPoint(inv, currentDoc)
-  const start = applyToPoint(inv, s.startDoc)
-  const fb = p.frameBox0
-  const dx = now.x - start.x
-  const dy = now.y - start.y
+  if (!p || !node) return null
   const c = snap.content
-  // Which point of the box stays put, as a fraction of it.
+  // The point that stays put, and the point that was grabbed, as fractions
+  // of the box.
   const fx = options.fromCenter ? 0.5 : handle.includes('w') ? 1 : handle.includes('e') ? 0 : 0.5
   const fy = options.fromCenter ? 0.5 : handle.includes('n') ? 1 : handle.includes('s') ? 0 : 0.5
+  const gx = handle.includes('e') ? 1 : handle.includes('w') ? 0 : 0.5
+  const gy = handle.includes('s') ? 1 : handle.includes('n') ? 0 : 0.5
+  const freeW = handle.includes('e') || handle.includes('w')
+  const freeH = handle.includes('n') || handle.includes('s')
+
+  const grabbed = mapPoint(nodeMapping(s.doc, snap.id).toWorld, c.x + gx * c.width, c.y + gy * c.height)
+  if (!grabbed) return null
+  // Measured in the frame's own axes, so an edge handle follows only the
+  // pointer's motion across that edge, however the object is turned.
+  const toFrame = invert(p.frame0)
+  const target = applyToPoint(toFrame, {
+    x: grabbed.x + currentDoc.x - s.startDoc.x,
+    y: grabbed.y + currentDoc.y - s.startDoc.y,
+  })
+  // Shift keeps the proportions: one unknown, a scale of the whole box.
+  const proportional = options.constrain && freeW && freeH
 
   const build = (width: number, height: number) => {
     const reanchor = compose(
@@ -750,41 +773,79 @@ function fitPerspectiveResize(
       ...node,
       transform: transformFromMatrix(local, width, height, snap.transform.originX, snap.transform.originY),
     } as DesignNode
-    const box = frameBounds(
-      patchDocument(s.doc, new Map([[snap.id, resized]])),
-      snap.id,
-      p.frame0,
-      (id) => (id === snap.id ? { x: c.x, y: c.y, width, height } : undefined),
-    )
-    return { world, box }
+    const moved = patchDocument(s.doc, new Map([[snap.id, resized]]))
+    // The resized box keeps its corner at (c.x, c.y) in its own space.
+    const at = mapPoint(nodeMapping(moved, snap.id).toWorld, c.x + gx * width, c.y + gy * height)
+    if (!at) return null
+    const q = applyToPoint(toFrame, at)
+    return { world, rx: freeW ? q.x - target.x : 0, ry: freeH ? q.y - target.y : 0 }
   }
-  // How far the dragged edge is from where the pointer put it.
-  const offX = (b: Bounds) =>
-    handle.includes('e') ? b.x + b.width - (fb.x + fb.width + dx) : handle.includes('w') ? b.x - (fb.x + dx) : 0
-  const offY = (b: Bounds) =>
-    handle.includes('s') ? b.y + b.height - (fb.y + fb.height + dy) : handle.includes('n') ? b.y - (fb.y + dy) : 0
+  const norm = (r: { rx: number; ry: number }) => Math.hypot(r.rx, r.ry)
 
-  let width = estimate.width
-  let height = estimate.height
-  for (let iter = 0; iter < 4; iter++) {
-    const cur = build(width, height)
-    if (!cur.box) return null
-    const ex = offX(cur.box)
-    const ey = offY(cur.box)
-    if (Math.abs(ex) < 0.01 && Math.abs(ey) < 0.01) return { world: cur.world, size: { width, height } }
-    if (ex !== 0) {
-      const probe = build(width + 1, height).box
-      const slope = probe ? offX(probe) - ex : 0
-      if (Math.abs(slope) > 1e-6) width = Math.max(0.5, width - ex / slope)
+  // Continue from the last frame; the first frame starts from the estimate.
+  let width = s.lastFit?.width ?? estimate.width
+  let height = s.lastFit?.height ?? estimate.height
+  if (proportional) height = width * (c.height / Math.max(1e-6, c.width))
+  let cur = build(width, height)
+  if (!cur) return null
+
+  for (let iter = 0; iter < 8 && norm(cur) > 0.01; iter++) {
+    const e = Math.max(0.25, 1e-3 * Math.max(width, height))
+    let dw = 0
+    let dh = 0
+    if (proportional) {
+      // One unknown, the scale; follow whichever way the pointer moved more.
+      const k = c.height / Math.max(1e-6, c.width)
+      const probe = build(width + e, (width + e) * k)
+      if (!probe) break
+      const useX = Math.abs(cur.rx) >= Math.abs(cur.ry)
+      const slope = useX ? (probe.rx - cur.rx) / e : (probe.ry - cur.ry) / e
+      if (Math.abs(slope) < 1e-9) break
+      dw = -(useX ? cur.rx : cur.ry) / slope
+      dh = dw * k
+    } else {
+      // The slope of the grabbed point in the frame's x and y, per unit of
+      // width and of height.
+      const pw = freeW ? build(width + e, height) : null
+      const ph = freeH ? build(width, height + e) : null
+      if ((freeW && !pw) || (freeH && !ph)) break
+      const a = pw ? (pw.rx - cur.rx) / e : 0
+      const cc = pw ? (pw.ry - cur.ry) / e : 0
+      const b = ph ? (ph.rx - cur.rx) / e : 0
+      const d = ph ? (ph.ry - cur.ry) / e : 0
+      if (freeW && freeH) {
+        const det = a * d - b * cc
+        if (Math.abs(det) < 1e-12) break
+        dw = (-cur.rx * d + cur.ry * b) / det
+        dh = (cur.rx * cc - cur.ry * a) / det
+      } else if (freeW) {
+        if (Math.abs(a) < 1e-9) break
+        dw = -cur.rx / a
+      } else {
+        if (Math.abs(d) < 1e-9) break
+        dh = -cur.ry / d
+      }
     }
-    if (ey !== 0) {
-      const probe = build(width, height + 1).box
-      const slope = probe ? offY(probe) - ey : 0
-      if (Math.abs(slope) > 1e-6) height = Math.max(0.5, height - ey / slope)
+    // Damped: only a step that brings the point closer is taken.
+    let step = 1
+    let next = null
+    while (step > 1 / 64) {
+      const w = Math.max(0.5, width + dw * step)
+      const h = Math.max(0.5, height + dh * step)
+      const trial = build(w, h)
+      if (trial && norm(trial) < norm(cur)) {
+        next = { w, h, trial }
+        break
+      }
+      step /= 2
     }
+    if (!next) break
+    width = next.w
+    height = next.h
+    cur = next.trial
   }
-  const last = build(width, height)
-  return last.box ? { world: last.world, size: { width, height } } : null
+  s.lastFit = { width, height }
+  return { world: cur.world, size: { width, height } }
 }
 
 /**

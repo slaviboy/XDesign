@@ -1618,8 +1618,14 @@ object that owns the camera, so it still turns with that object's 2D rotation. A
 tilted parent is measured in the parent's own plane, so what is dragged stays under the pointer.
 Resizing a tilted group scales its projected picture, which is exact; a tilted shape grows its
 own flat box — so its stroke and corners are not scaled — and since that moves the centre the
-camera looks at, the size is solved for until the projected edge is under the pointer, and the
-opposite side is put back where it was. The gizmo writes nothing until release, like every drag:
+camera looks at, the size is solved for until the grabbed corner or edge of the shape is under
+the pointer, with the opposite side put back where it was. The target is that point on the
+shape, not the edge of the frame round it, and that choice is load-bearing: the frame is the
+bounds of the projected corners, which corner makes each edge changes as the shape grows, and
+solving against a target with a kink in it overshot — the box leapt, shrank back and leapt again
+under a perfectly steady drag. Width and height are solved together, with the full two-by-two
+slope, and each frame starts from where the last one finished, so the size moves as continuously
+as the pointer. The gizmo writes nothing until release, like every drag:
 the few nodes a gesture holds are patched into a layered copy of the document each frame, and the
 canvas, the frame and the inspector all read that one copy, so they cannot disagree.
 

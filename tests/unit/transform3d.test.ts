@@ -48,7 +48,7 @@ import {
   setTransform3d,
 } from '../../src/history/Commands'
 import { beginTransform3d, commitTransform3d, getLiveTransform3d, updateTransform3d } from '../../src/tools/Transform3dSession'
-import { beginDrag, commitDrag, updateDrag } from '../../src/tools/DragSession'
+import { beginDrag, commitDrag, getLiveSize, updateDrag } from '../../src/tools/DragSession'
 import { liveDocument } from '../../src/tools/liveDocument'
 
 function docWith(...build: Array<(doc: DesignDocument) => void>): DesignDocument {
@@ -252,6 +252,44 @@ describe('gestures on something in perspective', () => {
     // since growing the box moves the centre the camera looks at.
     const eastAfter = localToWorld(getDoc(), id, { x: node.transform.width, y: 50 })!
     expect(Math.abs(eastAfter.x - (east.x + 40))).toBeLessThan(0.05)
+  })
+
+  it('a tilted shape grows steadily under a steady drag — no leap and no shrinking back', () => {
+    // The regression: the size used to be solved against the edge of the frame
+    // round the projection, which kinks as a different corner becomes the
+    // extreme one, and the solve overshot — the box leapt, shrank back and
+    // leapt again while the pointer moved smoothly.
+    // What a 1600 x 1000 photo imports as, dragged the way a hand drags: the
+    // size at which the old solve first leapt.
+    let id = ''
+    replaceDocument(docWith((d) => {
+      const image = createRect({ x: 100, y: 100, width: 900, height: 562 })
+      image.transform3d = { rotateX: 10, rotateY: 25, z: 0 }
+      addNode(d, image, d.rootId)
+      id = image.id
+    }))
+    const doc = getDoc()
+    const corner = localToWorld(doc, id, { x: 900, y: 562 })!
+    expect(beginDrag(doc, [id], 'resize', corner, 'se')).toBe(true)
+    let last = { width: 900, height: 562 }
+    let mats = null
+    const step = { x: 6.67, y: 4.17 }
+    for (let i = 1; i <= 90; i++) {
+      mats = updateDrag({ x: corner.x + i * step.x, y: corner.y + i * step.y }, noMods)
+      const size = getLiveSize(id)!
+      expect(size.width).toBeGreaterThanOrEqual(last.width - 1e-6)
+      expect(size.height).toBeGreaterThanOrEqual(last.height - 1e-6)
+      // No step grows the box by much more than the pointer moved.
+      expect(size.width - last.width).toBeLessThan(step.x * 2)
+      expect(size.height - last.height).toBeLessThan(step.y * 3)
+      last = size
+    }
+    commitDrag(mats)
+    // And the grabbed corner ended up under the pointer.
+    const node = getDoc().nodes[id]!
+    const landed = localToWorld(getDoc(), id, { x: node.transform.width, y: node.transform.height })!
+    expect(landed.x).toBeCloseTo(corner.x + 90 * step.x, 1)
+    expect(landed.y).toBeCloseTo(corner.y + 90 * step.y, 1)
   })
 
   it('a child moved across a tilted card follows the pointer on screen', () => {
