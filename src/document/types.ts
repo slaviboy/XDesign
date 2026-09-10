@@ -284,10 +284,11 @@ export type BlendMode =
  * Offsets are in the node's LOCAL units and may be negative; blur may not be.
  * `visible` is the checkbox in the Properties panel: it turns the effect off
  * without discarding the settings, exactly as Adobe describes.
+ *
+ * Which kind of shadow it is is not stored on it: that is decided by the field
+ * of the Style it is kept in (SHADOW_FIELD).
  */
 export interface ShadowEffect {
-  /** Drop shadow (outside the shape) or inner shadow (inside it). */
-  kind: 'drop' | 'inner'
   x: number
   y: number
   blur: number
@@ -295,8 +296,23 @@ export interface ShadowEffect {
   visible: boolean
 }
 
+/** Drop shadow (cast outside the shape) or inner shadow (inside its edge). */
+export type ShadowKind = 'drop' | 'inner'
+
+/**
+ * Where each kind of shadow lives on a Style.
+ *
+ * Two fields rather than one shadow with a kind, because Adobe lists Drop
+ * Shadow and Inner Shadow as two separate effects and an object can carry both
+ * at once — a pressed, neumorphic button is exactly that.
+ */
+export const SHADOW_FIELD = {
+  drop: 'shadow',
+  inner: 'innerShadow',
+} as const satisfies Record<ShadowKind, keyof Style>
+
+/** What either kind of shadow starts from the first time it is ticked. */
 export const DEFAULT_SHADOW: ShadowEffect = {
-  kind: 'drop',
   x: 0,
   y: 4,
   blur: 8,
@@ -348,13 +364,15 @@ export interface Style {
   opacity: number
   blendMode: BlendMode
   /**
-   * One shadow, drop or inner. Absent means none.
+   * The drop shadow. Absent means none.
    *
    * Optional rather than always-present so a document saved before effects
    * existed still loads unchanged, and so a shape with no shadow costs nothing
    * in the file.
    */
   shadow?: ShadowEffect
+  /** The inner shadow, independent of the drop shadow. Absent means none. */
+  innerShadow?: ShadowEffect
   /** One blur, object or background. Absent means none. */
   blur?: BlurEffect
 }

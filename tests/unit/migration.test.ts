@@ -130,6 +130,41 @@ describe('legacy shape migration', () => {
   })
 })
 
+// --------------------------------------------------------- the shadow split --
+
+describe('the one shadow becomes two', () => {
+  const settings = { x: -3, y: 7, blur: 21, color: { r: 9, g: 8, b: 7, a: 0.4 }, visible: true }
+  /** A rectangle saved when a shape had one shadow, drop or inner. */
+  const withShadow = (shadow: unknown) =>
+    legacyFile([legacyShape({ type: 'rect', cornerRadius: 0, style: { ...legacyShape({}).style, shadow } })])
+  const styleOf = (doc: ReturnType<typeof deserializeDocument>) => {
+    const n = doc.nodes.n1!
+    return 'style' in n ? n.style : null
+  }
+
+  it('an inner shadow in the old single slot comes back as the inner shadow', () => {
+    const style = styleOf(deserializeDocument(withShadow({ kind: 'inner', ...settings })))
+    // Every setting intact, and it is not ALSO a drop shadow.
+    expect(style?.innerShadow).toEqual(settings)
+    expect(style?.shadow).toBeUndefined()
+  })
+
+  it('a drop shadow stays the drop shadow, without its dead kind', () => {
+    const doc = deserializeDocument(withShadow({ kind: 'drop', ...settings }))
+    // toEqual, so a leftover `kind` fails it.
+    expect(styleOf(doc)?.shadow).toEqual(settings)
+    expect(styleOf(doc)?.innerShadow).toBeUndefined()
+    const json = new TextDecoder().decode(serializeDocument(doc, { plainJson: true }))
+    expect(json).not.toContain('"kind"')
+  })
+
+  it('a shape saved with no shadow still has none', () => {
+    const style = styleOf(deserializeDocument(withShadow(null)))
+    expect(style?.shadow ?? null).toBeNull()
+    expect(style?.innerShadow).toBeUndefined()
+  })
+})
+
 /** The old star generator, verbatim, as the oracle for the conversion. */
 function starPointsLegacy(width: number, height: number, points: number, innerRatio: number) {
   const n = Math.max(3, Math.round(points))

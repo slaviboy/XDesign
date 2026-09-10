@@ -36,6 +36,7 @@ import {
   pngSize,
   readField,
   selectionFrameBox,
+  selectTool,
   setField,
 } from './helpers'
 
@@ -129,6 +130,17 @@ test('dragging the gizmo turns the object, and its centre pushes it in depth', a
   expect(await readField(page, 'Z depth')).toBeGreaterThan(20)
   const nearer = (await selectionFrameBox(page))!
   expect(nearer.height).toBeGreaterThan(before.height)
+})
+
+test('the gizmo belongs to the Select tool', async ({ page }) => {
+  await rectWith3d(page)
+  await expect(page.locator('.gizmo-3d')).toHaveCount(1)
+  // Under any other tool a press on it would draw rather than turn, so it is
+  // not offered — the object stays selected, and the gizmo comes back with Select.
+  await selectTool(page, 'ellipse')
+  await expect(page.locator('.gizmo-3d')).toHaveCount(0)
+  await selectTool(page, 'select')
+  await expect(page.locator('.gizmo-3d')).toHaveCount(1)
 })
 
 test('⌥⌘T resets the 3D transform, and ⌘T shows and hides the controls', async ({ page }) => {

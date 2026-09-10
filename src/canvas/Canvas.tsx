@@ -126,7 +126,6 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
   const canvasSize = useEditorStore((s) => s.canvasSize)
   const toolId = useEditorStore((s) => s.tool)
   const editingTextId = useEditorStore((s) => s.editingTextId)
-  const hoverCursor = useEditorStore((s) => s.hoverCursor)
   const guideColor = useDocumentStore((s) => s.doc.settings.guideColor)
 
   // --- coordinate helpers ---------------------------------------------------
@@ -382,13 +381,16 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
     [onContextMenu, toCanvasPoint],
   )
 
-  const cursor = middlePanRef.current ? 'grabbing' : (hoverCursor ?? getTool(toolId).cursor)
+  const tool = getTool(toolId)
+  const cursor = middlePanRef.current ? 'grabbing' : tool.cursor
 
   return (
     <div
       ref={containerRef}
       className="canvas-root"
       data-testid="canvas-root"
+      // Read by the stylesheet, which stops the overlay's own cursors showing.
+      data-fixed-cursor={tool.fixedCursor ? '' : undefined}
       onDragOver={onDragOver}
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}

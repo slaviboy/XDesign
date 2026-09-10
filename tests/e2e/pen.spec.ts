@@ -24,7 +24,7 @@
  */
 
 import { test, expect, type Page } from '@playwright/test'
-import { CANVAS, nodesOfType, openApp, selectTool } from './helpers'
+import { CANVAS, dropFiles, nodesOfType, openApp, selectTool } from './helpers'
 
 async function pt(page: Page, x: number, y: number) {
   const box = await page.locator(CANVAS).boundingBox()
@@ -435,7 +435,20 @@ test('splitting a line leaves two lines, not two curves', async ({ page }) => {
   expect(await pathD(page)).toBe('M0 0 L200 0 L200 100 L200 200')
 })
 
-test('the cursor says whether a press will move a point or add one', async ({ page }) => {
+/**
+ * The cursor the pointer shows at a point on the page. Read from whatever is
+ * under it rather than from the canvas: an anchor or a handle with a cursor of
+ * its own shows through a canvas that only set its own.
+ */
+async function cursorAt(page: Page, p: { x: number; y: number }) {
+  await page.mouse.move(p.x, p.y)
+  return page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y)
+    return el ? getComputedStyle(el).cursor : null
+  }, p)
+}
+
+test('the pen keeps one cursor whatever it is over', async ({ page }) => {
   await click(page, 200, 200)
   await click(page, 320, 200)
   await click(page, 320, 320)
@@ -444,18 +457,47 @@ test('the cursor says whether a press will move a point or add one', async ({ pa
   await click(page, 320, 260)
   await selectTool(page, 'pen')
 
-  const cursor = () => page.locator(CANVAS).evaluate((el) => getComputedStyle(el).cursor)
-  const onSegment = await pt(page, 320, 290)
-  await page.mouse.move(onSegment.x, onSegment.y)
-  await expect.poll(cursor).toBe('crosshair')
+  // On the outline, where a press adds a point; on an anchor, where it grabs
+  // one; on an open end, where it carries on drawing; and on empty canvas.
+  for (const [x, y] of [[320, 290], [320, 200], [200, 200], [600, 500]] as const) {
+    const p = await pt(page, x, y)
+    await expect.poll(() => cursorAt(page, p), `at ${x},${y}`).toBe('crosshair')
+  }
 
-  const onPoint = await pt(page, 320, 200)
-  await page.mouse.move(onPoint.x, onPoint.y)
-  await expect.poll(cursor).toBe('move')
+  // And while drawing, over the path being built.
+  await click(page, 600, 500)
+  const next = await pt(page, 650, 520)
+  await expect.poll(() => cursorAt(page, next)).toBe('crosshair')
+})
 
-  const away = await pt(page, 600, 500)
-  await page.mouse.move(away.x, away.y)
-  await expect.poll(cursor).toBe('crosshair')
+test('the pen keeps its cursor over the frame of something it cannot edit', async ({ page }) => {
+  // An image has no points, so the pen leaves its frame up — and every handle
+  // on a frame carries a cursor of its own.
+  const base64 = await page.evaluate(() => {
+    const c = document.createElement('canvas')
+    c.width = 200
+    c.height = 120
+    const x = c.getContext('2d')!
+    x.fillStyle = '#3399cc'
+    x.fillRect(0, 0, 200, 120)
+    return c.toDataURL('image/png').split(',')[1]!
+  })
+  await selectTool(page, 'select')
+  await dropFiles(page, [{ name: 'photo.png', type: 'image/png', base64 }], { x: 400, y: 300 })
+  await page.locator('.layer-row', { hasText: 'photo' }).first().click()
+  await selectTool(page, 'pen')
+
+  for (const handle of ['se', 'n']) {
+    const box = (await page.locator(`.resize-handle[data-handle="${handle}"]`).boundingBox())!
+    const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    await expect.poll(() => cursorAt(page, centre), handle).toBe('crosshair')
+  }
+  // The same handle still says "resize" to the Select tool, whose it is.
+  await selectTool(page, 'select')
+  const se = (await page.locator('.resize-handle[data-handle="se"]').boundingBox())!
+  await expect
+    .poll(() => cursorAt(page, { x: se.x + se.width / 2, y: se.y + se.height / 2 }))
+    .toBe('nwse-resize')
 })
 
 // ---------------------------------------------------------------------------

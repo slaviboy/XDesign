@@ -149,8 +149,8 @@ export function patchDocument(
 
 function hasOwnEffects(node: DesignNode): boolean {
   if (!hasStyle(node)) return false
-  const { shadow, blur } = node.style
-  return !!shadow?.visible || (!!blur?.visible && blur.amount > 0)
+  const { shadow, innerShadow, blur } = node.style
+  return !!shadow?.visible || !!innerShadow?.visible || (!!blur?.visible && blur.amount > 0)
 }
 
 /**

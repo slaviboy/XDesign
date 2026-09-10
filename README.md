@@ -39,14 +39,16 @@ followed by a curve). `Shift` constrains to 45° placing and 15° dragging; `Cmd
 the first point instead of closing on it, and suppresses anchor snapping. Anchors line up with
 the anchors around them, with a guide to say so. Hovering a path shows handles over its start
 and end — clicking one carries it on, and on a closed path it reopens the ring. `Enter` or a
-double-click ends an open path; `Escape` steps back from drawing to editing to neither.
+double-click ends an open path; `Escape` steps back from drawing to editing to neither. The pen
+keeps its one crosshair whatever it is over, handles included: the anchors, the end handles and
+the insert preview are what say what a press will do.
 
 **Two pointers** — the filled arrow selects and moves whole objects; the hollow one
 (**Direct Selection**, `D`) goes straight to the leaf and shows its points. A single click on
 a rectangle puts its four corners on screen, on a line its two ends. Looking costs nothing:
 the shape stays a live rectangle, with its Corners and Radius fields, until you actually move
 a point — at which moment it becomes an editable path, as Illustrator does. The path being
-edited is traced in a blue hairline drawn over the artwork, so the edges read even on a shape
+edited is traced in a thin blue line drawn over the artwork, so the edges read even on a shape
 whose fill matches what is behind it, and the trace comes from the live point model, not the
 document, so it follows a point through the drag rather than snapping on release.
 Double-clicking a shape with the arrow does the same thing, and lights up the Direct Selection
@@ -183,8 +185,8 @@ save colours with (+).
 covers shows, the rest is hidden rather than deleted. Double-click to step inside and readjust
 either the mask or what it holds; **Ungroup Mask** hands both back untouched.
 
-**Effects** — a **Drop Shadow** or **Inner Shadow** with X, Y, blur and colour, and a
-**Background Blur** or **Object Blur**. The controls and their ranges are Adobe's: Amount 0–50,
+**Effects** — a **Drop Shadow** and an **Inner Shadow**, each with its own X, Y, blur and colour,
+one under the other and either or both on one object, and a **Background Blur** or **Object Blur**. The controls and their ranges are Adobe's: Amount 0–50,
 Brightness −50–+50, Opacity 0–100%, with brightness and opacity belonging to the background blur
 alone. The checkbox on each turns the effect off without discarding its settings.
 
@@ -1151,6 +1153,27 @@ session snapshots how far a node's effects paint outside its box (a blur radius 
 something a resize edits, so it is constant for the gesture) and rewrites the region from the
 live size in the same place it rewrites `d`. The filter element registers under its own
 LiveTransform key for that, the way geometry elements register under `geomKey`.
+
+### Drop and inner shadow are two effects, not one with a switch
+
+Adobe lists Drop Shadow and Inner Shadow as separate rows in the Property Inspector, and an
+object can carry both: the pressed, neumorphic button on its own help page is exactly a drop
+shadow outside and an inner shadow inside. The first model here had one `shadow` with a `kind`,
+which made that impossible — choosing Inner Shadow replaced the drop shadow instead of adding to it.
+
+So a style has two optional fields: `shadow`, the drop shadow, where it always was, so every saved
+drop shadow loads unchanged; and `innerShadow`. A shadow no longer says which kind it is; the
+field it sits in does. Both go into the one filter, in a fixed order with `in` threaded through:
+the object blur, then the inner shadow drawn over the shape, then the drop shadow cast from that
+result, which puts it behind both. The inner shadow lies entirely inside the shape, so it leaves
+the silhouette the drop shadow is cast from alone. It paints nothing outside the shape either, but
+the filter region still has to make room for it: it is worked out from a shifted copy of the
+shape, and whatever of that copy the region cut off would come back as a rim along the wrong edge.
+
+A saved inner shadow moves to its new field on load, and the dead `kind` is dropped from drop
+shadows. That moves data, so `FORMAT_VERSION` went to 4 — and had to for a second reason: an
+older build handed a shadow with no `kind` would draw every drop shadow as an inner one, and
+refusing the file is the better failure.
 
 ### A mask group is a group with a flag, not a node type of its own
 

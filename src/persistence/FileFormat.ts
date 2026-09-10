@@ -39,7 +39,8 @@ import {
   DEFAULT_SETTINGS,
   supports3d,
   type DesignDocument, type DesignNode, type ImageAsset, type NodeId,
-  type ArtboardGrid, type Guide, type RGBA, type Swatch, type Transform3D,
+  type ArtboardGrid, type Guide, type RGBA, type ShadowEffect, type Style, type Swatch,
+  type Transform3D,
 } from '../document/types'
 import { createDocumentRoot } from '../document/NodeFactory'
 import { artboardIds, createMatrixCache, geometryBounds } from '../document/SceneGraph'
@@ -53,8 +54,13 @@ export const FORMAT_NAME = 'OfflineDesignDocument'
  * A bump rather than the usual additive field, because this MOVES data: a
  * version-2 file's guides are read from the old place and distributed, and
  * nothing is written back there.
+ *
+ * 4: the one shadow with a `kind` became two, `style.shadow` (drop) and
+ * `style.innerShadow`. It moves data too, and an older build handed a shadow
+ * with no `kind` would draw every drop shadow as an inner one — refusing the
+ * file is the better failure.
  */
-export const FORMAT_VERSION = 3
+export const FORMAT_VERSION = 4
 export const FILE_EXTENSION = '.xdesign'
 export const MIME_TYPE = 'application/x-xdesign+zip'
 
@@ -199,10 +205,11 @@ function parseJson(text: string): XDesignFile {
 /**
  * Brings a node written by an older build up to the current model.
  *
- * The only migration so far is the shape merge: Triangle and Star used to be
- * their own node types, and are now a polygon with three corners and a polygon
- * with a star ratio below 1. This runs on the one path every document takes into
- * memory, so file open and crash recovery are both covered.
+ * Two migrations so far. The shape merge: Triangle and Star used to be their
+ * own node types, and are now a polygon with three corners and a polygon with a
+ * star ratio below 1. And the shadow split: one shadow with a `kind` became a
+ * drop shadow and an inner shadow of their own. This runs on the one path every
+ * document takes into memory, so file open and crash recovery are both covered.
  */
 /**
  * Re-clean SVG that comes off disk.
@@ -236,6 +243,32 @@ function readSvgDefs(raw: unknown): Record<string, string> | undefined {
 }
 
 export function migrateLegacyNode(node: DesignNode): DesignNode {
+  return migrateShadowKind(migrateShapeMerge(node))
+}
+
+/**
+ * A shadow saved with a `kind` goes to the field that now means that kind.
+ *
+ * Keyed on the data rather than the file's version, so a hand-edited file is
+ * read the same way. The `kind` is dropped even from a drop shadow: a dead key
+ * would otherwise ride along into every save from now on.
+ */
+function migrateShadowKind(node: DesignNode): DesignNode {
+  const style = (node as { style?: Style }).style
+  const legacy = style?.shadow as (ShadowEffect & { kind?: unknown }) | null | undefined
+  if (!style || !legacy || typeof legacy !== 'object' || !('kind' in legacy)) return node
+  const { kind, ...shadow } = legacy
+  const next: Style = { ...style }
+  if (kind === 'inner') {
+    delete next.shadow
+    next.innerShadow = shadow
+  } else {
+    next.shadow = shadow
+  }
+  return { ...node, style: next } as DesignNode
+}
+
+function migrateShapeMerge(node: DesignNode): DesignNode {
   const legacy = node as DesignNode & {
     points?: number
     innerRatio?: number

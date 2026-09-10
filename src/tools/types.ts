@@ -77,6 +77,11 @@ export interface ToolContext {
 export interface Tool {
   readonly id: ToolId
   readonly cursor: string
+  /**
+   * Keep `cursor` in every state: nothing the pointer passes over — a point, a
+   * handle, a guide — swaps it for a cursor of its own.
+   */
+  readonly fixedCursor?: boolean
   /** Shown in the tooltip. */
   readonly label: string
   readonly shortcut: string

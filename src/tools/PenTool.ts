@@ -66,7 +66,6 @@ import {
 import {
   beginPathEditing,
   clearInsertPreview,
-  pathEditGrabAt,
   editableOutline,
   endPathEditing,
   isPointEditable,
@@ -460,11 +459,6 @@ function showSnapGuides(lines: SnapGuide[]): void {
   setEditor({ snapGuides: lines })
 }
 
-/** Set the pointer's cursor, only when it actually changes. */
-function setHoverCursor(cursor: string | null): void {
-  if (editorStore.getState().hoverCursor !== cursor) setEditor({ hoverCursor: cursor })
-}
-
 /**
  * Hand the object over from point editing to drawing.
  *
@@ -473,7 +467,6 @@ function setHoverCursor(cursor: string | null): void {
  * around the very path the pen was extending.
  */
 function enterDrawing(): void {
-  setHoverCursor(null)
   pen.endHints = []
   pen.endHintId = null
   if (editorStore.getState().nodeEditingId) {
@@ -708,7 +701,10 @@ function withHover(hover: Vec2): PenSubpath | null {
 
 export const penTool: Tool = {
   id: 'pen',
+  // One cursor whatever it is over, drawing or editing: the anchors, the end
+  // hints and the insert preview are what say what a press will do.
   cursor: 'crosshair',
+  fixedCursor: true,
   label: 'Pen',
   shortcut: 'P',
 
@@ -927,10 +923,9 @@ export const penTool: Tool = {
       }
     } else if (!pen.building && !pen.endArm) {
       // Idle over a path being edited: show where a click would drop an anchor,
-      // and say which of the two things a press would do.
+      // and which ends a press would carry on drawing from.
       updateInsertPreview(e, ctx)
       updateEndHints(e, ctx)
-      setHoverCursor(pathEditGrabAt(e, ctx) ? 'move' : null)
     }
     refreshOverlay()
   },
@@ -1060,7 +1055,6 @@ export const penTool: Tool = {
 
   onDeactivate(): void {
     clearInsertPreview()
-    setHoverCursor(null)
     showSnapGuides([])
     // Leaving the tool mid-path commits what has been drawn rather than losing it.
     if (pen.building && pen.building.points.length >= 2) finishPath(false)

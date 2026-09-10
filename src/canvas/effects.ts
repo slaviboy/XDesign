@@ -27,26 +27,36 @@
  *
  *   BLUR AMOUNT -> stdDeviation, halved. Adobe's 0..50 "Amount" — and CSS's
  *   `blur()` — describe a blur radius, while SVG's feGaussianBlur takes a
- *   standard deviation, which is half of it. Both blur kinds and both shadow
- *   kinds use the same halving, so an Amount of 20 looks like a Blur of 20.
+ *   standard deviation, which is half of it. Both blur kinds and both shadows
+ *   use the same halving, so an Amount of 20 looks like a Blur of 20.
  *
  *   BRIGHTNESS -> a CSS brightness multiplier. Adobe's -50..+50 maps onto
  *   0..2, so -50 is black and +50 is twice as bright.
  */
 
 import { toHex } from '../document/color'
-import type { BlurEffect, ShadowEffect, Style } from '../document/types'
+import {
+  SHADOW_FIELD,
+  type BlurEffect,
+  type ShadowEffect,
+  type ShadowKind,
+  type Style,
+} from '../document/types'
 
 /** Filter id for a node's effects. Stable, so a re-render reuses it. */
 export const effectFilterId = (nodeId: string): string => `fx-${nodeId}`
 
 export const blurStdDeviation = (amount: number): number => Math.max(0, amount) / 2
 
-/** The shadow that actually paints: absent or unchecked means none. */
-export function activeShadow(style: Style): ShadowEffect | null {
-  const s = style.shadow
+/** The shadow of the given kind that actually paints: absent or unchecked means none. */
+export function activeShadow(style: Style, kind: ShadowKind): ShadowEffect | null {
+  const s = style[SHADOW_FIELD[kind]]
   return s && s.visible ? s : null
 }
+
+/** How far a shadow's offset and blur carry it. */
+const shadowReach = (s: ShadowEffect | null): number =>
+  s ? s.blur + Math.abs(s.x) + Math.abs(s.y) : 0
 
 /** The blur that actually paints, of the given kind. */
 export function activeBlur(style: Style, kind: BlurEffect['kind']): BlurEffect | null {
@@ -74,14 +84,21 @@ export interface EffectFilter {
  * rendered it. The margin does not change during a gesture — a blur radius and
  * an offset are not what a resize edits — so it is snapshotted once and the
  * region recomputed from the live size.
+ *
+ * An inner shadow paints nothing outside the shape, but it still needs the
+ * room: it is worked out from a shifted copy of the shape, and whatever of
+ * that copy falls outside the region is lost, which would put a rim along the
+ * wrong edge. Both shadows start from the (blurred) shape rather than from
+ * each other, so the larger of the two is enough.
  */
 export function effectMargin(style: Style): number {
-  const shadow = activeShadow(style)
+  const drop = activeShadow(style, 'drop')
+  const inner = activeShadow(style, 'inner')
   const blur = activeBlur(style, 'object')
-  if (!shadow && !blur) return 0
+  if (!drop && !inner && !blur) return 0
   return (
     (blur ? blur.amount : 0) +
-    (shadow ? shadow.blur + Math.abs(shadow.x) + Math.abs(shadow.y) : 0) +
+    Math.max(shadowReach(drop), shadowReach(inner)) +
     style.stroke.width +
     8
   )
@@ -101,7 +118,7 @@ export function filterRegion(
 }
 
 /**
- * The filter for a node's shadow and object blur, or null if it has neither.
+ * The filter for a node's shadows and object blur, or null if it has none.
  *
  * Background blur is NOT here: no SVG filter primitive can read what is behind
  * an element, so it is done by re-drawing the backdrop. See the callers.
@@ -111,14 +128,16 @@ export function effectFilter(
   style: Style,
   box: { width: number; height: number },
 ): EffectFilter | null {
-  const shadow = activeShadow(style)
+  const drop = activeShadow(style, 'drop')
+  const inner = activeShadow(style, 'inner')
   const blur = activeBlur(style, 'object')
-  if (!shadow && !blur) return null
+  if (!drop && !inner && !blur) return null
 
   const parts: string[] = []
   // `in` is threaded from primitive to primitive so a blurred shape casts a
-  // shadow of its blurred self, rather than the two effects fighting over
-  // SourceGraphic and one of them silently winning.
+  // shadow of its blurred self, and a shape with both shadows casts its drop
+  // shadow from the shape with the inner one already on it — rather than the
+  // effects fighting over SourceGraphic and all but one silently vanishing.
   let source = 'SourceGraphic'
 
   if (blur) {
@@ -128,30 +147,33 @@ export function effectFilter(
     source = 'fx-blur'
   }
 
-  if (shadow) {
-    const color = toHex(shadow.color)
-    const alpha = round(shadow.color.a)
-    const sd = round(blurStdDeviation(shadow.blur))
-    if (shadow.kind === 'drop') {
-      // feDropShadow draws the shadow AND the source over it, so it is the
-      // whole effect in one primitive.
-      parts.push(
-        `<feDropShadow in="${source}" dx="${round(shadow.x)}" dy="${round(shadow.y)}"` +
-          ` stdDeviation="${sd}" flood-color="${color}" flood-opacity="${alpha}"/>`,
-      )
-    } else {
-      // An inner shadow is the shape MINUS a copy of itself shifted and
-      // blurred: what is left is the rim inside the edge, which is then
-      // flooded with the shadow colour and drawn back over the shape.
-      parts.push(
-        `<feOffset in="${source}" dx="${round(shadow.x)}" dy="${round(shadow.y)}" result="fx-off"/>`,
-        `<feGaussianBlur in="fx-off" stdDeviation="${sd}" result="fx-offblur"/>`,
-        `<feComposite operator="out" in="${source}" in2="fx-offblur" result="fx-rim"/>`,
-        `<feFlood flood-color="${color}" flood-opacity="${alpha}" result="fx-color"/>`,
-        `<feComposite operator="in" in="fx-color" in2="fx-rim" result="fx-shadow"/>`,
-        `<feComposite operator="over" in="fx-shadow" in2="${source}"/>`,
-      )
-    }
+  if (inner) {
+    // An inner shadow is the shape MINUS a copy of itself shifted and
+    // blurred: what is left is the rim inside the edge, which is then
+    // flooded with the shadow colour and drawn back over the shape. It lies
+    // entirely inside the shape, so the silhouette a drop shadow is cast
+    // from is unchanged by it.
+    const sd = round(blurStdDeviation(inner.blur))
+    parts.push(
+      `<feOffset in="${source}" dx="${round(inner.x)}" dy="${round(inner.y)}" result="fx-off"/>`,
+      `<feGaussianBlur in="fx-off" stdDeviation="${sd}" result="fx-offblur"/>`,
+      `<feComposite operator="out" in="${source}" in2="fx-offblur" result="fx-rim"/>`,
+      `<feFlood flood-color="${toHex(inner.color)}" flood-opacity="${round(inner.color.a)}" result="fx-color"/>`,
+      `<feComposite operator="in" in="fx-color" in2="fx-rim" result="fx-shadow"/>`,
+      `<feComposite operator="over" in="fx-shadow" in2="${source}" result="fx-inner"/>`,
+    )
+    source = 'fx-inner'
+  }
+
+  if (drop) {
+    // feDropShadow draws the shadow AND the source over it, so it is the
+    // whole effect in one primitive — and, drawn last, it sits behind
+    // everything the primitives before it made.
+    parts.push(
+      `<feDropShadow in="${source}" dx="${round(drop.x)}" dy="${round(drop.y)}"` +
+        ` stdDeviation="${round(blurStdDeviation(drop.blur))}"` +
+        ` flood-color="${toHex(drop.color)}" flood-opacity="${round(drop.color.a)}"/>`,
+    )
   }
 
   // A region in user space rather than the default -10%..120% of the bounding

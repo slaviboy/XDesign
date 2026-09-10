@@ -65,7 +65,7 @@ describe('effect filters', () => {
 
   it('an unchecked effect is off but not forgotten', () => {
     const style = styleWith({ shadow: { ...DEFAULT_SHADOW, visible: false } })
-    expect(activeShadow(style)).toBeNull()
+    expect(activeShadow(style, 'drop')).toBeNull()
     expect(effectFilter('n1', style, BOX)).toBeNull()
     // The settings are still there to come back to — that is the whole point of
     // a checkbox rather than a delete.
@@ -84,7 +84,7 @@ describe('effect filters', () => {
   })
 
   it('an inner shadow subtracts a shifted copy of the shape from itself', () => {
-    const style = styleWith({ shadow: { ...DEFAULT_SHADOW, kind: 'inner' } })
+    const style = styleWith({ innerShadow: { ...DEFAULT_SHADOW } })
     const p = effectFilter('n1', style, BOX)!.primitives
     expect(p).not.toContain('feDropShadow')
     // The rim, flooded and drawn back over the shape.
@@ -92,6 +92,48 @@ describe('effect filters', () => {
     expect(p).toContain('operator="out"')
     expect(p).toContain('<feFlood')
     expect(p).toContain('operator="over"')
+  })
+
+  it('a drop shadow and an inner shadow apply together, each with its own settings', () => {
+    const style = styleWith({
+      shadow: { ...DEFAULT_SHADOW, x: 5, y: 9, blur: 10, color: { r: 255, g: 0, b: 0, a: 0.5 } },
+      innerShadow: { ...DEFAULT_SHADOW, x: -2, y: -3, blur: 6, color: { r: 0, g: 0, b: 255, a: 0.8 } },
+    })
+    const p = effectFilter('n1', style, BOX)!.primitives
+    expect(p).toContain('<feOffset in="SourceGraphic" dx="-2" dy="-3"')
+    expect(p).toContain('flood-color="#0000ff" flood-opacity="0.8"')
+    expect(p).toContain('<feDropShadow')
+    expect(p).toContain('dx="5" dy="9" stdDeviation="5" flood-color="#ff0000" flood-opacity="0.5"')
+    // The drop shadow is cast from the shape WITH its inner shadow, and comes
+    // last, so it lands behind both instead of replacing one of them.
+    expect(p).toContain('<feDropShadow in="fx-inner"')
+    expect(p.indexOf('<feDropShadow')).toBeGreaterThan(p.indexOf('result="fx-inner"'))
+  })
+
+  it('each shadow has its own checkbox', () => {
+    const innerOnly = styleWith({
+      shadow: { ...DEFAULT_SHADOW, visible: false },
+      innerShadow: { ...DEFAULT_SHADOW },
+    })
+    expect(activeShadow(innerOnly, 'drop')).toBeNull()
+    expect(activeShadow(innerOnly, 'inner')).not.toBeNull()
+    expect(effectFilter('n1', innerOnly, BOX)!.primitives).not.toContain('feDropShadow')
+
+    const dropOnly = styleWith({
+      shadow: { ...DEFAULT_SHADOW },
+      innerShadow: { ...DEFAULT_SHADOW, visible: false },
+    })
+    const p = effectFilter('n1', dropOnly, BOX)!.primitives
+    expect(p).toContain('<feDropShadow in="SourceGraphic"')
+    expect(p).not.toContain('feOffset')
+  })
+
+  it('the filter region leaves an inner shadow room for its shifted copy', () => {
+    // Offset 40 down: the copy hangs 40 below the shape, and if the region cut
+    // it off, the blur would see nothing there and draw a rim on the bottom edge.
+    const style = styleWith({ innerShadow: { ...DEFAULT_SHADOW, x: 0, y: 40, blur: 4 } })
+    const filter = effectFilter('n1', style, BOX)!
+    expect(filter.y + filter.height).toBeGreaterThan(BOX.height + 40)
   })
 
   it('a blurred shape casts a shadow of its blurred self', () => {
@@ -195,10 +237,11 @@ describe('outlineStroke', () => {
 // -------------------------------------------------------------- persistence --
 
 describe('effects and masks in the file', () => {
-  it('a shadow, a blur and a mask all survive a save and a load', () => {
+  it('both shadows, a blur and a mask all survive a save and a load', () => {
     const doc = createDocument('Effects', false)
     const rect = createRect({ width: 80, height: 40 })
-    rect.style.shadow = { kind: 'inner', x: -3, y: 7, blur: 21, color: { r: 9, g: 8, b: 7, a: 0.4 }, visible: true }
+    rect.style.shadow = { x: 2, y: 5, blur: 12, color: { r: 1, g: 2, b: 3, a: 0.3 }, visible: true }
+    rect.style.innerShadow = { x: -3, y: 7, blur: 21, color: { r: 9, g: 8, b: 7, a: 0.4 }, visible: true }
     rect.style.blur = { kind: 'background', amount: 33, brightness: -12, fillOpacity: 0.75, visible: false }
     addNode(doc, rect, doc.rootId)
 
@@ -214,6 +257,7 @@ describe('effects and masks in the file', () => {
     // and an effect that loads back at a different strength is a silent
     // corruption of someone's document.
     expect('style' in loaded && loaded.style.shadow).toEqual(rect.style.shadow)
+    expect('style' in loaded && loaded.style.innerShadow).toEqual(rect.style.innerShadow)
     expect('style' in loaded && loaded.style.blur).toEqual(rect.style.blur)
     // An unchecked effect is still saved — the checkbox is a setting, not a delete.
     expect('style' in loaded && loaded.style.blur?.visible).toBe(false)
@@ -230,6 +274,7 @@ describe('effects and masks in the file', () => {
     // Optional, so an untouched document does not grow, and a file written
     // before effects existed still loads unchanged.
     expect(json).not.toContain('"shadow"')
+    expect(json).not.toContain('"innerShadow"')
     expect(json).not.toContain('"blur"')
     expect(json).not.toContain('"maskId"')
   })

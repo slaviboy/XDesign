@@ -375,11 +375,12 @@ export function renderBounds(doc: DesignDocument, id: NodeId, cache?: MatrixCach
 }
 
 /**
- * How far a node's own shadow and object blur can paint past its box.
+ * How far a node's own drop shadow and object blur can paint past its box.
  *
  * The same generous reach canvas/effects.ts gives a filter region, restated
  * here because the document layer may not import the canvas: a mesh that
- * stopped short of a shadow would crop it.
+ * stopped short of a shadow would crop it. The inner shadow is left out: the
+ * filter needs room to work it out, but it paints nothing past the shape.
  */
 function effectReach(style: Style): number {
   const shadow = style.shadow?.visible ? style.shadow : null

@@ -86,6 +86,7 @@ import type {
   NodeId,
   Paint,
   ShadowEffect,
+  ShadowKind,
   Stroke,
   Style,
   TextStyle,
@@ -100,6 +101,7 @@ import {
   DEFAULT_BLUR,
   DEFAULT_LAYOUT_GRID,
   DEFAULT_SHADOW,
+  SHADOW_FIELD,
   DEFAULT_SQUARE_GRID,
   DEFAULT_STROKE,
   cornerIndex,
@@ -822,7 +824,8 @@ export function setStroke(patch: Partial<Stroke>, coalesceKey?: string): boolean
 }
 
 /**
- * Add, edit or remove the shadow on the selection.
+ * Add, edit or remove one of the selection's two shadows, leaving the other
+ * alone.
  *
  * `null` removes it outright; a patch merges into whatever is there, starting
  * from Adobe's own default the first time. Turning the effect OFF is
@@ -830,22 +833,25 @@ export function setStroke(patch: Partial<Stroke>, coalesceKey?: string): boolean
  * panel, and it has to keep the settings so ticking it again restores them.
  */
 export function setShadow(
+  kind: ShadowKind,
   patch: Partial<ShadowEffect> | null,
   coalesceKey?: string,
 ): boolean {
   const ids = editableSelection()
   if (ids.length === 0) return false
+  const field = SHADOW_FIELD[kind]
+  const name = kind === 'drop' ? 'drop shadow' : 'inner shadow'
   return transaction(
-    patch === null ? 'Remove shadow' : 'Change shadow',
+    patch === null ? `Remove ${name}` : `Change ${name}`,
     (draft) => {
       if (
         !eachStyled(ids, draft, (style) => {
           if (patch === null) {
-            delete style.shadow
+            delete style[field]
             return
           }
-          const base = style.shadow ?? DEFAULT_SHADOW
-          style.shadow = {
+          const base = style[field] ?? DEFAULT_SHADOW
+          style[field] = {
             ...base,
             ...clonePlain(patch),
             blur: Math.max(0, patch.blur ?? base.blur),

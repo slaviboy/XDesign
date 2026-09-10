@@ -34,6 +34,9 @@ import {
 const section = (page: Page, name: string) => page.locator('.section', { hasText: name })
 const filterOf = (page: Page, nth = 0) =>
   page.locator('.document-layer filter').nth(nth).innerHTML()
+/** A number field in a section, by its label. */
+const fieldIn = (page: Page, where: ReturnType<typeof section>, label: string) =>
+  where.locator('.field', { has: page.locator(`.field-label:text-is("${label}")`) }).locator('input')
 
 /** Select two layers by name, which is steadier than clicking overlapping art. */
 async function selectLayers(page: Page, names: string[]) {
@@ -46,31 +49,69 @@ async function selectLayers(page: Page, names: string[]) {
 
 // ----------------------------------------------------------------- shadows --
 
-test('Drop Shadow and Inner Shadow are two shapes of the same effect', async ({ page }) => {
+test('Drop Shadow and Inner Shadow are two effects, and an object can have both', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 460, y: 340 })
-  const shadow = section(page, 'SHADOW')
+  const drop = section(page, 'Drop Shadow')
+  const inner = section(page, 'Inner Shadow')
 
   // Off to begin with: no effect, and nothing in the picture.
-  await expect(shadow.locator('.paint-toggle')).not.toBeChecked()
+  await expect(drop.locator('.paint-toggle')).not.toBeChecked()
+  await expect(inner.locator('.paint-toggle')).not.toBeChecked()
   await expect(page.locator('.document-layer filter')).toHaveCount(0)
 
-  await shadow.locator('.paint-toggle').check()
+  await drop.locator('.paint-toggle').check()
   expect(await filterOf(page)).toContain('feDropShadow')
+  expect(await filterOf(page)).not.toContain('feOffset')
 
-  await shadow.locator('select').selectOption('inner')
-  const inner = await filterOf(page)
-  expect(inner).not.toContain('feDropShadow')
+  // Ticking the inner shadow adds it: the drop shadow stays.
+  await inner.locator('.paint-toggle').check()
+  const both = await filterOf(page)
+  expect(both).toContain('feDropShadow')
   // The shape minus a shifted copy of itself, flooded and drawn back on top.
-  expect(inner).toContain('feOffset')
-  expect(inner).toContain('operator="out"')
-  expect(inner).toContain('feFlood')
+  expect(both).toContain('feOffset')
+  expect(both).toContain('operator="out"')
+  expect(both).toContain('feFlood')
+
+  // And either can go on its own.
+  await drop.locator('.paint-toggle').uncheck()
+  const innerOnly = await filterOf(page)
+  expect(innerOnly).not.toContain('feDropShadow')
+  expect(innerOnly).toContain('feOffset')
+})
+
+test('each shadow has its own X, Y, B and colour', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 460, y: 340 })
+  const drop = section(page, 'Drop Shadow')
+  const inner = section(page, 'Inner Shadow')
+  await drop.locator('.paint-toggle').check()
+  await inner.locator('.paint-toggle').check()
+
+  await fieldIn(page, inner, 'X').fill('6')
+  await fieldIn(page, inner, 'X').press('Enter')
+  await fieldIn(page, drop, 'X').fill('-9')
+  await fieldIn(page, drop, 'X').press('Enter')
+  const filter = await filterOf(page)
+  expect(filter).toMatch(/<feOffset[^>]* dx="6"/)
+  expect(filter).toMatch(/<feDropShadow[^>]* dx="-9"/)
+
+  // The inner shadow's swatch edits the inner shadow's colour.
+  await inner.locator('.swatch').click()
+  const hex = page
+    .locator('.popover .field', { has: page.locator('.field-label:text-is("#")') })
+    .locator('input')
+  await hex.fill('ff0000')
+  await hex.press('Enter')
+  const recoloured = await filterOf(page)
+  expect(recoloured).toMatch(/<feFlood[^>]* flood-color="#ff0000"/)
+  expect(recoloured).not.toMatch(/<feDropShadow[^>]* flood-color="#ff0000"/)
 })
 
 test('the shadow X, Y and B fields drive what is drawn', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 460, y: 340 })
-  const shadow = section(page, 'SHADOW')
+  const shadow = section(page, 'Drop Shadow')
   await shadow.locator('.paint-toggle').check()
 
   for (const [label, value, attr, expected] of [
@@ -78,9 +119,8 @@ test('the shadow X, Y and B fields drive what is drawn', async ({ page }) => {
     ['Y', '-8', 'dy', '-8'],
     ['B', '30', 'stdDeviation', '15'],
   ] as const) {
-    const field = shadow.locator('.field', { has: page.locator(`.field-label:text-is("${label}")`) })
-    await field.locator('input').fill(value)
-    await field.locator('input').press('Enter')
+    await fieldIn(page, shadow, label).fill(value)
+    await fieldIn(page, shadow, label).press('Enter')
     expect(await filterOf(page), label).toContain(`${attr}="${expected}"`)
   }
 })
@@ -88,9 +128,9 @@ test('the shadow X, Y and B fields drive what is drawn', async ({ page }) => {
 test('unchecking a shadow keeps its settings for when it comes back', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 460, y: 340 })
-  const shadow = section(page, 'SHADOW')
+  const shadow = section(page, 'Drop Shadow')
   await shadow.locator('.paint-toggle').check()
-  const blur = shadow.locator('.field', { has: page.locator('.field-label:text-is("B")') }).locator('input')
+  const blur = fieldIn(page, shadow, 'B')
   await blur.fill('26')
   await blur.press('Enter')
 
@@ -302,7 +342,7 @@ test('Outline Stroke does nothing to a shape with no border', async ({ page }) =
 test('every effect survives SVG export', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'rect', { x: 250, y: 200 }, { x: 400, y: 340 })
-  await section(page, 'SHADOW').locator('.paint-toggle').check()
+  await section(page, 'Drop Shadow').locator('.paint-toggle').check()
   await drawShape(page, 'rect', { x: 300, y: 260 }, { x: 520, y: 380 })
   await section(page, 'BLUR').locator('.paint-toggle').check()
   await drawShape(page, 'ellipse', { x: 560, y: 200 }, { x: 700, y: 320 })
@@ -350,7 +390,7 @@ async function withoutSnapping(page: Page) {
 }
 
 async function shadowSection(page: Page, y: string, blur: string) {
-  const shadow = section(page, 'SHADOW')
+  const shadow = section(page, 'Drop Shadow')
   await shadow.locator('.paint-toggle').check()
   for (const [label, value] of [['Y', y], ['B', blur]] as const) {
     const field = shadow
@@ -382,7 +422,7 @@ test('a shadow follows the shape through a move, not on release', async ({ page 
 
   expect(digest(during)).toBe(digest(after))
   // And it is a shadow, not two identically empty patches.
-  await section(page, 'SHADOW').locator('.paint-toggle').uncheck()
+  await section(page, 'Drop Shadow').locator('.paint-toggle').uncheck()
   expect(digest(await page.screenshot({ clip: patch }))).not.toBe(digest(after))
 })
 

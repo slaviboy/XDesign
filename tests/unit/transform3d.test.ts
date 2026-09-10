@@ -105,11 +105,18 @@ describe('what is in 3D', () => {
       card(d, { z: -20 }, g.id)
     })
     expect(isPreserve3d(doc, stack)).toBe(true)
-    // A shadow needs a flat picture to cast from, so the same group becomes one.
+    // A shadow needs a flat picture to cast from, so the same group becomes
+    // one — an inner shadow as much as a drop shadow.
     const g = doc.nodes[stack]!
-    if ('style' in g) g.style.shadow = { kind: 'drop', x: 0, y: 4, blur: 8, color: { r: 0, g: 0, b: 0, a: 0.3 }, visible: true }
-    const shadowed = { ...doc, nodes: { ...doc.nodes } }
-    expect(isPreserve3d(shadowed, stack)).toBe(false)
+    const shadow = { x: 0, y: 4, blur: 8, color: { r: 0, g: 0, b: 0, a: 0.3 }, visible: true }
+    for (const field of ['shadow', 'innerShadow'] as const) {
+      if (!('style' in g)) continue
+      delete g.style.shadow
+      delete g.style.innerShadow
+      g.style[field] = shadow
+      // A fresh document object, because answers are remembered per document.
+      expect(isPreserve3d({ ...doc, nodes: { ...doc.nodes } }, stack), field).toBe(false)
+    }
   })
 })
 

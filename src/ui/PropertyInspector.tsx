@@ -118,6 +118,7 @@ import {
   DEFAULT_LAYOUT_GRID,
   DEFAULT_SHADOW,
   DEFAULT_SQUARE_GRID,
+  SHADOW_FIELD,
   gutterForColumnWidth,
   layoutColumns,
   cornerRadiusOf,
@@ -133,6 +134,7 @@ import {
   type Paint,
   type RGBA,
   type ShadowEffect,
+  type ShadowKind,
   type Style,
   type TextSizing,
   type TextTransform,
@@ -742,9 +744,12 @@ const ALIGN_OPTIONS: Array<{ value: Style['stroke']['align']; label: string; ico
   { value: 'center', label: 'Center', icon: <StrokeCenterIcon /> },
 ]
 
+/** What the colour popover is editing: a paint, or one of the two shadows' colour. */
+type PickerTarget = 'fill' | 'stroke' | ShadowKind
+
 function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style }> }) {
   const [popover, setPopover] = useState<{
-    target: 'fill' | 'stroke' | 'shadow'
+    target: PickerTarget
     x: number
     y: number
   } | null>(null)
@@ -773,17 +778,18 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
   const dash = common(nodes, (n) => n.style.stroke.dashArray.join(' '))
 
   const first = nodes[0]!
-  const shadow = first.style.shadow
   const blur = first.style.blur
   const rangeFillPaint =
     textRange && textNode?.type === 'text'
       ? (runsIn(textNode, textRange.start, textRange.end)[0]?.fill ?? textNode.style.fill)
       : null
+  const shadowTarget =
+    popover && popover.target !== 'fill' && popover.target !== 'stroke' ? popover.target : null
   const currentPaint: Paint =
     popover?.target === 'stroke'
       ? first.style.stroke.paint
-      : popover?.target === 'shadow'
-        ? { type: 'solid', color: shadow?.color ?? DEFAULT_SHADOW.color }
+      : shadowTarget
+        ? { type: 'solid', color: first.style[SHADOW_FIELD[shadowTarget]]?.color ?? DEFAULT_SHADOW.color }
         : (rangeFillPaint ?? first.style.fill)
 
   // The on-canvas gradient handles are part of the picker, as Adobe lists them:
@@ -835,7 +841,7 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
     }, []),
   )
 
-  const openPicker = useCallback((target: 'fill' | 'stroke' | 'shadow', e: React.MouseEvent) => {
+  const openPicker = useCallback((target: PickerTarget, e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     // Flip left of the swatch; the width comes from the popover itself so the
     // two cannot drift apart.
@@ -943,53 +949,10 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
       </Section>
 
 
-      {/* Adobe: "click Drop Shadow or Inner Shadow in the Property Inspector",
-          and the checkbox next to it turns the effect off without losing it. */}
-      <Section title={t('section.shadow')}>
-        <div className="paint-row">
-          <PaintToggle
-            on={!!shadow?.visible}
-            label="Shadow"
-            onChange={(on) =>
-              shadow ? setShadow({ visible: on }) : setShadow({ ...DEFAULT_SHADOW, visible: on })
-            }
-          />
-          <Select
-            value={shadow?.kind ?? 'drop'}
-            options={[
-              { value: 'drop', label: 'Drop Shadow' },
-              { value: 'inner', label: 'Inner Shadow' },
-            ]}
-            onChange={(v) => setShadow({ kind: v as ShadowEffect['kind'], visible: true })}
-            title="Shadow type"
-          />
-          <Swatch
-            paint={{ type: 'solid', color: shadow?.color ?? DEFAULT_SHADOW.color }}
-            onClick={(e) => openPicker('shadow', e)}
-          />
-        </div>
-        {shadow?.visible && (
-          <div className="field-row cols-3">
-            <NumberField
-              label="X"
-              value={common(nodes, (n) => n.style.shadow?.x ?? 0)}
-              onChange={(v, committing) => setShadow({ x: v }, committing ? undefined : 'shadow-x')}
-            />
-            <NumberField
-              label="Y"
-              value={common(nodes, (n) => n.style.shadow?.y ?? 0)}
-              onChange={(v, committing) => setShadow({ y: v }, committing ? undefined : 'shadow-y')}
-            />
-            <NumberField
-              label="B"
-              title="Blur"
-              min={0}
-              value={common(nodes, (n) => n.style.shadow?.blur ?? 0)}
-              onChange={(v, committing) => setShadow({ blur: v }, committing ? undefined : 'shadow-b')}
-            />
-          </div>
-        )}
-      </Section>
+      {/* Adobe: "click Drop Shadow or Inner Shadow in the Property Inspector" —
+          two effects, one under the other, so an object can have both. */}
+      <ShadowSection kind="drop" nodes={nodes} onPickColor={(e) => openPicker('drop', e)} />
+      <ShadowSection kind="inner" nodes={nodes} onPickColor={(e) => openPicker('inner', e)} />
 
       {/* Adobe's two blurs share one section, as they share one dropdown in XD:
           an object blur blurs the shape, a background blur blurs what is behind
@@ -1055,17 +1018,70 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
           anchor={{ x: popover.x, y: popover.y }}
           // A shadow has a colour, not a paint: Adobe's Shadow takes a Color,
           // and a gradient shadow is not a thing in XD or in SVG's feDropShadow.
-          allowGradient={popover.target !== 'shadow'}
+          allowGradient={!shadowTarget}
           onChange={(paint, committing) => {
             const key = committing ? undefined : `paint:${popover.target}`
             if (popover.target === 'fill') setFill(paint, key)
             else if (popover.target === 'stroke') setStroke({ paint }, key)
-            else if (paint.type === 'solid') setShadow({ color: paint.color }, key)
+            else if (paint.type === 'solid') setShadow(popover.target, { color: paint.color }, key)
           }}
           onClose={() => setPopover(null)}
         />
       )}
     </>
+  )
+}
+
+/**
+ * One of the two shadows: its checkbox, its colour and its X, Y and B, all on
+ * one row. The checkbox turns the effect off without losing it, and the fields
+ * go while it is off, as the fill's extras do — they would edit nothing.
+ */
+function ShadowSection({
+  kind,
+  nodes,
+  onPickColor,
+}: {
+  kind: ShadowKind
+  nodes: Array<DesignNode & { style: Style }>
+  onPickColor: (e: React.MouseEvent) => void
+}) {
+  const field = SHADOW_FIELD[kind]
+  const shadow = nodes[0]!.style[field]
+  const edit = (patch: Partial<ShadowEffect>, axis: string, committing: boolean) =>
+    setShadow(kind, patch, committing ? undefined : `${field}-${axis}`)
+  return (
+    <Section title={t(kind === 'drop' ? 'section.dropShadow' : 'section.innerShadow')}>
+      <div className="paint-row">
+        <PaintToggle
+          on={!!shadow?.visible}
+          label={kind === 'drop' ? 'Drop shadow' : 'Inner shadow'}
+          onChange={(on) => setShadow(kind, shadow ? { visible: on } : { ...DEFAULT_SHADOW, visible: on })}
+        />
+        <Swatch paint={{ type: 'solid', color: shadow?.color ?? DEFAULT_SHADOW.color }} onClick={onPickColor} />
+        {shadow?.visible && (
+          <>
+            <NumberField
+              label="X"
+              value={common(nodes, (n) => n.style[field]?.x ?? 0)}
+              onChange={(v, committing) => edit({ x: v }, 'x', committing)}
+            />
+            <NumberField
+              label="Y"
+              value={common(nodes, (n) => n.style[field]?.y ?? 0)}
+              onChange={(v, committing) => edit({ y: v }, 'y', committing)}
+            />
+            <NumberField
+              label="B"
+              title="Blur"
+              min={0}
+              value={common(nodes, (n) => n.style[field]?.blur ?? 0)}
+              onChange={(v, committing) => edit({ blur: v }, 'b', committing)}
+            />
+          </>
+        )}
+      </div>
+    </Section>
   )
 }
 

@@ -771,13 +771,6 @@ export function pathEditOpenEndAt(e: CanvasPointerEvent, ctx: ToolContext): Poin
   return null
 }
 
-/** The anchor or handle under the pointer, if a press there would grab one. */
-export function pathEditGrabAt(e: CanvasPointerEvent, ctx: ToolContext): PointHandleRef | null {
-  if (!edit.nodeId) return null
-  const tolLocal = (GRAB_PX / ctx.viewport().zoom) * localScale()
-  return findGrab(toLocal(e.doc), tolLocal)
-}
-
 /**
  * Where clicking the outline would drop an anchor, in DOCUMENT space.
  *

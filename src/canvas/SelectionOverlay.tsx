@@ -145,6 +145,7 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
   const gradientEditing = useEditorStore((s) => s.gradientEditing)
   const editingContext = useEditorStore((s) => s.editingContext)
   const dragging = useEditorStore((s) => s.isDragging)
+  const tool = useEditorStore((s) => s.tool)
   // A single Fixed Size text box whose content is taller than it is. Adobe marks
   // the bottom handle red so the cropping is visible rather than silent.
   const overflowId = useMemo(() => {
@@ -213,8 +214,10 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
         )
       )}
 
-      {/* After the frame, so where the two overlap the gizmo wins the press. */}
-      {!nodeEditingId && !gradientEditing && frame && (
+      {/* After the frame, so where the two overlap the gizmo wins the press.
+          Only under the Select tool, which is the one that turns it: under
+          any other a press on it would draw instead. */}
+      {tool === 'select' && !nodeEditingId && !gradientEditing && frame && (
         <Gizmo3D doc={doc} selection={selection} viewport={viewport} frame={frame} tick={tick3d} />
       )}
 
