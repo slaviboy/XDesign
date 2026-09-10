@@ -610,6 +610,46 @@ test('the guide colour is a setting, and is saved with the document', async ({ p
   )
 })
 
+test('a guide keeps the guide colour while it is pulled out and while it is moved', async ({ page }) => {
+  // The guide in the hand used to switch to a hue of its own, so a new guide
+  // looked as though it ignored the colour chosen in Preferences until it was
+  // let go — and so did an old one the moment it was picked up.
+  await openApp(page)
+  await openPreferences(page)
+  await page.locator('[data-testid="guide-color"]').click()
+  const hex = page.locator('.popover .field', { has: page.locator('.field-label:text-is("#")') }).locator('input')
+  await hex.fill('00AA44')
+  await hex.press('Enter')
+  await page.locator('.dialog h4').first().click()
+  await page.locator('.dialog button', { hasText: 'Done' }).click()
+
+  const inHand = page.locator('.artboard-guides .guide.active')
+  const strokeOf = (locator: typeof inHand) => locator.evaluate((el) => getComputedStyle(el).stroke)
+
+  // Pulled out of the edge, and not yet let go.
+  await holdGuide(page, 'x', await screenOfLocalX(page, 250))
+  await expect(inHand).toHaveCount(1)
+  expect(await strokeOf(inHand)).toBe('rgb(0, 170, 68)')
+  // Put down, it is the colour it was while it was held.
+  await page.mouse.up()
+  expect(await strokeOf(guides(page).first())).toBe('rgb(0, 170, 68)')
+
+  // Picked up again by its line.
+  const line = page.locator('.artboard-guides .guide-hit').first()
+  const box = (await line.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + 150)
+  await page.mouse.down()
+  await page.mouse.move(await screenOfLocalX(page, 320), box.y + 150, { steps: 8 })
+  await expect(inHand).toHaveCount(1)
+  expect(await strokeOf(inHand)).toBe('rgb(0, 170, 68)')
+  await page.mouse.up()
+
+  // The strip a guide is pulled from, lit on hover, is the same colour too.
+  const strip = page.locator('[data-guide-strip="y"]').first()
+  await strip.hover()
+  expect(await strip.evaluate((el) => getComputedStyle(el).fill)).toBe('rgb(0, 170, 68)')
+})
+
 // ------------------------------------------------- readout and the artboard --
 
 test('the measurement rule takes the artboard title\'s place while it is needed', async ({ page }) => {

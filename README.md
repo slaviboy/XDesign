@@ -95,8 +95,10 @@ are actually placing: a margin, or a column. Drag a guide off the artboard and i
 before you let go, because a guide outside the artboard it belongs to is a state the model cannot
 hold. Click a guide to select it — it thickens and grows a handle at the artboard's edge, its
 position appears in the panel as a scrubbable `X` or `Y`, and `Delete` removes it. Preferences
-sets the guide colour and whether guides can be dragged by the line itself or only by that
-handle. `⌘;` hides them, `⇧⌘;` locks them, and
+sets the guide colour — which every guide takes, including the one in your hand while you pull
+it out or move it, the strip it comes out of, and the snap line an object makes against one —
+and whether guides can be dragged by the line itself or only by that handle. `⌘;` hides them,
+`⇧⌘;` locks them, and
 right-clicking an artboard offers Copy, Paste, Remove All and Lock All Guides — pasting applies
 one set of guides across as many artboards as you have selected.
 

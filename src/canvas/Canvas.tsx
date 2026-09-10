@@ -56,6 +56,7 @@ import { screenDistanceToDoc, screenToDoc, docToScreen } from './Viewport'
 import { getTool } from '../tools/ToolRegistry'
 import { documentStore, getDoc } from '../state/DocumentStore'
 import { artboardAtPoint, geometryBounds } from '../document/SceneGraph'
+import { toCss } from '../document/color'
 import {
   endTextEditing,
   editorStore,
@@ -126,6 +127,7 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
   const toolId = useEditorStore((s) => s.tool)
   const editingTextId = useEditorStore((s) => s.editingTextId)
   const hoverCursor = useEditorStore((s) => s.hoverCursor)
+  const guideColor = useDocumentStore((s) => s.doc.settings.guideColor)
 
   // --- coordinate helpers ---------------------------------------------------
 
@@ -399,6 +401,11 @@ export function Canvas({ onFilesDropped, onContextMenu }: CanvasProps) {
         className="canvas-svg"
         width={canvasSize.width}
         height={canvasSize.height}
+        // The document's guide colour, as the token every guide rule reads — the
+        // lines, the one being dragged, the strip they come out of and the snap
+        // line an object makes against one. Setting it on the lines alone left
+        // the rest in the stylesheet's default pink whatever Preferences said.
+        style={{ '--guide': toCss(guideColor) } as React.CSSProperties}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

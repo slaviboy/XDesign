@@ -100,10 +100,8 @@
   /* Canvas chrome. These read against ARTWORK, not against the panels. */
   --handle-fill: #ffffff;
   --handle-stroke: #1473e6;
+  /* Only a fallback: the canvas sets this from the document's guide colour. */
   --guide: #d83790;
-  /* The one being dragged, in a different hue from the placed ones and from
-     the magenta measurement rule beside it — three things on screen at once. */
-  --guide-active: #00b0c7;
   /* The coordinate chip reads against ARTWORK, so it is dark in both themes —
      a light chip would vanish on a white artboard. */
   --chip-bg: #303030;
@@ -209,7 +207,6 @@
   --handle-fill: #ffffff;
   --handle-stroke: #2680eb;
   --guide: #e35bab;
-  --guide-active: #2ad2e8;
   --chip-bg: #262626;
   --snap-guide: #ff5ba0;
   /* Mid-grey rather than black: the grid crosses both the near-black pasteboard
