@@ -59,19 +59,20 @@ import {
   setTransform3d,
 } from '../history/Commands'
 import { anyIn3d, is3dAffected, Z_DEPTH_MAX, Z_DEPTH_MIN } from '../document/Scene3D'
-import { liveDocument } from '../tools/liveDocument'
+import { liveDocument, withLiveShape } from '../tools/liveDocument'
+import { getDoc } from '../state/DocumentStore'
 import { getLiveTransform3d } from '../tools/Transform3dSession'
 import { shortcutLabel } from '../shortcuts/keymap'
 import { setRepeatGridParams } from '../history/RepeatGridCommands'
 import { canImageTrace, openImageTrace } from '../history/TraceCommands'
 import { importTextIntoSelection } from '../app/textImport'
 import {
-  artboardOf, geometryBounds, localBox, localGeometryBounds, nodeLocalMatrix, worldMatrix,
+  artboardOf, geometryBounds, localBox, localGeometryBounds, localMatrix, nodeLocalMatrix, worldMatrix,
 } from '../document/SceneGraph'
 import { applyToPoint, decompose, invert, multiply, type Mat2D, type Vec2 } from '../geometry/Matrix'
 import { transformBounds, unionAll, type Bounds } from '../geometry/Bounds'
-import { MAX_SIDES, MIN_SIDES } from '../geometry/ShapeGeometry'
-import { getLiveBox, getLiveMatrix, getLiveSize, usesIntrinsicSize } from '../tools/DragSession'
+import { MAX_SIDES, MIN_SIDES, polygonBoxForOutline } from '../geometry/ShapeGeometry'
+import { getLiveBox, getLiveMatrix, usesIntrinsicSize } from '../tools/DragSession'
 import { isGradient as isGradientPaint } from '../canvas/paint'
 import { getLiveRadius } from '../tools/RadiusSession'
 import { getLiveStarRatio } from '../tools/StarRatioSession'
@@ -142,6 +143,7 @@ import {
   DEFAULT_TEXT_STYLE,
   supports3d,
   type TextStyle,
+  type Transform,
   type Transform3D,
 } from '../document/types'
 
@@ -402,9 +404,18 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
     setNodeTransform(node.id, { y: node.transform.y + (value - shown) }, `y:${node.id}`)
   }
   const applySize = (key: 'width' | 'height', value: number) => {
-    for (const node of nodes) {
+    for (const { id } of nodes) {
+      // Read fresh: with the ratio locked, W and then H are applied in turn,
+      // and a rounded polygon's H has to start from the width just set.
+      const node = getDoc().nodes[id]
+      if (!node) continue
       const scale = Math.abs(key === 'width' ? node.transform.scaleX : node.transform.scaleY) || 1
-      setNodeTransform(node.id, { [key]: Math.max(0.5, value / scale) }, `${key}:${node.id}`)
+      const wanted = Math.max(0.5, value / scale)
+      if (node.type === 'polygon' && node.cornerRadius > 0) {
+        setNodeTransform(id, roundedPolygonResize(node, key, wanted), `${key}:${id}`)
+        continue
+      }
+      setNodeTransform(id, { [key]: wanted }, `${key}:${id}`)
     }
     // A narrower Auto Height box wraps differently and is therefore taller.
     if (key === 'width') refitAutoHeight(nodes.map((n) => n.id))
@@ -701,18 +712,55 @@ function liveEffectiveSize(
   const scaleX = Math.abs(node.transform.scaleX)
   const scaleY = Math.abs(node.transform.scaleY)
 
-  const size = getLiveSize(node.id)
-  if (size) return { width: size.width * scaleX, height: size.height * scaleY }
+  // The box the resize is dragging, which is the frame's.
+  const box = getLiveBox(node.id)
+  if (box) return { width: box.width * scaleX, height: box.height * scaleY }
 
+  const own = describedSize(node)
   const local = liveLocalMatrix(doc, node)
   if (local) {
     const d = decompose(local)
-    return {
-      width: node.transform.width * Math.abs(d.scaleX),
-      height: node.transform.height * Math.abs(d.scaleY),
-    }
+    return { width: own.width * Math.abs(d.scaleX), height: own.height * Math.abs(d.scaleY) }
   }
-  return { width: node.transform.width * scaleX, height: node.transform.height * scaleY }
+  return { width: own.width * scaleX, height: own.height * scaleY }
+}
+
+/**
+ * The box that gives a rounded polygon's outline a new width or height.
+ *
+ * W and H are the outline's (see describedSize), so the box is solved for the
+ * outline asked for, with the other side's outline held where it is — widening
+ * a triangle blunts its tips, which would otherwise shorten it. Moved, too, so
+ * the outline's top-left corner stays put, as a shape's does when W is typed.
+ */
+function roundedPolygonResize(
+  node: DesignNode & { type: 'polygon' },
+  key: 'width' | 'height',
+  wanted: number,
+): Partial<Transform> {
+  const now = localGeometryBounds(node)
+  const target = { width: now.width, height: now.height, [key]: wanted }
+  const fit = polygonBoxForOutline(target, node.sides, node.starRatio, node.cornerRadius, node.transform)
+  const t0 = node.transform
+  const t1 = { ...t0, width: fit.width, height: fit.height }
+  const before = applyToPoint(localMatrix(t0), { x: now.x, y: now.y })
+  const after = applyToPoint(localMatrix(t1), { x: fit.outline.x, y: fit.outline.y })
+  return {
+    width: fit.width,
+    height: fit.height,
+    x: t0.x + before.x - after.x,
+    y: t0.y + before.y - after.y,
+  }
+}
+
+/**
+ * The size W and H describe: the node's box — except for a rounded polygon,
+ * whose frame is its outline. Rounding cuts a polygon back inside its box, and
+ * the fields have to agree with the frame drawn round the shape, radius drag
+ * in flight included.
+ */
+function describedSize(node: DesignNode): { width: number; height: number } {
+  return node.type === 'polygon' ? localGeometryBounds(withLiveShape(node)) : node.transform
 }
 
 // ---------------------------------------------------------------------------

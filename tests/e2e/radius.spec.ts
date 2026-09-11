@@ -67,6 +67,46 @@ test('only a box gets the mode toggle; a polygon keeps its single field', async 
   await expect(page.locator('.corner-radius-row input')).toHaveCount(1)
 })
 
+test('a rounded triangle is framed by the outline it draws, while the radius is dragged too', async ({ page }) => {
+  await openApp(page)
+  await drawShape(page, 'polygon', { x: 260, y: 160 }, { x: 460, y: 360 })
+  // Both measured the same way — the geometry's own box, stroke left out — so
+  // the frame's hairline does not count as the frame being bigger.
+  const rectOf = (selector: string) =>
+    page.locator(selector).first().evaluate((el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.x, y: r.y, width: r.width, height: r.height }
+    })
+  const outline = () => rectOf('.document-layer [data-node-type="polygon"] path')
+  const frame = () => rectOf('.selection-frame')
+  const hugs = async (phase: string) => {
+    const [o, f] = [await outline(), await frame()]
+    for (const k of ['x', 'y', 'width', 'height'] as const) {
+      expect(Math.abs(f[k] - o[k]), `${phase}: ${k}`).toBeLessThan(1)
+    }
+  }
+  await hugs('sharp')
+  const sharp = await frame()
+
+  // Typed: the tips are cut back, and the frame comes in with them.
+  const radius = page.locator('.corner-radius-row input')
+  await radius.fill('40')
+  await radius.press('Enter')
+  await hugs('typed')
+  expect((await frame()).height).toBeLessThan(sharp.height - 20)
+
+  // Dragged: the frame follows the outline while the pointer is still down.
+  const handle = await radiusHandle(page, 'vertex')
+  await page.mouse.move(handle.x, handle.y)
+  await page.mouse.down()
+  await page.mouse.move(handle.x, handle.y + 25, { steps: 8 })
+  await hugs('mid-drag')
+  const during = await frame()
+  await page.mouse.up()
+  await hugs('released')
+  expect((await frame()).height).toBeCloseTo(during.height, 0)
+})
+
 test('the radius handle follows the selected mode', async ({ page }) => {
   await openApp(page)
   await drawShape(page, 'rect', { x: 260, y: 200 }, { x: 500, y: 380 })

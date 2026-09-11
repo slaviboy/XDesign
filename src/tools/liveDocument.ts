@@ -35,8 +35,26 @@ import { transformFromMatrix } from '../document/DocumentModel'
 import { worldMatrix } from '../document/SceneGraph'
 import { patchDocument } from '../document/Scene3D'
 import { getLiveMatrices, getLiveSize } from './DragSession'
+import { getLiveRadius } from './RadiusSession'
+import { getLiveStarRatio } from './StarRatioSession'
 import { getLive3dMap } from './Transform3dSession'
 import type { DesignDocument, DesignNode, NodeId } from '../document/types'
+
+/**
+ * A polygon as the radius or star-ratio drag in flight would leave it.
+ *
+ * Its rounded outline changes with both — and with it the frame round it and
+ * the size the inspector reads — while neither drag writes the document until
+ * it is let go of. Measured from the document, the frame stood still while the
+ * shape shrank away from it.
+ */
+export function withLiveShape(node: DesignNode): DesignNode {
+  if (node.type !== 'polygon') return node
+  const radius = getLiveRadius(node.id)
+  const ratio = getLiveStarRatio(node.id)
+  if (radius === null && ratio === null) return node
+  return { ...node, cornerRadius: radius ?? node.cornerRadius, starRatio: ratio ?? node.starRatio }
+}
 
 let memo: {
   doc: DesignDocument

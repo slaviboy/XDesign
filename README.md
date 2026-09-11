@@ -39,7 +39,8 @@ curve followed by a straight line), dragged it pulls that line back out (a strai
 followed by a curve). `Shift` constrains to 45° placing and 15° dragging; `Cmd`/`Ctrl` drags
 the first point instead of closing on it, and suppresses anchor snapping. Anchors line up with
 the anchors around them, with a guide to say so. Hovering a path shows handles over its start
-and end — clicking one carries it on, and on a closed path it reopens the ring. `Enter` or a
+and end — clicking one carries it on, and on a closed path it reopens the ring; dragging one
+moves the point, with no copy of the handle left behind where it started. `Enter` or a
 double-click ends an open path; `Escape` steps back from drawing to editing to neither. The pen
 keeps the ordinary arrow whatever it is over, handles included: the anchors, the end handles and
 the insert preview — a white dot on the outline — are what say what a press will do, and a
@@ -1243,6 +1244,25 @@ star's reflex inner vertices round inward with no special case.
 Rounding a sharp apex necessarily pulls the outline in — a triangle rounded at 8px no
 longer touches the top of its box, though a square still does, because its flat edges do.
 The node's own width and height never change; only the drawn path insets.
+
+What it is *measured* by does change: a rounded polygon's frame is its outline, not its box.
+Framed by the box, a star rounded hard sat in the middle of a selection rectangle with a
+margin of nothing all round it, and snapping, align and the export crop all agreed with the
+margin rather than with the shape. So `localGeometryBounds` reports the outline, which
+`roundedPolygonBounds` computes from the same corners the path is drawn from — each arc
+spans less than a half-turn and is furthest out only at its circle's four compass points,
+so the answer is exact and needs no path parsed. The frame, the W/H fields, snapping,
+align, the marquee and the export crop follow from that with no change of their own, and
+the frame follows a radius or star-ratio drag while the pointer is still down.
+
+The one place it costs anything is a resize, whose handles are now on the outline while
+the node stores its box. The outline is neither the box scaled — the cut-back is a fixed
+distance while the edges can carry the radius — nor the box less a constant, since it
+becomes a share of the size once they cannot. So the box is solved for:
+`polygonBoxForOutline` takes a secant step per axis and lands on the outline the handle asks
+for in two or three evaluations, and the drag places it so the outline's opposite corner
+stays put. Typing W or H goes through the same solve, holding the other side's outline where
+it is, because widening a triangle blunts its tips and would otherwise shorten it.
 
 The handles sit a constant gap INSIDE the corner they round: `radius * (1/sin(theta/2) - 1)` along
 the inward bisector — the nearest point of the curve to the vertex — plus a fixed stand-off. Because

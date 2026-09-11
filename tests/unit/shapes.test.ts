@@ -16,7 +16,11 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { roundedPolygonPath, maxPolygonRadius, polygonStarPoints, polygonStarPath, rectPath } from '@/geometry/ShapeGeometry'
+import {
+  roundedPolygonPath, roundedPolygonBounds, maxPolygonRadius, polygonBoxForOutline, polygonOutlineBounds,
+  polygonStarPoints, polygonStarPath, rectPath,
+} from '@/geometry/ShapeGeometry'
+import { geometryBounds } from '@/document/SceneGraph'
 import { pathBounds, pointInPath, pathLength, distanceToPath } from '@/geometry/PathUtils'
 import { cornerGeometry, radiusHandlePosition } from '@/tools/RadiusSession'
 import {
@@ -127,6 +131,90 @@ describe('roundedPolygonPath', () => {
     expect(polygonStarPath(80,60,3,1,8)).toContain('A')
     expect(polygonStarPath(100,100,6,1,6)).toContain('A')
     expect(polygonStarPath(100,100,5,0.5,4)).toContain('A')
+  })
+})
+
+describe('a rounded polygon is framed by its outline', () => {
+  const cases: Array<[number, number, number, number, number]> = []
+  for (const [w, h] of [[200, 140], [80, 160]]) {
+    for (const sides of [3, 5, 6, 8]) {
+      for (const ratio of [1, 0.5]) {
+        for (const radius of [4, 12, 40, 9999]) cases.push([w, h, sides, ratio, radius])
+      }
+    }
+  }
+
+  it('measures exactly the outline it draws', () => {
+    // Computed from the arcs rather than from the path, so it is checked against
+    // the path: the drawn outline and the framed one must be the same outline.
+    // To pathBounds' precision, which measures an arc as the cubics it converts
+    // it to — and those bulge past the true circle by up to ~3e-4 of its radius.
+    for (const [w, h, sides, ratio, radius] of cases) {
+      const drawn = pathBounds(polygonStarPath(w, h, sides, ratio, radius))
+      const framed = polygonOutlineBounds(w, h, sides, ratio, radius)
+      const label = `${sides} sides, ratio ${ratio}, r ${radius}, ${w}x${h}`
+      // Per side; a width or height has two sides to be out by.
+      const side = 3e-4 * Math.min(radius, Math.max(w, h)) + 2e-3
+      for (const k of ['x', 'y', 'width', 'height'] as const) {
+        const tolerance = k === 'width' || k === 'height' ? 2 * side : side
+        expect(Math.abs(framed[k] - drawn[k]), `${label}: ${k}`).toBeLessThan(tolerance)
+      }
+      expect(roundedPolygonBounds(polygonStarPoints(w, h, sides, ratio), radius)).toEqual(framed)
+    }
+  })
+
+  it('finds a corner furthest out in the middle of its arc, exactly', () => {
+    // A diamond: each corner is square and points along an axis, so its arc
+    // reaches furthest at its midpoint — r·(√2 − 1) in from the vertex — and
+    // not at either end, where only the tangent points are.
+    const diamond = [{ x: 50, y: 0 }, { x: 100, y: 50 }, { x: 50, y: 100 }, { x: 0, y: 50 }]
+    const r = 12
+    const inset = r * (Math.SQRT2 - 1)
+    const b = roundedPolygonBounds(diamond, r)
+    expect(b.x).toBeCloseTo(inset, 9)
+    expect(b.y).toBeCloseTo(inset, 9)
+    expect(b.width).toBeCloseTo(100 - 2 * inset, 9)
+    expect(b.height).toBeCloseTo(100 - 2 * inset, 9)
+  })
+
+  it('a triangle rounded hard stands well inside its box, most of all at its tip', () => {
+    const b = polygonOutlineBounds(200, 200, 3, 1, 30)
+    expect(b.y).toBeGreaterThan(20)
+    expect(b.x).toBeGreaterThan(0)
+    expect(b.y + b.height).toBeCloseTo(200, 6)
+  })
+
+  it('a sharp polygon or star still fills its box exactly', () => {
+    for (const sides of [3, 5, 7]) {
+      for (const ratio of [1, 0.4]) {
+        expect(polygonOutlineBounds(120, 90, sides, ratio, 0)).toEqual({ x: 0, y: 0, width: 120, height: 90 })
+      }
+    }
+  })
+
+  it('solves the box whose outline a resize asks for', () => {
+    for (const [w, h, sides, ratio, radius] of cases) {
+      for (const target of [{ width: 300, height: 90 }, { width: 40, height: 260 }, { width: 1, height: 1 }]) {
+        const fit = polygonBoxForOutline(target, sides, ratio, radius, { width: w, height: h })
+        const got = polygonOutlineBounds(fit.width, fit.height, sides, ratio, radius)
+        expect(got.width).toBeCloseTo(target.width, 5)
+        expect(got.height).toBeCloseTo(target.height, 5)
+        expect(fit.outline).toEqual(got)
+      }
+    }
+  })
+
+  it('measures a rounded polygon in the document by its outline', () => {
+    const doc = createDocument('Outline', false)
+    const tri = createPolygon({ x: 100, y: 50, width: 200, height: 200 }, {}, 3, 1)
+    tri.cornerRadius = 30
+    addNode(doc, tri, doc.rootId)
+    const outline = polygonOutlineBounds(200, 200, 3, 1, 30)
+    const b = geometryBounds(doc, tri.id)
+    expect(b.x).toBeCloseTo(100 + outline.x, 6)
+    expect(b.y).toBeCloseTo(50 + outline.y, 6)
+    expect(b.width).toBeCloseTo(outline.width, 6)
+    expect(b.height).toBeCloseTo(outline.height, 6)
   })
 })
 

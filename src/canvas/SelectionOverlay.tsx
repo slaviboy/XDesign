@@ -43,7 +43,7 @@ import {
   worldMatrix,
 } from '../document/SceneGraph'
 import { frameMatrix, is3dAffected, localToWorld, nodeMapping, pivotOf } from '../document/Scene3D'
-import { liveDocument } from '../tools/liveDocument'
+import { liveDocument, withLiveShape } from '../tools/liveDocument'
 import {
   getLiveTransform3d,
   getTransform3dMode,
@@ -268,7 +268,7 @@ function computeFrame(
     // A group's stored box is written once and never refitted, so framing it
     // draws handles that are not on the artwork the moment a child moves.
     // Measuring the contents puts them back on it.
-    let local = liveBox ?? localContentBox(doc, node)
+    let local = liveBox ?? localContentBox(doc, withLiveShape(node))
 
     // A mask group shows only what its mask reveals, so the frame is the
     // mask's — framing the union would draw a rectangle round artwork that is

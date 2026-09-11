@@ -635,6 +635,37 @@ test('a dragged curve gets two direction lines of equal length', async ({ page }
   expect((await pathD(page))!).toContain('C')
 })
 
+test('dragging an end point leaves no handle behind where it started', async ({ page }) => {
+  await drawAndReselect(page)
+  const over = await pt(page, 320, 260)
+  await page.mouse.move(over.x, over.y)
+  await expect(page.locator('.pen-end-hint')).toHaveCount(2)
+
+  const from = await pt(page, 320, 320)
+  const to = await pt(page, 420, 380)
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  await page.mouse.move(to.x, to.y, { steps: 8 })
+  // Only the point being dragged: no hollow copy of it where the drag began.
+  await expect(page.locator('.pen-end-hint')).toHaveCount(0)
+  await page.mouse.up()
+
+  // Hovering again measures the path as it now is, so the handle is on the
+  // end where it was put, not where it used to be.
+  const onMovedSegment = await pt(page, 370, 290)
+  await page.mouse.move(onMovedSegment.x, onMovedSegment.y)
+  await expect(page.locator('.pen-end-hint')).toHaveCount(2)
+  const hints = await page.locator('.pen-end-hint').evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    }),
+  )
+  const near = (p: { x: number; y: number }) => Math.min(...hints.map((h) => Math.hypot(h.x - p.x, h.y - p.y)))
+  expect(near(to)).toBeLessThan(1.5)
+  expect(near(from)).toBeGreaterThan(20)
+})
+
 test('hovering a path with the pen shows handles over its start and end', async ({ page }) => {
   await click(page, 200, 200)
   await click(page, 320, 200)

@@ -50,6 +50,8 @@ import { transformBounds, unionAll, type Bounds } from '../geometry/Bounds'
 import {
   ellipsePath,
   linePath,
+  polygonBoxForOutline,
+  polygonOutlineBounds,
   polygonStarPath,
   rectPath,
 } from '../geometry/ShapeGeometry'
@@ -265,7 +267,41 @@ export function getLiveBox(id: NodeId): Bounds | undefined {
   const size = session?.liveSizes.get(id)
   const snap = size && session!.nodes.find((n) => n.id === id)
   if (!size || !snap) return undefined
-  return { x: snap.content.x, y: snap.content.y, width: size.width, height: size.height }
+  return contentAt(snap, size.width, size.height)
+}
+
+/** A polygon whose rounding cuts its outline back inside its box, if this is one. */
+function roundedPolygon(snap: NodeSnapshot): { sides: number; starRatio: number; radius: number } | null {
+  return snap.type === 'polygon' && (snap.vertexRadius ?? 0) > 0
+    ? { sides: snap.sides ?? 3, starRatio: snap.starRatio ?? 1, radius: snap.vertexRadius! }
+    : null
+}
+
+/**
+ * Where the box being dragged sits in the node's own space once the node is
+ * `width` by `height`.
+ *
+ * Everything drawn from its box keeps that box's corner where it was: a
+ * rectangle's is (0, 0), and a path is scaled about its own (geometryScale).
+ * A rounded polygon is the exception. Its frame is its outline, inset from its
+ * box by the rounding — by an amount that changes with the box — so it is
+ * measured rather than assumed.
+ */
+function contentAt(snap: NodeSnapshot, width: number, height: number): Bounds {
+  const rounded = roundedPolygon(snap)
+  if (rounded) return polygonOutlineBounds(width, height, rounded.sides, rounded.starRatio, rounded.radius)
+  return { x: snap.content.x, y: snap.content.y, width, height }
+}
+
+/** The size that gives content of the size the handle asked for: contentAt's inverse. */
+function sizeForContent(
+  snap: NodeSnapshot,
+  wanted: { width: number; height: number },
+): { width: number; height: number } {
+  const rounded = roundedPolygon(snap)
+  if (!rounded) return wanted
+  const fit = polygonBoxForOutline(wanted, rounded.sides, rounded.starRatio, rounded.radius, snap.transform)
+  return { width: fit.width, height: fit.height }
 }
 
 /**
@@ -572,9 +608,13 @@ function applyResize(
     // thing that moves its children.
     const kx = s.scalesContent && content.width > 0 ? box.width / content.width : 1
     const ky = s.scalesContent && content.height > 0 ? box.height / content.height : 1
+    // The size a node with one of its own takes, and where its content then
+    // starts in its own space — where it did, but for a rounded polygon.
+    const sized = s.scalesContent ? null : sizeForContent(snap, liveTextSize(snap, box))
+    const from = sized ? contentAt(snap, sized.width, sized.height) : content
     // Into the content box's frame, resize there, and back out again.
     const reanchor = compose(
-      translation(-content.x, -content.y),
+      translation(-from.x, -from.y),
       scaling(box.sx * kx, box.sy * ky),
       translation(box.x0, box.y0),
       translation(content.x, content.y),
@@ -592,7 +632,7 @@ function applyResize(
       pushLiveTransform(snap, world)
       return
     }
-    let size = liveTextSize(snap, box)
+    let size = sized!
     if (snap.persp) {
       // Text derives its height from its width, so it keeps the estimate; a
       // shape is solved until its projected frame's edge is under the pointer.
@@ -785,10 +825,12 @@ function fitPerspectiveResize(
   const proportional = options.constrain && freeW && freeH
 
   const build = (width: number, height: number) => {
-    const reanchor = compose(
-      translation(-c.x, -c.y),
-      translation(fx * (c.width - width), fy * (c.height - height)),
-      translation(c.x, c.y),
+    // Where the box being dragged is at this size, moved so its pinned point
+    // is where it was.
+    const o = contentAt(snap, width, height)
+    const reanchor = translation(
+      c.x + fx * c.width - (o.x + fx * o.width),
+      c.y + fy * c.height - (o.y + fy * o.height),
     )
     const world = pinAnchor(s, snap, multiply(snap.world, reanchor), reanchor, handle, options, width, height)
     const local = multiply(invert(snap.parentWorld), world)
@@ -797,8 +839,7 @@ function fitPerspectiveResize(
       transform: transformFromMatrix(local, width, height, snap.transform.originX, snap.transform.originY),
     } as DesignNode
     const moved = patchDocument(s.doc, new Map([[snap.id, resized]]))
-    // The resized box keeps its corner at (c.x, c.y) in its own space.
-    const at = mapPoint(nodeMapping(moved, snap.id).toWorld, c.x + gx * width, c.y + gy * height)
+    const at = mapPoint(nodeMapping(moved, snap.id).toWorld, o.x + gx * o.width, o.y + gy * o.height)
     if (!at) return null
     const q = applyToPoint(toFrame, at)
     return { world, rx: freeW ? q.x - target.x : 0, ry: freeH ? q.y - target.y : 0 }

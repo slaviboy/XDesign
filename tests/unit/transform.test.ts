@@ -18,9 +18,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { applyToPoint, invert, multiply, isOrthogonal, type Mat2D } from '@/geometry/Matrix'
 import { transformBounds } from '@/geometry/Bounds'
-import { localContentBox, localMatrix, worldMatrix, geometryBounds } from '@/document/SceneGraph'
+import { localContentBox, localGeometryBounds, localMatrix, worldMatrix, geometryBounds } from '@/document/SceneGraph'
 import { resizeBoxInPlace, transformFromMatrix } from '@/document/DocumentModel'
-import { createDocument, createRect, createEllipse, createPath } from '@/document/NodeFactory'
+import { createDocument, createRect, createEllipse, createPath, createPolygon } from '@/document/NodeFactory'
 import { addNode, groupNodes, ungroupNode } from '@/document/DocumentModel'
 import { replaceDocument, getDoc, transaction } from '@/state/DocumentStore'
 import { setSelection } from '@/state/EditorStore'
@@ -195,6 +195,66 @@ describe('resize with rotation', () => {
     expect(corner(M1, drawn, 0, 0).y).toBeCloseTo(pinned.y, 4)
     expect(corner(M1, drawn, 1, 1).x).toBeCloseTo(pointer.x, 4)
     expect(corner(M1, drawn, 1, 1).y).toBeCloseTo(pointer.y, 4)
+  })
+})
+
+describe('resizing a rounded polygon', () => {
+  it('drags the frame round its outline, not the box it was drawn in', () => {
+    // The frame is the rounded outline, well inside the box for a triangle's
+    // tips, and the outline is neither the box scaled nor the box less a
+    // constant — so the grabbed corner has to be solved onto the pointer.
+    for (const rotation of [0, 25]) {
+      for (const [handle, fx, fy, dx, dy] of [
+        ['se', 1, 1, 60, 40],
+        ['nw', 0, 0, -50, -30],
+        ['e', 1, 0.5, 70, 0],
+        ['n', 0.5, 0, 0, -45],
+      ] as const) {
+        replaceDocument(freshDoc())
+        const tri = createPolygon({ x: 100, y: 80, width: 200, height: 180, rotation }, {}, 3, 1)
+        tri.cornerRadius = 30
+        transaction('add', (d) => { addNode(d, tri, d.rootId) })
+
+        const doc = getDoc()
+        const o = localGeometryBounds(doc.nodes[tri.id]!)
+        const M0 = worldMatrix(doc, tri.id)
+        const at = (m: Mat2D, b: typeof o, u: number, v: number) =>
+          applyToPoint(m, { x: b.x + b.width * u, y: b.y + b.height * v })
+        // The grabbed point moves along the frame's own axes, so it is moved
+        // there too and then carried back into the world.
+        const grabbed = at(M0, o, fx, fy)
+        const local = { x: o.x + o.width * fx + dx, y: o.y + o.height * fy + dy }
+        const pointer = applyToPoint(M0, local)
+        // The point opposite the handle stays put.
+        const px = 1 - fx
+        const py = 1 - fy
+        const pinned = at(M0, o, px, py)
+        const label = `${handle} at ${rotation}°`
+
+        expect(beginDrag(doc, [tri.id], 'resize', grabbed, handle)).toBe(true)
+        const mats = updateDrag(pointer, { constrain: false, fromCenter: false })
+        // Mid-drag: the frame is the live outline under the live matrix.
+        const live = getLiveMatrix(tri.id)!
+        const box = getLiveBox(tri.id)!
+        for (const [p, u, v] of [[pointer, fx, fy], [pinned, px, py]] as const) {
+          const q = at(live, box, u, v)
+          expect(q.x, label).toBeCloseTo(p.x, 4)
+          expect(q.y, label).toBeCloseTo(p.y, 4)
+        }
+
+        commitDrag(mats)
+        const after = getDoc().nodes[tri.id]!
+        const o1 = localGeometryBounds(after)
+        const M1 = worldMatrix(getDoc(), tri.id)
+        for (const [p, u, v] of [[pointer, fx, fy], [pinned, px, py]] as const) {
+          const q = at(M1, o1, u, v)
+          expect(q.x, `${label}, committed`).toBeCloseTo(p.x, 4)
+          expect(q.y, `${label}, committed`).toBeCloseTo(p.y, 4)
+        }
+        // Still a triangle with the same rounding: only its box was solved for.
+        expect(after.type === 'polygon' && after.cornerRadius).toBe(30)
+      }
+    }
   })
 })
 

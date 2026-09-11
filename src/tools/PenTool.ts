@@ -258,6 +258,23 @@ function updateEndHints(e: CanvasPointerEvent, ctx: ToolContext): void {
   refreshOverlay()
 }
 
+/**
+ * Put the end hints away until the pointer next hovers.
+ *
+ * They are measured once per path under the pointer and not again while it
+ * stays there, so a press that moved a point — dragging an end most of all —
+ * left its hint where the point had been: a hollow dot where the drag started
+ * beside the filled one actually being dragged, still there after release. Any
+ * press can change the path, so any press drops them, and the next move
+ * measures the path afresh.
+ */
+function dropEndHints(): void {
+  if (pen.endHints.length === 0 && pen.endHintId === null) return
+  pen.endHints = []
+  pen.endHintId = null
+  refreshOverlay()
+}
+
 export function getPenPreview(): { sub: PenSubpath; rubber: PenSubpath | null } | null {
   if (!pen.building) return null
   // The pending segment is drawn as the path it would BECOME, which in
@@ -711,6 +728,7 @@ export const penTool: Tool = {
 
   onPointerDown(e: CanvasPointerEvent, ctx: ToolContext): void {
     if (!pen.building) {
+      dropEndHints()
       const doc = ctx.doc()
       const hit = hitTest(doc, e.doc, { tolerance: ctx.tolerance() })
       const wasEditing = editorStore.getState().nodeEditingId

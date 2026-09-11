@@ -47,6 +47,7 @@ import {
 import {
   ellipsePath,
   linePath,
+  polygonOutlineBounds,
   polygonStarPath,
   rectPath,
 } from '../geometry/ShapeGeometry'
@@ -218,6 +219,12 @@ export function localGeometryBounds(node: DesignNode): Bounds {
     const x = Math.min(node.x1, node.x2)
     const y = Math.min(node.y1, node.y2)
     return { x, y, width: Math.abs(node.x2 - node.x1), height: Math.abs(node.y2 - node.y1) }
+  }
+  // Rounding cuts a polygon's corners back inside its box — a triangle's tips
+  // a long way — so what it covers is its outline, not the box it was drawn in.
+  if (node.type === 'polygon' && node.cornerRadius > 0) {
+    const { width, height } = node.transform
+    return polygonOutlineBounds(width, height, node.sides, node.starRatio, node.cornerRadius)
   }
   return localBox(node)
 }

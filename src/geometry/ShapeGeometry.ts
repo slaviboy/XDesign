@@ -25,6 +25,7 @@
  * "rotate a group, ungroup, everything is still correct" hold.
  */
 
+import type { Bounds } from './Bounds'
 import type { Vec2 } from './Matrix'
 
 /** Per-corner radii, clockwise from top-left. */
@@ -112,17 +113,44 @@ export function ellipsePath(width: number, height: number): string {
  * points round outward.
  */
 export function roundedPolygonPath(points: readonly Vec2[], radius: number): string {
-  const n = points.length
-  if (n < 3) return pointsToClosedPath(points)
-  if (radius <= 0) return pointsToClosedPath(points)
+  if (points.length < 3 || radius <= 0) return pointsToClosedPath(points)
+  const corners = roundedCorners(points, radius)
+  // Every vertex was degenerate; fall back rather than emit a lone `Z`.
+  if (corners.length === 0) return pointsToClosedPath(points)
 
   const parts: string[] = []
   // Which command opens the subpath is decided by what has actually been
-  // emitted, not by the loop index: a degenerate first vertex is skipped, and
+  // emitted, not by the vertex index: a degenerate first vertex is skipped, and
   // keying off `i === 0` then produced a path starting with `L`, which is not
   // valid path data and renders as nothing at all.
   const move = () => (parts.length === 0 ? 'M' : 'L')
+  for (const c of corners) {
+    if (c.kind === 'point') {
+      parts.push(`${move()}${r(c.at.x)} ${r(c.at.y)}`)
+      continue
+    }
+    parts.push(`${move()}${r(c.a.x)} ${r(c.a.y)}`)
+    parts.push(`A${r(c.radius)} ${r(c.radius)} 0 0 ${c.sweep} ${r(c.b.x)} ${r(c.b.y)}`)
+  }
+  parts.push('Z')
+  return parts.join(' ')
+}
 
+/** One vertex of a rounded polygon: kept sharp, or replaced by an arc. */
+type RoundedCorner =
+  | { kind: 'point'; at: Vec2 }
+  | { kind: 'arc'; a: Vec2; b: Vec2; centre: Vec2; radius: number; sweep: 0 | 1 }
+
+/**
+ * The corners of a polygon rounded by `radius`, in order.
+ *
+ * The arithmetic roundedPolygonPath writes and roundedPolygonBounds measures,
+ * in one place, so the outline that is drawn and the outline that is framed
+ * cannot disagree.
+ */
+function roundedCorners(points: readonly Vec2[], radius: number): RoundedCorner[] {
+  const n = points.length
+  const out: RoundedCorner[] = []
   for (let i = 0; i < n; i++) {
     const prev = points[(i - 1 + n) % n]!
     const cur = points[i]!
@@ -141,7 +169,7 @@ export function roundedPolygonPath(points: readonly Vec2[], radius: number): str
     const theta = Math.acos(cosTheta)
     // A straight-through vertex has nothing to round.
     if (theta < 1e-6 || Math.abs(Math.PI - theta) < 1e-6) {
-      parts.push(`${move()}${r(cur.x)} ${r(cur.y)}`)
+      out.push({ kind: 'point', at: cur })
       continue
     }
 
@@ -157,15 +185,77 @@ export function roundedPolygonPath(points: readonly Vec2[], radius: number): str
     const cross = u1.x * u2.y - u1.y * u2.x
     const sweep = cross < 0 ? 1 : 0
 
-    parts.push(`${move()}${r(a.x)} ${r(a.y)}`)
-    parts.push(`A${r(effective)} ${r(effective)} 0 0 ${sweep} ${r(b.x)} ${r(b.y)}`)
+    // The centre is on the bisector, where the arc meets both edges square.
+    const bx = u1.x + u2.x
+    const by = u1.y + u2.y
+    const bl = Math.hypot(bx, by)
+    const reach = tangent / Math.cos(theta / 2)
+    const centre = { x: cur.x + (bx / bl) * reach, y: cur.y + (by / bl) * reach }
+
+    out.push({ kind: 'arc', a, b, centre, radius: effective, sweep })
   }
+  return out
+}
 
-  // Every vertex was degenerate; fall back rather than emit a lone `Z`.
-  if (parts.length === 0) return pointsToClosedPath(points)
+/**
+ * The bounds of a polygon rounded by `radius` — of the outline as drawn, not
+ * of the vertices it was rounded from.
+ *
+ * Rounding a corner cuts it back, so the tip of a triangle rounded hard sits
+ * well inside where its vertex was. Each arc spans less than a half-turn and
+ * reaches its furthest left, right, top or bottom only at the four compass
+ * points of its circle, so the bounds are the tangent points plus whichever of
+ * those compass points fall on an arc: exact, and no path to parse.
+ */
+export function roundedPolygonBounds(points: readonly Vec2[], radius: number): Bounds {
+  if (points.length < 3 || radius <= 0) return boundsOf(points)
+  const corners = roundedCorners(points, radius)
+  if (corners.length === 0) return boundsOf(points)
 
-  parts.push('Z')
-  return parts.join(' ')
+  const reached: Vec2[] = []
+  for (const c of corners) {
+    if (c.kind === 'point') {
+      reached.push(c.at)
+      continue
+    }
+    reached.push(c.a, c.b)
+    const from = Math.atan2(c.a.y - c.centre.y, c.a.x - c.centre.x)
+    // The short way round, which is the arc drawn (large-arc 0).
+    const span = wrapAngle(Math.atan2(c.b.y - c.centre.y, c.b.x - c.centre.x) - from)
+    for (const compass of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+      const d = wrapAngle(compass - from)
+      if (span >= 0 ? d >= 0 && d <= span : d <= 0 && d >= span) {
+        reached.push({
+          x: c.centre.x + c.radius * Math.cos(compass),
+          y: c.centre.y + c.radius * Math.sin(compass),
+        })
+      }
+    }
+  }
+  return boundsOf(reached)
+}
+
+/** An angle brought into (-pi, pi]. */
+function wrapAngle(a: number): number {
+  let v = a
+  while (v <= -Math.PI) v += 2 * Math.PI
+  while (v > Math.PI) v -= 2 * Math.PI
+  return v
+}
+
+function boundsOf(points: readonly Vec2[]): Bounds {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const p of points) {
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.x > maxX) maxX = p.x
+    if (p.y > maxY) maxY = p.y
+  }
+  if (!Number.isFinite(minX)) return { x: 0, y: 0, width: 0, height: 0 }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
 }
 
 /**
@@ -301,6 +391,79 @@ export function polygonStarPath(
 ): string {
   const points = polygonStarPoints(width, height, sides, starRatio)
   return radius > 0 ? roundedPolygonPath(points, radius) : pointsToClosedPath(points)
+}
+
+/**
+ * What a polygon or star actually covers in its local box.
+ *
+ * Sharp, it fills the box exactly (see unitToBox). Rounded, it does not: every
+ * corner is cut back, and a sharp tip — a triangle's, a star's — furthest of
+ * all. Everything that frames or measures the shape reads this rather than the
+ * box, so the selection frame hugs what is drawn instead of standing off it by
+ * however much the rounding took away.
+ */
+export function polygonOutlineBounds(
+  width: number,
+  height: number,
+  sides: number,
+  starRatio = 1,
+  radius = 0,
+): Bounds {
+  if (!(radius > 0)) return { x: 0, y: 0, width: Math.max(0, width), height: Math.max(0, height) }
+  return roundedPolygonBounds(polygonStarPoints(width, height, sides, starRatio), radius)
+}
+
+/**
+ * The box whose rounded outline measures `target` — the inverse of
+ * polygonOutlineBounds, for a resize, whose handles are on the outline.
+ *
+ * Not a proportion: the rounding cuts a corner back by a fixed distance while
+ * the edges can carry the radius, and by a share of the size once they cannot,
+ * so the outline is neither the box scaled nor the box less a constant. It is
+ * close to straight in the size, though, so a secant step per axis lands on it
+ * in two or three evaluations. Width and height are solved together because
+ * each moves the other's corners: a wider triangle has blunter tips top and
+ * bottom.
+ */
+export function polygonBoxForOutline(
+  target: { width: number; height: number },
+  sides: number,
+  starRatio: number,
+  radius: number,
+  start: { width: number; height: number },
+): { width: number; height: number; outline: Bounds } {
+  const tw = Math.max(0, target.width)
+  const th = Math.max(0, target.height)
+  if (!(radius > 0)) return { width: tw, height: th, outline: { x: 0, y: 0, width: tw, height: th } }
+
+  const MIN = 0.01
+  let w = Math.max(MIN, start.width)
+  let h = Math.max(MIN, start.height)
+  let out = polygonOutlineBounds(w, h, sides, starRatio, radius)
+  // The first step takes the outline as the box's share of it; the secant
+  // between steps then measures the real slope.
+  let slopeW = out.width > 0 ? out.width / w : 1
+  let slopeH = out.height > 0 ? out.height / h : 1
+  for (let i = 0; i < 24; i++) {
+    const ew = tw - out.width
+    const eh = th - out.height
+    if (Math.abs(ew) < 1e-7 && Math.abs(eh) < 1e-7) break
+    const w1 = Math.max(MIN, w + ew / slopeW)
+    const h1 = Math.max(MIN, h + eh / slopeH)
+    const next = polygonOutlineBounds(w1, h1, sides, starRatio, radius)
+    if (Math.abs(w1 - w) > 1e-9) {
+      const s = (next.width - out.width) / (w1 - w)
+      if (s > 1e-3) slopeW = s
+    }
+    if (Math.abs(h1 - h) > 1e-9) {
+      const s = (next.height - out.height) / (h1 - h)
+      if (s > 1e-3) slopeH = s
+    }
+    w = w1
+    h = h1
+    out = next
+  }
+  return { width: w, height: h, outline: out }
 }
 
 /** Centre the polygon is generated about, in local space. */
