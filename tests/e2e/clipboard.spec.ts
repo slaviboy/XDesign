@@ -140,6 +140,44 @@ test('a copied artboard pastes beside the original, contents and all', async ({ 
   expect(copy!.x).toBeGreaterThan(original!.x + original!.width)
 })
 
+test('right-click Copy then Paste on an artboard pastes the artboard, not a picture of it', async ({ page }) => {
+  // The menu Paste has to read the clipboard itself, where the PNG written for
+  // other applications sits beside the stamped markup that says the copy is ours.
+  await drawShape(page, 'rect', { x: 120, y: 120 }, { x: 220, y: 200 })
+  await page.locator('.artboard-label').first().click({ button: 'right' })
+  await page.locator('.menu-item', { hasText: 'Copy' }).first().click()
+
+  const canvas = await page.locator(CANVAS).boundingBox()
+  await page.locator(CANVAS).click({ button: 'right', position: { x: canvas!.width - 20, y: canvas!.height - 20 } })
+  await page.locator('.menu-item', { hasText: 'Paste' }).first().click()
+  await page.waitForTimeout(800)
+
+  await expect(nodesOfType(page, 'image')).toHaveCount(0)
+  await expect(nodesOfType(page, 'artboard')).toHaveCount(2)
+  await expect(nodesOfType(page, 'rect')).toHaveCount(2)
+  await expect(page.locator('.artboard-label')).toHaveText(['Artboard 1', 'Artboard 2'])
+})
+
+test('right-click Copy then Paste on a text object pastes the text object', async ({ page }) => {
+  // All-text copies put the characters on the clipboard, not the stamped markup,
+  // so there is no stamp to find — the paste has to recognise the text itself.
+  await selectTool(page, 'text')
+  await clickCanvas(page, { x: 200, y: 200 })
+  await page.keyboard.type('Headline')
+  await page.keyboard.press('Escape')
+  await expect(nodesOfType(page, 'text')).toHaveCount(1)
+
+  await nodesOfType(page, 'text').first().click({ button: 'right' })
+  await page.locator('.menu-item', { hasText: 'Copy' }).first().click()
+  await page.waitForTimeout(800)
+  await page.locator(CANVAS).click({ button: 'right', position: { x: 300, y: 300 } })
+  await page.locator('.menu-item', { hasText: 'Paste' }).first().click()
+  await page.waitForTimeout(800)
+
+  await expect(nodesOfType(page, 'image')).toHaveCount(0)
+  await expect(nodesOfType(page, 'text')).toHaveCount(2)
+})
+
 test('copying puts a picture on the clipboard, for applications that want one', async ({ page }) => {
   await drawShape(page, 'rect', { x: 120, y: 120 }, { x: 240, y: 200 })
   await press(page, 'c')

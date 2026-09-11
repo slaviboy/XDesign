@@ -157,6 +157,22 @@ async function renderPng(ids: readonly NodeId[]): Promise<Blob | null> {
 }
 
 /**
+ * The text the last write put on the clipboard, and the copy it came from.
+ *
+ * An all-text copy writes the characters rather than the stamped markup, so
+ * there is no stamp to find when it comes back — without this a paste from the
+ * menu took the PNG beside it for a picture from somewhere else.
+ */
+let written: { clipId: string; plain: string } | null = null
+
+/**
+ * The write still under way. Rendering the PNG takes a moment, and until the
+ * write lands the clipboard holds whatever was there before — so a Paste from
+ * the menu right after Copy would import that instead.
+ */
+let inflight: Promise<void> | null = null
+
+/**
  * Write the clipboard asynchronously, with the PNG included.
  *
  * Used on its own for a copy from a menu, where there is no native event, and
@@ -165,11 +181,23 @@ async function renderPng(ids: readonly NodeId[]): Promise<Blob | null> {
  * permission, an insecure context — whatever was written synchronously stands,
  * so copy never ends up worse off for having tried.
  */
-async function writeAsync(ids: readonly NodeId[]): Promise<void> {
+function writeAsync(ids: readonly NodeId[]): Promise<void> {
+  const write = writeFlavors(ids)
+  inflight = write
+  void write.finally(() => {
+    if (inflight === write) inflight = null
+  })
+  return write
+}
+
+async function writeFlavors(ids: readonly NodeId[]): Promise<void> {
   try {
     if (typeof navigator === 'undefined' || !navigator.clipboard) return
     const flavors = await buildFlavors(ids)
     if (!flavors) return
+    const clipId = currentClipId()
+    // Trimmed as the readers trim, so the comparison is like for like.
+    written = clipId ? { clipId, plain: flavors.plain.trim() } : null
 
     const png = typeof ClipboardItem === 'undefined' ? null : await renderPng(ids)
     if (png && navigator.clipboard.write) {
@@ -250,8 +278,10 @@ export async function readClipboardAsync(): Promise<ClipboardPayload | null> {
       if (type) {
         const blob = await item.getType(type)
         files.push(new File([blob], `Pasted image.${extensionFor(type)}`, { type }))
-        continue
       }
+      // Read even beside an image: our own copy is exactly that pair, and the
+      // text is where the stamp saying so lives. Skipping it pasted a copied
+      // artboard back as a picture of itself.
       if (!text && item.types.includes('text/plain')) {
         text = (await (await item.getType('text/plain')).text()).trim() || null
       }
@@ -263,7 +293,10 @@ export async function readClipboardAsync(): Promise<ClipboardPayload | null> {
 }
 
 function clipIdOf(text: string | null): string | null {
-  return text ? (STAMP_RE.exec(text)?.[1] ?? null) : null
+  if (!text) return null
+  const stamped = STAMP_RE.exec(text)?.[1]
+  if (stamped) return stamped
+  return written && text === written.plain ? written.clipId : null
 }
 
 function extensionFor(mimeType: string): string {
@@ -282,6 +315,8 @@ function extensionFor(mimeType: string): string {
 export async function pasteFromSystem(
   opts: { event?: ClipboardEvent; at?: Vec2 } = {},
 ): Promise<NodeId[]> {
+  // An event's data is fixed when it fires, so only a read made here can wait.
+  if (!opts.event && inflight) await inflight
   const payload = opts.event ? readClipboardEvent(opts.event) : await readClipboardAsync()
 
   // Our own copy, still current: use the full-fidelity payload rather than

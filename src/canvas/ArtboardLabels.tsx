@@ -86,6 +86,13 @@ export const ArtboardLabels = memo(function ArtboardLabels() {
               // artboard whichever instrument happens to be selected, so the
               // active tool must never see this press.
               e.stopPropagation()
+              // A right-press names the artboard the menu about to open is
+              // for — without this, Copy there copied whatever was selected
+              // before. Part of a larger selection, it leaves that alone.
+              if (e.button === 2) {
+                if (!selection.includes(id)) setSelection([id])
+                return
+              }
               const svg = e.currentTarget.ownerSVGElement
               if (!svg) return
               beginArtboardLabelDrag(id, e.nativeEvent, e.currentTarget, svg)
