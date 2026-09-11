@@ -85,6 +85,8 @@
    */
   --magenta: #bd2a7b;  /* 5.55:1 on white */
   --warn: #a1620a;     /* 4.92:1 */
+  /* The ground under a warning in a dialog: the warning's colour, barely there. */
+  --warn-bg: #fdf3e3;
   --error: #d7373f;    /* 4.66:1 */
 
   /* Notification chips: white text sits on these, in BOTH themes. */
@@ -208,6 +210,7 @@
      is a token that silently rots. */
   --magenta: #e35bab;  /* 4.58:1 */
   --warn: #e68619;     /* 5.61:1 */
+  --warn-bg: #3a2c16;
   --error: #f0787f;    /* 5.55:1 — #ec5b62 sat exactly on 4.50 */
 
   --overlay-strong: #454545;

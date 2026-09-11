@@ -36,7 +36,7 @@ import { ensureDictionaries } from '../text/spellcheck'
 import { Notifications } from '../ui/Notifications'
 import { ExportDialog } from '../ui/ExportDialog'
 import {
-  AboutDialog, ArtboardPresetDialog, NewDocumentDialog, PreferencesDialog,
+  AboutDialog, ArtboardPresetDialog, NewDocumentDialog, OpenDroppedDocumentDialog, PreferencesDialog,
   RecoveryDialog, ShortcutsDialog,
 } from '../ui/Dialogs'
 import { PreferencesExportDialog, PreferencesImportDialog } from '../ui/PreferencesTransferDialogs'
@@ -48,7 +48,7 @@ import { installSystemClipboard } from '../state/SystemClipboard'
 import { installTraceReconciler } from '../history/TraceCommands'
 import { installCropReconciler } from '../tools/CropSession'
 import {
-  adoptRecoveredDocument, importFilesFlow, openDocumentFlow, saveDocumentFlow,
+  adoptRecoveredDocument, importFilesFlow, isDocumentFile, openDocumentFlow, saveDocumentFlow,
 } from './fileOperations'
 import { checkForRecovery, dismissRecovery, startAutosave, stopAutosave, type RecoveryOffer } from '../persistence/Autosave'
 import { screenDistanceToDoc, screenToDoc, docToScreen } from '../canvas/Viewport'
@@ -183,7 +183,16 @@ export function App() {
     void ensureDictionaries()
   }, [])
 
+  // A dropped document is opened, not imported — and opening replaces what is
+  // open, so it is asked about first. Anything dropped alongside it waits: a
+  // document and the artwork for it are two different intentions.
+  const [droppedDocument, setDroppedDocument] = useState<{ file: File; skipped: number } | null>(null)
   const onFilesDropped = useCallback((files: FileList, at: Vec2) => {
+    const dropped = Array.from(files).find(isDocumentFile)
+    if (dropped) {
+      setDroppedDocument({ file: dropped, skipped: files.length - 1 })
+      return
+    }
     void importFiles(files, at)
   }, [])
 
@@ -236,6 +245,14 @@ export function App() {
       {dialog === 'artboard-preset' && <ArtboardPresetDialog />}
       {dialog === 'preferences-export' && <PreferencesExportDialog />}
       {dialog === 'preferences-import' && <PreferencesImportDialog />}
+
+      {droppedDocument && (
+        <OpenDroppedDocumentDialog
+          file={droppedDocument.file}
+          skipped={droppedDocument.skipped}
+          onClose={() => setDroppedDocument(null)}
+        />
+      )}
 
       {recovery && (
         <RecoveryDialog

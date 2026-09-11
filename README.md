@@ -134,6 +134,12 @@ Artboard 2*. The highlight reads the same `artboardAtPoint` the drop itself pare
 cannot promise one thing and do another. Over bare pasteboard, where there is no region to fill,
 it shrinks to a chip at the cursor.
 
+**Dropping a document** — a `.xdesign` file dropped on the canvas is opened rather than imported,
+and because opening replaces what is open, it asks first. With unsaved changes it also says what
+would be lost. **Save & Open** saves them first and is the default choice. **Discard & Open** is
+offered as well, named and coloured as the destructive one. Anything dropped along with the
+document is left out, and the dialog says so.
+
 **Eight languages** — English, Български, Deutsch, Español, Français, Português, 中文 and 日本語,
 chosen in Preferences and remembered on the machine. One JSON catalogue per locale keyed by
 resource id, with English as the source of truth and the fallback.

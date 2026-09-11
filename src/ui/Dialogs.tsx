@@ -16,7 +16,8 @@
  */
 
 /**
- * Preferences, keyboard shortcuts, About, New document, and crash recovery.
+ * Preferences, keyboard shortcuts, About, New document, crash recovery, and
+ * opening a document dropped on the canvas.
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
@@ -28,7 +29,8 @@ import {
   closeDialog, setEditor, setMarqueeMode, setToolHighlight, setViewport,
   type MarqueeMode, type ToolHighlight,
 } from '../state/EditorStore'
-import { useDocument, useEditorStore } from '../state/hooks'
+import { useDocument, useDocumentStore, useEditorStore } from '../state/hooks'
+import { openDocumentFromFile, saveDocumentFlow } from '../app/fileOperations'
 import { getStorageEstimate, clearRecent } from '../persistence/IndexedDbStore'
 import { supportsFileSystemAccess } from '../persistence/FileSystem'
 import { ALT_LABEL, MOD_LABEL } from '../shortcuts/bindings'
@@ -565,6 +567,102 @@ export function RecoveryDialog({
       <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
         Recovering replaces the current empty document. Discarding removes the autosave.
       </p>
+    </DialogShell>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Opening a dropped document
+// ---------------------------------------------------------------------------
+
+/**
+ * Asked when a .xdesign file is dropped on the canvas: opening it replaces
+ * the document that is open, and a drop has no menu command in front of it to
+ * ask first.
+ *
+ * With nothing unsaved it is a plain yes or no. With unsaved changes the
+ * warning says what would be lost, and the way out that keeps them — Save &
+ * Open — is the primary button; discarding is offered, but named for what it
+ * does and coloured as the destructive choice.
+ */
+export function OpenDroppedDocumentDialog({
+  file,
+  skipped,
+  onClose,
+}: {
+  file: File
+  /** Other files dropped with it, which are not imported. */
+  skipped: number
+  onClose: () => void
+}) {
+  const dirty = useDocumentStore((s) => s.dirty)
+  const current = useDocumentStore((s) => s.doc.name)
+  const [busy, setBusy] = useState(false)
+
+  const open = async () => {
+    setBusy(true)
+    await openDocumentFromFile(file)
+    onClose()
+  }
+
+  const saveThenOpen = async () => {
+    setBusy(true)
+    // Cancelling the save dialog cancels the open too: the changes are still
+    // unsaved, and they were the reason to ask.
+    if (!(await saveDocumentFlow(false))) {
+      setBusy(false)
+      return
+    }
+    await openDocumentFromFile(file)
+    onClose()
+  }
+
+  return (
+    <DialogShell
+      title={`Open “${file.name}”?`}
+      onClose={() => { if (!busy) onClose() }}
+      footer={
+        <>
+          <button type="button" className="button" disabled={busy} onClick={onClose}>Cancel</button>
+          {dirty ? (
+            <>
+              <button type="button" className="button danger" disabled={busy} onClick={() => void open()}
+                data-testid="drop-open-discard">
+                Discard & Open
+              </button>
+              <button type="button" className="button primary" disabled={busy} onClick={() => void saveThenOpen()}
+                data-testid="drop-open-save">
+                Save & Open
+              </button>
+            </>
+          ) : (
+            <button type="button" className="button primary" disabled={busy} onClick={() => void open()}
+              data-testid="drop-open">
+              Open
+            </button>
+          )}
+        </>
+      }
+    >
+      <p style={{ marginTop: 0, fontSize: 12, lineHeight: 1.6 }}>
+        Opening it replaces <strong>{current}</strong>, the document you have open now.
+      </p>
+      {dirty ? (
+        <div className="dialog-warning" role="alert">
+          <strong>{current} has unsaved changes.</strong> They will be lost if you open this file
+          without saving first.
+        </div>
+      ) : (
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          Everything in it is saved, so nothing will be lost.
+        </p>
+      )}
+      {skipped > 0 && (
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 0 }}>
+          Only the document is opened. The {skipped === 1 ? 'other file' : `${skipped} other files`} you
+          dropped with it {skipped === 1 ? 'is' : 'are'} not imported.
+        </p>
+      )}
     </DialogShell>
   )
 }

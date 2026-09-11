@@ -31,6 +31,7 @@ import {
   DocumentFormatError,
   openDocument,
   pickFileViaInput,
+  readDocumentFile,
   pickFilesViaInput,
   saveDocument,
   type SaveTarget,
@@ -41,6 +42,8 @@ import {
 } from '../persistence/Preferences'
 import { setPendingPreferences } from '../state/PreferencesTransfer'
 import { flush, markDocumentSaved } from '../persistence/Autosave'
+import { recordRecent } from '../persistence/IndexedDbStore'
+import { FILE_EXTENSION } from '../persistence/FileFormat'
 import { importFiles } from '../images/ImageImporter'
 import { preloadFontsFor } from '../text/FontRegistry'
 import { documentBounds } from '../document/SceneGraph'
@@ -91,23 +94,60 @@ export async function openDocumentFlow(): Promise<void> {
     await flush()
     const result = await openDocument()
     if (!result) return
-    // Before the document is installed, not after: the first layout of every
-    // text node happens on the first render, and a face that has not arrived by
-    // then is measured as the fallback.
-    await preloadDocumentFonts(result.doc)
-    replaceDocument(result.doc)
-    saveTarget = result.target
-    clearSelection()
-    fitToDocument()
-    notify('success', `Opened ${result.doc.name}`, undefined, 2500)
+    await installOpenedDocument(result.doc, result.target)
   } catch (error) {
-    notify(
-      'error',
-      error instanceof DocumentFormatError ? error.message : 'That file could not be opened.',
-      undefined,
-      9000,
-    )
+    reportOpenFailure(error)
   }
+}
+
+/**
+ * Whether a file is a document to open rather than artwork to import — told
+ * by its extension, since an operating system rarely knows the type of a
+ * .xdesign file and hands it over as octet-stream or as nothing at all.
+ */
+export function isDocumentFile(file: File): boolean {
+  return file.name.toLowerCase().endsWith(FILE_EXTENSION) || file.type === 'application/x-xdesign+zip'
+}
+
+/**
+ * Open a document from a file the user already has in hand — one dropped on
+ * the canvas. Replacing the open document is the caller's to have confirmed:
+ * a drop has no menu command in front of it to ask. There is no file handle
+ * behind a dropped file, so the first Save asks where to put it, as a
+ * document opened from the fallback file picker does.
+ */
+export async function openDocumentFromFile(file: File): Promise<boolean> {
+  try {
+    await flush()
+    const doc = await readDocumentFile(file)
+    await recordRecent(doc)
+    await installOpenedDocument(doc, { handle: null, fileName: file.name })
+    return true
+  } catch (error) {
+    reportOpenFailure(error)
+    return false
+  }
+}
+
+async function installOpenedDocument(doc: ReturnType<typeof getDoc>, target: SaveTarget): Promise<void> {
+  // Before the document is installed, not after: the first layout of every
+  // text node happens on the first render, and a face that has not arrived by
+  // then is measured as the fallback.
+  await preloadDocumentFonts(doc)
+  replaceDocument(doc)
+  saveTarget = target
+  clearSelection()
+  fitToDocument()
+  notify('success', `Opened ${doc.name}`, undefined, 2500)
+}
+
+function reportOpenFailure(error: unknown): void {
+  notify(
+    'error',
+    error instanceof DocumentFormatError ? error.message : 'That file could not be opened.',
+    undefined,
+    9000,
+  )
 }
 
 export async function saveDocumentFlow(forceDialog = false): Promise<boolean> {

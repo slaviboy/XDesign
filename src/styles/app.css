@@ -832,6 +832,26 @@ body.section-reordering * { cursor: grabbing !important; user-select: none; }
   color: #fff;
 }
 .button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+/* The destructive choice in a dialog: named for what it does, and coloured so
+   it is never mistaken for the safe one beside it. */
+.button.danger {
+  background: var(--notify-error-bg);
+  border-color: var(--notify-error-bg);
+  color: var(--accent-contrast);
+}
+/* Restated, or the plain button's hover would grey it out under the pointer. */
+.button.danger:hover:not(:disabled) { background: var(--notify-error-bg); filter: brightness(0.92); }
+
+/* What a choice in a dialog would cost, set apart from the explanation. */
+.dialog-warning {
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  border-left: 3px solid var(--warn);
+  background: var(--warn-bg);
+  color: var(--text);
+}
 .button:disabled { opacity: 0.45; cursor: default; }
 
 .dialog-row {
