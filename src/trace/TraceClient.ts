@@ -34,6 +34,8 @@
  */
 
 import type { TraceRequest, TraceResponse } from '../workers/trace.worker'
+import { FULL_CROP } from '../document/ImageCrop'
+import type { ImageCrop } from '../document/types'
 import type { RasterData, TraceOptions, TraceResult } from './types'
 
 export interface TraceOutcome {
@@ -193,15 +195,24 @@ const MAX_SOURCE_PIXELS = 2_000_000
  * Data URLs are same-origin, so the canvas is never tainted and getImageData
  * is allowed — the same reason the eyedropper's rasterizer works.
  */
-export function loadRaster(dataUrl: string): Promise<RasterData> {
+export function loadRaster(dataUrl: string, crop: ImageCrop = FULL_CROP): Promise<RasterData> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.onload = () => {
       const natural = { width: img.naturalWidth || 1, height: img.naturalHeight || 1 }
+      // Only the kept part of a cropped image is decoded, so the trace is of
+      // what is on the canvas — and the size cap below spends its budget on
+      // that part rather than on pixels nobody can see.
+      const source = {
+        x: crop.x * natural.width,
+        y: crop.y * natural.height,
+        width: Math.max(1, crop.width * natural.width),
+        height: Math.max(1, crop.height * natural.height),
+      }
       // Whole-number-ish reduction, then rounded up so nothing collapses to 0.
-      const fit = Math.min(1, Math.sqrt(MAX_SOURCE_PIXELS / (natural.width * natural.height)))
-      const width = Math.max(1, Math.round(natural.width * fit))
-      const height = Math.max(1, Math.round(natural.height * fit))
+      const fit = Math.min(1, Math.sqrt(MAX_SOURCE_PIXELS / (source.width * source.height)))
+      const width = Math.max(1, Math.round(source.width * fit))
+      const height = Math.max(1, Math.round(source.height * fit))
 
       const canvas = document.createElement('canvas')
       canvas.width = width
@@ -215,7 +226,7 @@ export function loadRaster(dataUrl: string): Promise<RasterData> {
       // out of existence, and the tracer would then faithfully trace the gaps.
       ctx.imageSmoothingEnabled = true
       ctx.imageSmoothingQuality = 'high'
-      ctx.drawImage(img, 0, 0, width, height)
+      ctx.drawImage(img, source.x, source.y, source.width, source.height, 0, 0, width, height)
       const pixels = ctx.getImageData(0, 0, width, height)
       resolve({ width, height, data: pixels.data })
     }

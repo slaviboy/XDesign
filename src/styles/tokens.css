@@ -121,6 +121,15 @@
   --scrollbar-thumb: rgba(0, 0, 0, 0.2);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
 
+  /* SVG code, in the colours a browser's element inspector uses — the view
+     people already read markup in. */
+  --code-bg: #fafafa;
+  --code-tag: #881280;
+  --code-attr: #994500;
+  --code-value: #1a1aa6;
+  --code-text: #303030;
+  --code-comment: #236e25;
+
   /* Metrics */
   --topbar-height: 44px;
   --toolbar-width: 52px;
@@ -225,6 +234,13 @@
 
   --scrollbar-thumb: rgba(255, 255, 255, 0.22);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.34);
+
+  --code-bg: #1f1f1f;
+  --code-tag: #5db0d7;
+  --code-attr: #9bbbdc;
+  --code-value: #f29766;
+  --code-text: #d4d4d4;
+  --code-comment: #7fb77e;
 
   --shadow-panel: 0 2px 8px rgba(0, 0, 0, 0.45);
   --shadow-popover: 0 6px 20px rgba(0, 0, 0, 0.55);

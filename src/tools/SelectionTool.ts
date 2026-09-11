@@ -105,6 +105,17 @@ import {
 } from '../state/EditorStore'
 import { getDoc } from '../state/DocumentStore'
 import { isUniformCornerRadius } from '../document/types'
+import {
+  beginCropDrag,
+  cancelCropDrag,
+  cancelCropMode,
+  commitCropMode,
+  endCropDrag,
+  isCropDragging,
+  nudgeCrop,
+  updateCropDrag,
+  type CropHandle,
+} from './CropSession'
 import type { Mat2D, Vec2 } from '../geometry/Matrix'
 import type { DesignDocument, NodeId } from '../document/types'
 import type { CanvasPointerEvent, Tool, ToolContext } from './types'
@@ -118,6 +129,7 @@ type Phase =
   | 'star-ratio'
   | 'gradient'
   | 'gizmo'
+  | 'crop'
 
 interface State {
   phase: Phase
@@ -252,6 +264,18 @@ export const selectionTool: Tool = {
 
     // While a path's points are shown, they own the pointer.
     if (editor.nodeEditingId && pathEditPointerDown(e, ctx)) return
+
+    // Crop mode owns it too: its handles adjust the crop, and a press anywhere
+    // else is the click away that applies it — and nothing more, so the click
+    // that finishes a crop does not also select or move whatever it landed on.
+    if (editor.cropEditing) {
+      if (e.targetHandle === 'crop' && beginCropDrag((e.targetCorner ?? 'move') as CropHandle, e.doc)) {
+        state.phase = 'crop'
+        return
+      }
+      commitCropMode()
+      return
+    }
 
     // 1a. A corner-radius handle. Checked before the transform handles because
     // it sits inside the shape, where a plain click would otherwise start a move.
@@ -395,6 +419,19 @@ export const selectionTool: Tool = {
   },
 
   onPointerMove(e: CanvasPointerEvent, ctx: ToolContext): void {
+    if (state.phase === 'crop') {
+      // Same self-healing guard as the phases below.
+      if (!isCropDragging() || e.buttons === 0) {
+        endCropDrag()
+        reset()
+        return
+      }
+      updateCropDrag(e.doc, e.shiftKey)
+      return
+    }
+    // Nothing under the pointer is pickable while cropping, so no hover.
+    if (editorStore.getState().cropEditing) return
+
     if (state.phase === 'radius') {
       // Self-healing: a tool switch mid-gesture can deliver pointerup elsewhere,
       // and a button-less move here would otherwise keep deforming the shape.
@@ -502,6 +539,12 @@ export const selectionTool: Tool = {
   onPointerUp(e: CanvasPointerEvent, ctx: ToolContext): void {
     const editor = editorStore.getState()
 
+    if (state.phase === 'crop') {
+      endCropDrag()
+      reset()
+      return
+    }
+
     if (state.phase === 'radius') {
       commitRadiusDrag()
       reset()
@@ -570,6 +613,12 @@ export const selectionTool: Tool = {
     // editing below, because that only runs when nothing is being edited yet.
     if (editorStore.getState().nodeEditingId && pathEditDoubleClick(e, ctx)) return
 
+    // Inside the crop, a double-click is "that's the one" — XD's way out.
+    if (editorStore.getState().cropEditing) {
+      commitCropMode()
+      return
+    }
+
     const doc = ctx.doc()
     const deep = hitTest(doc, e.doc, { tolerance: ctx.tolerance(), deep: true })
     if (!deep) return
@@ -618,6 +667,35 @@ export const selectionTool: Tool = {
 
   onKeyDown(e: KeyboardEvent): boolean {
     if (editorStore.getState().nodeEditingId && pathEditKeyDown(e)) return true
+
+    if (editorStore.getState().cropEditing) {
+      if (e.key === 'Escape') {
+        if (isCropDragging()) {
+          cancelCropDrag()
+          reset()
+        } else {
+          cancelCropMode()
+        }
+        return true
+      }
+      if (e.key === 'Enter') {
+        commitCropMode()
+        return true
+      }
+      // Arrows move the kept part over the picture, as they nudge an object.
+      const step = e.shiftKey ? 10 : 1
+      const nudge: Record<string, [number, number]> = {
+        ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step],
+      }
+      const by = nudge[e.key]
+      if (by) {
+        nudgeCrop(by[0], by[1])
+        return true
+      }
+      // The image is not what Delete means here, and deleting it out from
+      // under the crop would leave the mode cropping nothing.
+      if (e.key === 'Delete' || e.key === 'Backspace') return true
+    }
 
     // While the gradient widget is on screen, its selected stop owns Delete and
     // Tab — otherwise Delete would remove the whole shape out from under it.
@@ -693,6 +771,10 @@ export const selectionTool: Tool = {
   },
 
   onDeactivate(): void {
+    // The crop mode itself outlives this: holding Space to pan comes through
+    // here too, and must not apply the crop. CropSession's reconciler applies
+    // it when the tool really changes.
+    if (isCropDragging()) cancelCropDrag()
     if (isRadiusDragging()) cancelRadiusDrag()
     if (isStarRatioDragging()) cancelStarRatioDrag()
     if (isGradientDragging()) cancelGradientDrag()

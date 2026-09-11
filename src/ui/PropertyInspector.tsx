@@ -51,6 +51,7 @@ import {
   setTextStyle,
   updateSettings,
   renameDocument,
+  resetImageCrop,
   matchSize,
   setCornerRadiusAt,
   clearTextRunStyle,
@@ -65,6 +66,10 @@ import { getLiveTransform3d } from '../tools/Transform3dSession'
 import { shortcutLabel } from '../shortcuts/keymap'
 import { setRepeatGridParams } from '../history/RepeatGridCommands'
 import { canImageTrace, openImageTrace } from '../history/TraceCommands'
+import {
+  canCrop, cancelCropMode, commitCropMode, enterCropMode, resetCropRect,
+} from '../tools/CropSession'
+import { isCropped } from '../document/ImageCrop'
 import { importTextIntoSelection } from '../app/textImport'
 import {
   artboardOf, geometryBounds, localBox, localGeometryBounds, localMatrix, nodeLocalMatrix, worldMatrix,
@@ -98,6 +103,7 @@ import {
 } from '../state/hooks'
 import { IconSelect, NumberField, Section, Select, TextField, common, IconButton } from './primitives'
 import { PaintPopover, PAINT_POPOVER_WIDTH } from './ColorPicker'
+import { SvgCodeSection } from './SvgCodeSection'
 import { useEyedropper } from './eyedropper'
 import {
   AlignBottomIcon, AlignCenterHIcon, AlignCenterVIcon, AlignLeftIcon, AlignRightIcon,
@@ -198,7 +204,7 @@ function GuideSection({ selected }: { selected: { artboardId: string; guideId: s
   const extent = guide.axis === 'x' ? board.transform.width : board.transform.height
 
   return (
-    <Section title={t('section.guide')}>
+    <Section id="guide" title={t('section.guide')}>
       <div className="multi-note">{guide.axis === 'x' ? t('label.vertical') : t('label.horizontal')} · {board.name}</div>
       <div className="field-row cols-3">
         <NumberField
@@ -242,7 +248,7 @@ function DocumentSection() {
 
   return (
     <>
-      <Section title={t('section.document')}>
+      <Section id="document" title={t('section.document')}>
         <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
           <TextField label={t('label.name')} value={doc.name} onChange={renameDocument} />
         </div>
@@ -256,7 +262,7 @@ function DocumentSection() {
 
       {/* Named to distinguish it from an artboard's own grid, which is a
           different feature with different settings. */}
-      <Section title={t('section.canvasGrid')}>
+      <Section id="canvasGrid" title={t('section.canvasGrid')}>
         <div className="multi-note">{t('note.canvasGrid')}</div>
         <label className="checkbox-row">
           <input
@@ -288,7 +294,7 @@ function DocumentSection() {
         </div>
       </Section>
 
-      <Section title={t('section.guidesSnapping')}>
+      <Section id="guidesSnapping" title={t('section.guidesSnapping')}>
         <label className="checkbox-row">
           <input
             type="checkbox"
@@ -453,6 +459,7 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
       </div>
 
       <Section
+        id="transform"
         title={t('section.transform')}
         actions={
           // Adobe's cube: it "only shows or hides the controls and the gizmo",
@@ -569,7 +576,7 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
         </div>
       </Section>
 
-      <Section title={t('section.align')}>
+      <Section id="align" title={t('section.align')}>
         <div className="icon-row">
           <IconButton icon={<AlignLeftIcon />} label="Align left" onClick={() => alignSelection('left')} />
           <IconButton icon={<AlignCenterHIcon />} label="Align center" onClick={() => alignSelection('center-h')} />
@@ -598,6 +605,7 @@ function SelectionSections({ nodes }: { nodes: DesignNode[] }) {
       <RepeatGridSection nodes={nodes} />
       <ShapeSection nodes={nodes} />
       <TextSection nodes={nodes} />
+      <SvgCodeSection nodes={nodes} />
       <ExportSection nodes={nodes} />
     </>
   )
@@ -898,7 +906,7 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
 
   return (
     <>
-      <Section title={t('section.fill')}>
+      <Section id="fill" title={t('section.fill')}>
         <div className="paint-row">
           <PaintToggle
             on={fillOn}
@@ -935,7 +943,7 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
         )}
       </Section>
 
-      <Section title={t('section.stroke')}>
+      <Section id="stroke" title={t('section.stroke')}>
         <div className="paint-row">
           <PaintToggle
             on={strokeOn}
@@ -1006,7 +1014,7 @@ function AppearanceSection({ nodes }: { nodes: Array<DesignNode & { style: Style
           an object blur blurs the shape, a background blur blurs what is behind
           it. Brightness and Opacity belong to the background one alone — Adobe:
           "Ignored for object blur effects." */}
-      <Section title={t('section.blur')}>
+      <Section id="blur" title={t('section.blur')}>
         <div className="paint-row">
           <PaintToggle
             on={!!blur?.visible}
@@ -1099,7 +1107,10 @@ function ShadowSection({
   const edit = (patch: Partial<ShadowEffect>, axis: string, committing: boolean) =>
     setShadow(kind, patch, committing ? undefined : `${field}-${axis}`)
   return (
-    <Section title={t(kind === 'drop' ? 'section.dropShadow' : 'section.innerShadow')}>
+    <Section
+      id={kind === 'drop' ? 'dropShadow' : 'innerShadow'}
+      title={t(kind === 'drop' ? 'section.dropShadow' : 'section.innerShadow')}
+    >
       <div className="paint-row">
         <PaintToggle
           on={!!shadow?.visible}
@@ -1379,20 +1390,73 @@ const CORNER_LABELS: Record<(typeof CORNER_ORDER)[number], string> = {
  * two menus deep in Illustrator and nobody finds it there either. A selected
  * image is exactly the moment to offer it.
  */
+/**
+ * Crop and Image Trace, for one image.
+ *
+ * Crop opens crop mode on the canvas; while it is open this section is its
+ * controls — Done and Cancel, and a way back to the whole picture. Reset Crop
+ * outside the mode undoes a crop entirely in one step, and is only offered
+ * when there is a crop to undo.
+ */
 function ImageSection({ nodes }: { nodes: DesignNode[] }) {
-  const images = nodes.filter((n) => n.type === 'image')
-  if (images.length !== 1 || nodes.length !== 1) return null
+  const cropping = useEditorStore((s) => s.cropEditing?.nodeId ?? null)
+  const image = nodes.length === 1 && nodes[0]!.type === 'image' ? nodes[0]! : null
+  if (!image || image.type !== 'image') return null
+  const editable = canCrop(image.id)
+
+  if (cropping === image.id) {
+    return (
+      <Section id="image" title={t('section.image')}>
+        <div className="multi-note" style={{ marginTop: 0, marginBottom: 6 }}>{t('note.cropHint')}</div>
+        <div className="field-row">
+          <button type="button" className="button primary" data-testid="crop-done" onClick={() => commitCropMode()}>
+            {t('prefs.done')}
+          </button>
+          <button type="button" className="button" data-testid="crop-cancel" onClick={() => cancelCropMode()}>
+            {t('action.cancel')}
+          </button>
+        </div>
+        <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
+          <button type="button" className="button" data-testid="crop-full" onClick={() => resetCropRect()}>
+            {t('label.showWholeImage')}
+          </button>
+        </div>
+      </Section>
+    )
+  }
+
   return (
-    <Section title={t('section.image')}>
-      <button
-        type="button"
-        className="button"
-        style={{ width: '100%' }}
-        disabled={!canImageTrace()}
-        onClick={() => openImageTrace(images[0]!.id)}
-      >
-        {t('menu.imageTrace')}
-      </button>
+    <Section id="image" title={t('section.image')}>
+      <div className="field-row">
+        <button
+          type="button"
+          className="button"
+          data-testid="crop-image"
+          disabled={!editable}
+          onClick={() => enterCropMode(image.id)}
+        >
+          {t('label.crop')}
+        </button>
+        <button
+          type="button"
+          className="button"
+          data-testid="reset-crop"
+          disabled={!editable || !isCropped(image)}
+          onClick={() => resetImageCrop(image.id)}
+        >
+          {t('label.resetCrop')}
+        </button>
+      </div>
+      <div className="field-row" style={{ gridTemplateColumns: '1fr' }}>
+        <button
+          type="button"
+          className="button"
+          disabled={!canImageTrace()}
+          onClick={() => openImageTrace(image.id)}
+        >
+          {t('menu.imageTrace')}
+        </button>
+      </div>
     </Section>
   )
 }
@@ -1415,7 +1479,7 @@ function ArtboardSection({ nodes }: { nodes: DesignNode[] }) {
 
   return (
     <>
-      <Section title={t('section.grid')}>
+      <Section id="grid" title={t('section.grid')}>
         <div className="paint-row">
           <PaintToggle
             on={on}
@@ -1576,7 +1640,7 @@ function RepeatGridSection({ nodes }: { nodes: DesignNode[] }) {
   }
 
   return (
-    <Section title={t('section.repeatGrid')}>
+    <Section id="repeatGrid" title={t('section.repeatGrid')}>
       <div className="field-row">
         <NumberField
           label="Cols"
@@ -1626,7 +1690,7 @@ function ShapeSection({ nodes }: { nodes: DesignNode[] }) {
   if (roundable.length === 0 && polygons.length === 0) return null
 
   return (
-    <Section title={t('section.shape')}>
+    <Section id="shape" title={t('section.shape')}>
       {polygons.length > 0 && (
         <div className="field-row">
           <NumberField
@@ -1748,7 +1812,7 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
   const groups = fontsByCategory()
 
   return (
-    <Section title={t('section.text')}>
+    <Section id="text" title={t('section.text')}>
       {range && (
         <div className="text-range-note">
           <span>{t('text.formattingSelection', { count: range.end - range.start })}</span>
@@ -1909,7 +1973,7 @@ function TextSection({ nodes }: { nodes: DesignNode[] }) {
 function ExportSection({ nodes }: { nodes: DesignNode[] }) {
   const marked = common(nodes, (n) => n.markedForExport)
   return (
-    <Section title={t('section.export')}>
+    <Section id="export" title={t('section.export')}>
       <label className="checkbox-row">
         <input
           type="checkbox"

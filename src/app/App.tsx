@@ -46,6 +46,7 @@ import { installKeyboard } from '../shortcuts/KeyboardManager'
 import { importFiles } from '../images/ImageImporter'
 import { installSystemClipboard } from '../state/SystemClipboard'
 import { installTraceReconciler } from '../history/TraceCommands'
+import { installCropReconciler } from '../tools/CropSession'
 import {
   adoptRecoveredDocument, importFilesFlow, openDocumentFlow, saveDocumentFlow,
 } from './fileOperations'
@@ -71,6 +72,7 @@ export function App() {
   const dialog = useEditorStore((s) => s.dialog)
   const inspectorWidth = useEditorStore((s) => s.inspectorWidth)
   const layersHeight = useEditorStore((s) => s.layersHeight)
+  const layersVisible = useEditorStore((s) => !s.hiddenSections.includes('layers'))
   const tracing = useStore(traceStore, (s) => s.session !== null)
   const menu = useMenuState()
   const [recovery, setRecovery] = useState<RecoveryOffer | null>(null)
@@ -131,6 +133,9 @@ export function App() {
 
   // ---- close Image Trace if its image leaves the document ------------------
   useEffect(() => installTraceReconciler(), [])
+
+  // ---- end crop mode when the image or the selection moves on --------------
+  useEffect(() => installCropReconciler(), [])
 
   // ---- stop the browser navigating away on a stray file drop ---------------
   useEffect(() => {
@@ -209,10 +214,15 @@ export function App() {
             <>
               <InspectorToolbar />
               <PropertyInspector />
-              <LayersResizer />
-              <div style={{ height: layersHeight, display: 'flex', flexDirection: 'column' }}>
-                <LayersPanel />
-              </div>
+              {/* Hidden, the properties take the whole column. */}
+              {layersVisible && (
+                <>
+                  <LayersResizer />
+                  <div style={{ height: layersHeight, display: 'flex', flexDirection: 'column' }}>
+                    <LayersPanel />
+                  </div>
+                </>
+              )}
             </>
           )}
         </aside>

@@ -69,6 +69,7 @@ import { subpathsToPath } from '../geometry/PathPoints'
 import { transformPath } from '../geometry/PathUtils'
 import { getLiveRadius, radiusHandlePosition, type RadiusCorner } from '../tools/RadiusSession'
 import { getLiveStarRatio } from '../tools/StarRatioSession'
+import { fullImageFrame } from '../document/ImageCrop'
 import { starRatioHandlePoint } from '../geometry/ShapeGeometry'
 import { multiply, toSvgMatrix } from '../geometry/Matrix'
 import { isGradient, sortedStops } from './paint'
@@ -143,6 +144,7 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
   const viewport = useEditorStore((s) => s.viewport)
   const nodeEditingId = useEditorStore((s) => s.nodeEditingId)
   const gradientEditing = useEditorStore((s) => s.gradientEditing)
+  const cropEditing = useEditorStore((s) => s.cropEditing)
   const editingContext = useEditorStore((s) => s.editingContext)
   const dragging = useEditorStore((s) => s.isDragging)
   const tool = useEditorStore((s) => s.tool)
@@ -194,12 +196,16 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
         />
       )}
 
-      {!nodeEditingId && !gradientEditing && selection.length === 1 && (
+      {!nodeEditingId && !gradientEditing && !cropEditing && selection.length === 1 && (
         <RadiusHandles nodeId={selection[0]!} viewport={viewport} tick={tick} />
       )}
 
 
-      {nodeEditingId ? (
+      {cropEditing ? (
+        // The crop's own frame stands in for the transform frame, whose
+        // handles would resize the image rather than the crop.
+        <CropFrame nodeId={cropEditing.nodeId} rect={cropEditing.rect} viewport={viewport} />
+      ) : nodeEditingId ? (
         <PathPointOverlay viewport={viewport} tick={tick} />
       ) : (
         // Adobe drops the frame while the gizmo turns the object: its handles
@@ -217,7 +223,7 @@ export const SelectionOverlay = memo(function SelectionOverlay() {
       {/* After the frame, so where the two overlap the gizmo wins the press.
           Only under the Select tool, which is the one that turns it: under
           any other a press on it would draw instead. */}
-      {tool === 'select' && !nodeEditingId && !gradientEditing && frame && (
+      {tool === 'select' && !nodeEditingId && !gradientEditing && !cropEditing && frame && (
         <Gizmo3D doc={doc} selection={selection} viewport={viewport} frame={frame} tick={tick3d} />
       )}
 
@@ -739,6 +745,76 @@ function SizeBadge({ x, y, text }: { x: number; y: number; text: string }) {
 const RADIUS_HANDLE_MIN_INSET = 13
 /** Below this on-screen size the shape is too small to host a handle. */
 const RADIUS_HANDLE_MIN_SHAPE = 34
+
+/**
+ * Crop mode's frame: the part of the picture that would be kept, with a handle
+ * on each corner and edge, and thirds drawn inside it as a composition guide.
+ * The whole picture is outlined faintly, so how far the crop can still grow
+ * is visible. Pressing inside the frame moves the crop over the picture.
+ */
+function CropFrame({ nodeId, rect, viewport }: { nodeId: NodeId; rect: Bounds; viewport: Viewport }) {
+  const doc = useDocument()
+  const node = doc.nodes[nodeId]
+  if (node?.type !== 'image') return null
+  const world = nodeWorldMatrix(doc, nodeId)
+  const toScreen = (x: number, y: number) => docToScreen(viewport, applyToXY(world, x, y))
+  const quad = (b: Bounds) => [
+    toScreen(b.x, b.y),
+    toScreen(b.x + b.width, b.y),
+    toScreen(b.x + b.width, b.y + b.height),
+    toScreen(b.x, b.y + b.height),
+  ]
+  const points = (ps: Vec2[]) => ps.map((p) => `${p.x},${p.y}`).join(' ')
+  const at = (f: Vec2) => toScreen(rect.x + rect.width * f.x, rect.y + rect.height * f.y)
+  const third = (a: Vec2, b: Vec2) => {
+    const p = at(a)
+    const q = at(b)
+    return `M${p.x} ${p.y}L${q.x} ${q.y}`
+  }
+
+  return (
+    <g className="crop-frame" data-testid="crop-frame">
+      <polygon className="crop-picture-outline" points={points(quad(fullImageFrame(node)))} />
+      <polygon
+        className="crop-area"
+        data-handle="crop"
+        data-corner="move"
+        points={points(quad(rect))}
+        pointerEvents="all"
+        style={{ cursor: 'move' }}
+      />
+      <path
+        className="crop-thirds"
+        d={[
+          third({ x: 1 / 3, y: 0 }, { x: 1 / 3, y: 1 }),
+          third({ x: 2 / 3, y: 0 }, { x: 2 / 3, y: 1 }),
+          third({ x: 0, y: 1 / 3 }, { x: 1, y: 1 / 3 }),
+          third({ x: 0, y: 2 / 3 }, { x: 1, y: 2 / 3 }),
+        ].join('')}
+      />
+      {RESIZE_HANDLES.map((h) => {
+        const p = at(HANDLE_POS[h])
+        return (
+          <rect
+            key={h}
+            data-handle="crop"
+            data-corner={h}
+            className="crop-handle"
+            x={p.x - CROP_HANDLE_SIZE / 2}
+            y={p.y - CROP_HANDLE_SIZE / 2}
+            width={CROP_HANDLE_SIZE}
+            height={CROP_HANDLE_SIZE}
+            pointerEvents="all"
+            style={{ cursor: HANDLE_CURSOR[h] }}
+          />
+        )
+      })}
+    </g>
+  )
+}
+
+/** A touch larger than a resize handle: a crop is set by its handles alone. */
+const CROP_HANDLE_SIZE = 9
 
 function RadiusHandles({
   nodeId,

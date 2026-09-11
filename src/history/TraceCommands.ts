@@ -41,6 +41,7 @@ import { scaling, translation } from '../geometry/Matrix'
 import { documentStore, getDoc, transaction, type DocumentState } from '../state/DocumentStore'
 import { editorStore, notify, setSelection } from '../state/EditorStore'
 import { closeTraceSession, openTraceSession, traceForCommit, traceStore } from '../state/TraceStore'
+import { commitCropMode } from '../tools/CropSession'
 import type { TraceResult } from '../trace/types'
 
 /** The single selected image, if that is what the selection is. */
@@ -59,6 +60,9 @@ export function canImageTrace(): boolean {
 
 /** View ▸ Image Trace. */
 export function openImageTrace(nodeId?: NodeId): void {
+  // A crop in progress is applied first: the trace is of the image as it is
+  // about to be, not as it was before the handles moved.
+  commitCropMode()
   const doc = getDoc()
   const node = nodeId ? doc.nodes[nodeId] : traceableImage()
   if (!node || node.type !== 'image') {
@@ -71,7 +75,9 @@ export function openImageTrace(nodeId?: NodeId): void {
     return
   }
   setSelection([node.id])
-  void openTraceSession(node.id, dataUrl)
+  // Only the kept part: the traced paths land in the image's box, which is
+  // the kept part, so tracing the whole picture would squeeze all of it in.
+  void openTraceSession(node.id, dataUrl, node.crop)
 }
 
 export function cancelImageTrace(): void {

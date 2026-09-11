@@ -251,6 +251,29 @@ control puts the result, its outlines, or the original picture on screen so you 
 the settings actually did. Pressing Trace replaces the image with a group of ordinary paths —
 same place, same size, same position in the stack — in one undo step.
 
+**Crop** — select an image and press **Crop** in its Image section. The whole picture comes up
+dimmed, with the part being kept at full strength inside a frame of eight handles; drag a handle
+to move that edge (`Shift` on a corner keeps the proportions), drag inside or use the arrow keys
+to move the kept part over the picture. `Enter`, **Done** or a click elsewhere applies it,
+`Escape` or **Cancel** leaves the image as it was, and a whole crop is one undo step. Nothing is
+thrown away: cropping again shows the whole picture so the crop can grow back, and **Reset
+Crop** returns to it in one step. Once applied, the kept part *is* the image — its size in the
+Transform fields, its selection frame, its border, what snaps and aligns, what exports and what
+Image Trace traces.
+
+**SVG code** — select a path, line, rectangle, ellipse or polygon and its SVG Code section shows
+the markup an export would write for it, laid out one element per line and coloured the way a
+browser's element inspector colours it. It follows the object as you work, and it can be edited:
+change a colour, a radius, a point or the transform in the box and the shape on the canvas
+changes to match as you type, one burst of typing being one undo step. Code that does not
+describe exactly one shape is refused with the reason, and the shape is left alone. The copy
+button puts the code on the clipboard.
+
+**Sections** — the app menu's Sections submenu turns any section of the right-hand column off
+and on, Layers included; the Layers button at the foot of the tool rail does the same for the
+layers panel. Hidden is only hidden: whatever the section controls is untouched, and the choice
+is remembered between sessions.
+
 **Clipboard** — copy an image or some text anywhere on the machine and paste it straight in,
 by `⌘V`, right-click ▸ Paste, or the app menu. It lands in the artboard you are working in:
 the one selected, or the one holding the selection. Text becomes a text object sized to the
@@ -1376,6 +1399,38 @@ are computed and then dropped, which is cheaper than the alternative of not star
 The decoded pixels are transferred rather than copied, and an image larger than two megapixels
 is reduced once on decode rather than on every trace — a 24-megapixel photograph is a 96 MB
 buffer, and the trace it produces is indistinguishable from the reduced image's.
+
+### A crop resizes the box, not the picture
+
+An image keeps its whole asset and records the part it keeps as fractions of the picture
+(`ImageNode.crop`) — fractions rather than pixels because an image imported from SVG only
+knows the size it was drawn at, not the size of its bitmap. Cropping resizes the node's box to
+exactly the kept part. That one decision is what makes the cropped image behave as the image
+everywhere at once: bounds, the selection frame, hit testing, snapping, alignment, masks and the
+border all read the box, and not one of them had to learn that cropping exists. The picture is
+drawn through a nested `<svg>` whose viewBox is the kept part, on the canvas and in the SVG
+export alike, and every raster export, the clipboard PNG and the eyedropper render from that
+export. Image Trace decodes only the kept part's pixels, so its result lands in the box without
+being squeezed.
+
+The kept part must not move when it is kept. The box's origin moves to the kept part's corner,
+and a node turns and scales about a pivot inside its box, so the transform is solved rather than
+written: the resize-in-place solution plus `L·r` for the origin's move `r`, with rotation, scale
+and skew carried over as the numbers they were. The crop tests check it on turned, flipped,
+skewed and corner-pivoted images.
+
+### SVG code is applied by difference, never by replacement
+
+The code box reads what you typed through the same importer that imports files — so it
+understands exactly the SVG an import would, and is exactly as safe — but it never replaces the
+object with the reading. The code that was shown is read too, and only what differs between the
+two readings is written. Replacing would have been wrong in quiet ways: a star's code is a
+`<path>`, so a colour change would have flattened it into one; SVG draws only centred strokes, so
+an inside border would have moved to the edge; and a shadow, which the importer does not model on
+a shape, would have vanished. Comparing two readings of the same importer also cancels its
+rounding, which would otherwise look like edits nobody made. Only geometry the object's own kind
+cannot hold — a `<rect>` retyped as a `<circle>` — replaces it, keeping its id, name and place in
+the layers.
 
 ### The preview hides the picture rather than covering it
 

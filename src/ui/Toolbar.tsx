@@ -25,7 +25,7 @@
 
 import { memo, type ReactNode } from 'react'
 import { TOOLBAR_LAYOUT, getTool } from '../tools/ToolRegistry'
-import { setTool, type ToolId } from '../state/EditorStore'
+import { notify, setTool, toggleSection, type ToolId } from '../state/EditorStore'
 import { shortcutLabel } from '../shortcuts/keymap'
 import { useKeymap } from '../shortcuts/useKeymap'
 import { useEditorStore } from '../state/hooks'
@@ -37,7 +37,9 @@ import {
   CursorIcon,
   DirectCursorIcon,
   EllipseIcon,
+  ExtensionsIcon,
   HandIcon,
+  LayersPanelIcon,
   LineIcon,
   PenIcon,
   PencilIcon,
@@ -86,6 +88,7 @@ const TOOL_KEYS: Record<ToolId, MessageKey> = {
 export const Toolbar = memo(function Toolbar() {
   const active = useEditorStore((s) => s.tool)
   const highlight = useEditorStore((s) => s.toolHighlight)
+  const layersVisible = useEditorStore((s) => !s.hiddenSections.includes('layers'))
   void useLanguage()
   void useKeymap()
 
@@ -110,6 +113,36 @@ export const Toolbar = memo(function Toolbar() {
           </Tooltip>
         )
       })}
+
+      {/* Panels rather than tools, so they sit apart at the foot of the rail
+          where XD keeps them. */}
+      <div className="toolbar-panels">
+        <Tooltip label={t('section.layers')}>
+          <button
+            type="button"
+            className={`tool-button panel-toggle${layersVisible ? ' on' : ''}`}
+            onClick={() => toggleSection('layers')}
+            aria-label={t('section.layers')}
+            aria-pressed={layersVisible}
+            data-testid="toggle-layers"
+          >
+            <LayersPanelIcon />
+          </button>
+        </Tooltip>
+        <Tooltip label={t('toolbar.extensions')}>
+          <button
+            type="button"
+            className="tool-button panel-toggle"
+            // Nothing to open yet, and a button that looks live and does
+            // nothing is worse than one that says so.
+            onClick={() => notify('info', 'Extensions are not available yet.')}
+            aria-label={t('toolbar.extensions')}
+            data-testid="extensions"
+          >
+            <ExtensionsIcon />
+          </button>
+        </Tooltip>
+      </div>
     </div>
   )
 })

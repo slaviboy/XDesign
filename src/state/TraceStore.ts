@@ -38,7 +38,7 @@ import { subscribeWithSelector } from 'zustand/middleware'
 import { loadRaster, TraceScheduler, type TraceOutcome } from '../trace/TraceClient'
 import { DEFAULT_TRACE_OPTIONS, matchingPreset, presetById } from '../trace/presets'
 import type { TraceOptions, TraceResult } from '../trace/types'
-import type { NodeId } from '../document/types'
+import type { ImageCrop, NodeId } from '../document/types'
 
 /**
  * Illustrator's View menu on the panel. The first three replace the picture
@@ -89,7 +89,11 @@ function patchSession(patch: Partial<TraceSession>): void {
  * Open the panel for an image. Decodes the pixels, then traces with the last
  * used settings so the first thing the user sees is a result, not a form.
  */
-export async function openTraceSession(nodeId: NodeId, dataUrl: string): Promise<void> {
+export async function openTraceSession(
+  nodeId: NodeId,
+  dataUrl: string,
+  crop?: ImageCrop,
+): Promise<void> {
   closeTraceSession()
   traceStore.setState({
     session: {
@@ -108,7 +112,7 @@ export async function openTraceSession(nodeId: NodeId, dataUrl: string): Promise
 
   let raster
   try {
-    raster = await loadRaster(dataUrl)
+    raster = await loadRaster(dataUrl, crop)
   } catch (error) {
     // The panel may have been closed while the image decoded.
     if (traceStore.getState().session?.nodeId !== nodeId) return

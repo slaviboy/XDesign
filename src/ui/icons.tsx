@@ -158,6 +158,31 @@ export const TextIcon = (p: IconProps) => (
 export const ArtboardIcon = (p: IconProps) => (
   <ToolIcon {...p}><path d="M7.6 3v18M16.4 3v18M3 7.6h18M3 16.4h18" /></ToolIcon>
 )
+/**
+ * The rail's two panel buttons. Solid glyphs rather than outlines, as drawn
+ * for the rail, and in currentColor so they follow the theme and the hover
+ * and active states the way the tool outlines do.
+ */
+export const LayersPanelIcon = ({ size = 18, ...rest }: IconProps) => (
+  <svg width={size} height={(size * 16.398) / 18.46} viewBox="0 0 18.46 16.398" fill="currentColor" {...rest}>
+    <path d="M9.24 -0.3579 L0.4074 4.4432 L9.08 10.441 L18.48 4.76 L9.24 -0.3579 Z" transform="translate(-0.02 0.357)" />
+    <path d="M3.483 0.09 L0 1.75 L9.22 8.1 L18.44 1.75 L15.5301 0.09 L9.06 4.02 L3.483 0.09 Z" transform="translate(0 8.297)" />
+  </svg>
+)
+export const ExtensionsIcon = ({ size = 16, ...rest }: IconProps) => (
+  <svg width={size} height={(size * 14) / 16} viewBox="0 0 16 14" fill="currentColor" {...rest}>
+    <path d="M6.19 0L2.81 0 1.77 4 0 4 0 14 16 14 16 4 14.23 4 13.19 0 9.81 0 8.77 4 7.23 4 6.19 0Z" />
+  </svg>
+)
+export const CopyIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="5.5" y="5.5" width="8" height="8" rx="1.2" />
+    <path d="M10.5 5.5V3.7a1.2 1.2 0 00-1.2-1.2H3.7a1.2 1.2 0 00-1.2 1.2v5.6a1.2 1.2 0 001.2 1.2h1.8" />
+  </Icon>
+)
+export const CheckIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M3.5 8.5l3 3 6-7" /></Icon>
+)
 export const ZoomIcon = (p: IconProps) => (
   <ToolIcon {...p}><circle cx="10.6" cy="10.6" r="6.6" /><path d="M15.4 15.4l5.1 5.1" /></ToolIcon>
 )

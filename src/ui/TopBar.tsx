@@ -46,7 +46,10 @@ import { pasteFromSystem } from '../state/SystemClipboard'
 import { stepZoom, zoomTo, zoomToFit, zoomToSelection } from '../shortcuts/KeyboardManager'
 import { ZOOM_MENU_STEPS } from '../canvas/Viewport'
 import { canImageTrace, openImageTrace } from '../history/TraceCommands'
-import { openDialog, setEditor, toggle3dControls, type WorkspaceTab } from '../state/EditorStore'
+import {
+  PANEL_SECTIONS, openDialog, setEditor, showAllSections, toggle3dControls, toggleSection,
+  type WorkspaceTab,
+} from '../state/EditorStore'
 import { useDocumentStore, useEditorStore } from '../state/hooks'
 import { artboardIds } from '../document/SceneGraph'
 import { t } from '../i18n'
@@ -88,6 +91,7 @@ export const TopBar = memo(function TopBar() {
     })
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const show3d = useEditorStore((s) => s.show3dControls)
+  const hiddenSections = useEditorStore((s) => s.hiddenSections)
   // Recomputed from the document, so the menu never offers a reset that
   // would do nothing or refuses one that would.
   const has3d = selection.some((id) => !!doc.nodes[id]?.transform3d)
@@ -220,6 +224,22 @@ export const TopBar = memo(function TopBar() {
           },
         ],
       },
+      {
+        kind: 'submenu',
+        label: t('menu.sections'),
+        testId: 'menu-sections',
+        items: [
+          // In the order they stand in the column, Layers last as it is there.
+          ...PANEL_SECTIONS.map((id): MenuItemSpec => ({
+            label: t(`section.${id}`),
+            checked: !hiddenSections.includes(id),
+            testId: `section-toggle-${id}`,
+            onSelect: () => toggleSection(id),
+          })),
+          { kind: 'separator' },
+          { label: t('menu.showAllSections'), disabled: hiddenSections.length === 0, onSelect: showAllSections },
+        ],
+      },
       { label: t('menu.newArtboard'), onSelect: () => openDialog('artboard-preset') },
       {
         kind: 'submenu',
@@ -249,7 +269,7 @@ export const TopBar = memo(function TopBar() {
   }, [
     gridVisible, guidesVisible, guideBoards, guidesLocked, languageTick,
     history.canRedo, history.canUndo, selectionCount, snapEnabled, themePreference,
-    show3d, has3d, in3d,
+    show3d, has3d, in3d, hiddenSections,
   ])
 
   return (

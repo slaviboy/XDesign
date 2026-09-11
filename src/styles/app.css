@@ -64,7 +64,10 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 12px;
-  padding: 0 10px;
+  /* The left inset centres the 26px menu button over the tool rail below it —
+     the rail's width less its 1px right border — so the menu, the mark and the
+     tools read as one column rather than two nearly aligned ones. */
+  padding: 0 10px 0 calc((var(--toolbar-width) - 1px - 26px) / 2);
   background: var(--bg-toolbar);
   border-bottom: 1px solid var(--border);
 }
@@ -180,6 +183,21 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 }
 .toolbar.highlight-tint .tool-button.active:hover { background: var(--bg-hover); }
 
+/* Pushed to the foot of the rail. The top margin is what does it in a column
+   flex box; a short window scrolls the rail rather than overlapping the tools. */
+.toolbar-panels {
+  margin-top: auto;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+/* An open panel is marked quietly — a tinted chip — so it never reads as a
+   second active tool. */
+.toolbar .panel-toggle.on { background: var(--bg-selected); }
+.toolbar .panel-toggle.on:hover { background: var(--bg-hover); }
+
 .tool-separator {
   width: 24px;
   height: 1px;
@@ -268,6 +286,24 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   shape-rendering: crispEdges;
 }
 .rotate-zone { fill: transparent; }
+
+/* Crop mode. The kept part gets a firm frame and solid handles; the whole
+   picture a faint dashed outline, showing how far the crop can still grow. */
+.crop-area { fill: transparent; stroke: var(--accent); stroke-width: 1.5; }
+.crop-picture-outline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+}
+.crop-thirds { fill: none; stroke: #fff; stroke-width: 1; opacity: 0.55; pointer-events: none; }
+.crop-handle {
+  fill: var(--accent);
+  stroke: var(--handle-fill);
+  stroke-width: 1.5;
+  shape-rendering: crispEdges;
+}
 .marquee {
   fill: rgba(20, 115, 230, 0.08);
   stroke: var(--accent);
@@ -1307,6 +1343,65 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
 .section-action.active,
 .section-action.active:hover:not(:disabled) { background: var(--accent); color: #fff; }
 .section-action:disabled { opacity: 0.3; cursor: default; }
+
+/* ---------------------------------------------------------- SVG code box -- */
+
+/* The box scrolls as one: the coloured copy sets the height, and the textarea
+   is laid exactly over it at the same size, so the two can never scroll apart.
+   Both must agree on every metric that moves a character — font, size, line
+   height, padding, wrapping — or the caret drifts off the letters it is in. */
+.code-scroll {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+}
+.code-scroll:focus-within { border-color: var(--accent); }
+.code-editor { position: relative; }
+.code-highlight,
+.code-input {
+  margin: 0;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  /* Wraps between attributes, and splits a single long value — a URL, path
+     data — only when it cannot fit a line on its own. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+  box-sizing: border-box;
+}
+.code-highlight { color: var(--code-text); pointer-events: none; min-height: 40px; }
+.code-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  overflow: hidden;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+  -webkit-text-fill-color: transparent;
+}
+.code-input::selection { background: rgba(20, 115, 230, 0.28); }
+.code-input[readonly] { cursor: text; }
+.code-punct, .code-tag { color: var(--code-tag); }
+.code-attr { color: var(--code-attr); }
+.code-value { color: var(--code-value); }
+.code-text { color: var(--code-text); }
+.code-comment { color: var(--code-comment); font-style: italic; }
+.code-error {
+  margin-top: 6px;
+  font-size: var(--fs-xs);
+  color: var(--error);
+  line-height: 1.4;
+}
 .section-action svg { display: block; pointer-events: none; }
 
 .aspect-lock {

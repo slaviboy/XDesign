@@ -43,6 +43,7 @@ import {
   type Transform3D,
 } from '../document/types'
 import { createDocumentRoot } from '../document/NodeFactory'
+import { sanitizeCrop } from '../document/ImageCrop'
 import { artboardIds, createMatrixCache, geometryBounds } from '../document/SceneGraph'
 import { clampGrid, normalizeTransform3d } from '../history/Commands'
 import { isSanitizerAvailable, sanitizeSvgFragment } from '../svg/SvgSanitizer'
@@ -351,6 +352,7 @@ function buildDocument(
   repairHierarchy(nodes, rootId)
   sanitizeArtboardExtras(nodes)
   sanitizeTransforms3d(nodes)
+  sanitizeImageCrops(nodes)
 
   const assets: Record<string, ImageAsset> = {}
   for (const asset of payload.assets ?? []) {
@@ -459,6 +461,21 @@ function sanitizeArtboardExtras(nodes: Record<NodeId, DesignNode>): void {
     const grid = readGrid(node.grid)
     if (grid) node.grid = grid
     else delete node.grid
+  }
+}
+
+/**
+ * The same distrust for an image's crop. A crop that is not four finite
+ * fractions inside the picture would scale the picture by infinity or show
+ * nothing at all; dropped, the image shows its whole picture in the same box,
+ * which is at least visible and can be cropped again.
+ */
+function sanitizeImageCrops(nodes: Record<NodeId, DesignNode>): void {
+  for (const node of Object.values(nodes)) {
+    if (node.type !== 'image' || node.crop === undefined) continue
+    const crop = sanitizeCrop(node.crop)
+    if (crop) node.crop = crop
+    else delete node.crop
   }
 }
 

@@ -51,6 +51,7 @@ import {
   rectPath,
 } from '../geometry/ShapeGeometry'
 import { localMatrix, maskOutlines, worldMatrix } from '../document/SceneGraph'
+import { cropOf, cropViewBox, fullImageFrame, isCropped, pictureSize } from '../document/ImageCrop'
 import { depthSorted, isPreserve3d, planeHomography } from '../document/Scene3D'
 import {
   useDocument,
@@ -94,6 +95,7 @@ import {
   isContainer,
   isMaskGroup,
   layoutColumns,
+  NO_PAINT,
   repeatGridOffsets,
   repeatGridSize,
   supports3d,
@@ -593,11 +595,13 @@ function ImageBody({
   node: ImageNode
   geomRef: (el: SVGElement | null) => (() => void) | undefined
 }): ReactNode {
-  const dataUrl = useDocumentStore((s) => s.doc.assets[node.assetId]?.dataUrl)
+  const asset = useDocumentStore((s) => s.doc.assets[node.assetId])
+  const dataUrl = asset?.dataUrl
   // While Image Trace previews a result in place of the picture, the picture
   // has to go — a trace with Ignore White on is transparent where the source
   // was white, and anything drawn on top would show it through.
   const traced = useTraceHidesSource(node.id)
+  const cropRect = useEditorStore((s) => (s.cropEditing?.nodeId === node.id ? s.cropEditing.rect : null))
   const { width, height } = node.transform
   const clipId = `img-clip-${node.id}`
 
@@ -619,6 +623,71 @@ function ImageBody({
 
   const preserve = node.fit === 'fill' ? 'none' : node.fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet'
 
+  if (cropRect) {
+    // Crop mode: the whole picture, dimmed, with the part that would be kept
+    // drawn over it at full strength — so what is being cut away stays in
+    // view, and can be taken back.
+    const frame = fullImageFrame(node)
+    const keepId = `img-keep-${node.id}`
+    const picture = (
+      <image
+        href={dataUrl}
+        x={frame.x}
+        y={frame.y}
+        width={frame.width}
+        height={frame.height}
+        preserveAspectRatio={preserve}
+      />
+    )
+    return (
+      <>
+        <defs>
+          <clipPath id={keepId}>
+            <rect x={cropRect.x} y={cropRect.y} width={cropRect.width} height={cropRect.height} />
+          </clipPath>
+        </defs>
+        <g opacity={0.35}>{picture}</g>
+        <g clipPath={`url(#${keepId})`}>{picture}</g>
+      </>
+    )
+  }
+
+  if (isCropped(node)) {
+    // The kept part fills the box: a nested viewport whose viewBox is that
+    // part of the picture, laid out at the picture's own size. A live resize
+    // writes width and height to it, so it scales with the frame, and it
+    // clips to itself, so nothing cut away shows.
+    const size = pictureSize(asset)
+    return (
+      <>
+        <defs>
+          <clipPath id={clipId}>
+            <path ref={geomRef} d={rectPath(width, height, node.cornerRadius)} />
+          </clipPath>
+        </defs>
+        <g clipPath={`url(#${clipId})`}>
+          <svg
+            ref={geomRef as (el: SVGSVGElement | null) => (() => void) | undefined}
+            width={width}
+            height={height}
+            viewBox={cropViewBox(cropOf(node), size)}
+            preserveAspectRatio={preserve}
+            overflow="hidden"
+          >
+            <image
+              href={dataUrl}
+              width={size.width}
+              height={size.height}
+              preserveAspectRatio="none"
+              style={{ imageRendering: 'auto' }}
+            />
+          </svg>
+        </g>
+        <ImageBorder node={node} geomRef={geomRef} />
+      </>
+    )
+  }
+
   return (
     <>
       {/* Always emitted, even at radius 0: a corner-radius drag overrides this
@@ -639,7 +708,36 @@ function ImageBody({
         clipPath={`url(#${clipId})`}
         style={{ imageRendering: 'auto' }}
       />
+      <ImageBorder node={node} geomRef={geomRef} />
     </>
+  )
+}
+
+/**
+ * An image's border: its Stroke, drawn around its box — which, cropped, is
+ * the kept part, so the border follows the crop. The picture itself takes
+ * no fill, so only the stroke is painted, aligned inside, on or outside the
+ * edge exactly as a rectangle's is.
+ */
+function ImageBorder({
+  node,
+  geomRef,
+}: {
+  node: ImageNode
+  geomRef: (el: SVGElement | null) => (() => void) | undefined
+}): ReactNode {
+  const { stroke } = node.style
+  if (stroke.paint.type === 'none' || stroke.width <= 0) return null
+  const { width, height } = node.transform
+  return (
+    <PaintedPath
+      nodeId={node.id}
+      style={{ ...node.style, fill: NO_PAINT }}
+      d={rectPath(width, height, node.cornerRadius)}
+      width={width}
+      height={height}
+      geomRef={geomRef}
+    />
   )
 }
 

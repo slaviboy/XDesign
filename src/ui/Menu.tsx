@@ -154,9 +154,43 @@ export function Menu({
   )
 }
 
+/**
+ * A submenu opens beside its row, then moves to stay on screen: up by as much
+ * as it runs past the bottom, to the left of its parent where there is no room
+ * to the right, and scrolling when it is taller than the window itself — a
+ * long list such as Sections would otherwise put its last entries out of reach.
+ */
 function SubMenu({ items, onClose }: { items: MenuItemSpec[]; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [fit, setFit] = useState<{ top: number; flip: boolean; maxHeight?: number }>({ top: -4, flip: false })
+
+  // Once, on opening, from where the default placement put it — measuring
+  // again after the move would see a menu that fits and move it back.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const margin = 8
+    const rect = el.getBoundingClientRect()
+    const room = window.innerHeight - margin * 2
+    const maxHeight = rect.height > room ? room : undefined
+    const height = Math.min(rect.height, room)
+    const overflow = rect.top + height - (window.innerHeight - margin)
+    const top = overflow > 0 ? Math.max(-4 - overflow, -4 - (rect.top - margin)) : -4
+    const flip = rect.right > window.innerWidth - margin
+    if (top !== -4 || flip || maxHeight !== undefined) setFit({ top, flip, maxHeight })
+  }, [])
+
   return (
-    <div className="menu" style={{ position: 'absolute', left: '100%', top: -4, marginLeft: 2 }}>
+    <div
+      ref={ref}
+      className="menu"
+      style={{
+        position: 'absolute',
+        top: fit.top,
+        ...(fit.flip ? { right: '100%', marginRight: 2 } : { left: '100%', marginLeft: 2 }),
+        ...(fit.maxHeight ? { maxHeight: fit.maxHeight, overflowY: 'auto' } : {}),
+      }}
+    >
       {items.map((item, i) =>
         item.kind === 'separator' ? (
           <div key={i} className="menu-separator" />

@@ -33,6 +33,8 @@ import {
 } from 'react'
 import { MenuHost, useMenuState } from './Menu'
 import { ChevronDownIcon } from './icons'
+import { useEditorStore } from '../state/hooks'
+import type { PanelSection } from '../state/EditorStore'
 
 // ------------------------------------------------------------------ tooltip
 
@@ -471,16 +473,21 @@ export function IconButton({
 }
 
 export function Section({
+  id,
   title,
   actions,
   children,
 }: {
+  /** Names the section for the menu that turns sections off; without one it always shows. */
+  id?: PanelSection
   title?: string
   actions?: ReactNode
   children: ReactNode
 }) {
+  const hidden = useEditorStore((s) => !!id && s.hiddenSections.includes(id))
+  if (hidden) return null
   return (
-    <div className="section">
+    <div className="section" data-section={id}>
       {title && (
         <h3 className="section-title">
           {title}

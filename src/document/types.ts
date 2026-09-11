@@ -879,11 +879,31 @@ export function applyRunStyle(
 
 export type ImageFit = 'fill' | 'contain' | 'cover'
 
+/**
+ * The part of an image's picture that is kept, as fractions of the whole —
+ * 0..1 on each axis, so it means the same whatever size the picture is drawn
+ * at and whether or not its true pixel size is known (an image imported from
+ * SVG only knows the size it was drawn).
+ */
+export interface ImageCrop {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface ImageNode extends StyledNode {
   type: 'image'
   assetId: AssetId
   fit: ImageFit
   cornerRadius: CornerRadii
+  /**
+   * Cropped away non-destructively: the asset keeps every pixel, and the node's
+   * box is the kept part. Because the box IS the kept part, bounds, hit
+   * testing, snapping, masks, export and Image Trace all see the crop as the
+   * image without knowing it exists. Absent means the whole picture.
+   */
+  crop?: ImageCrop
 }
 
 /**

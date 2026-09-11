@@ -111,6 +111,33 @@ function readStoredShow3d(): boolean {
   }
 }
 
+/**
+ * The panels of the right-hand column that can be turned off, each named for
+ * its title. A hidden section is simply not drawn — its settings on the
+ * artwork are untouched, as the 3D cube leaves a tilt in place.
+ */
+export const PANEL_SECTIONS = [
+  'document', 'canvasGrid', 'guidesSnapping', 'guide',
+  'transform', 'align', 'fill', 'stroke', 'dropShadow', 'innerShadow', 'blur',
+  'image', 'grid', 'repeatGrid', 'shape', 'text', 'svgCode', 'export', 'layers',
+] as const
+
+export type PanelSection = (typeof PANEL_SECTIONS)[number]
+
+export const HIDDEN_SECTIONS_STORAGE_KEY = 'xdesign.hiddenSections'
+
+function readStoredHiddenSections(): PanelSection[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(HIDDEN_SECTIONS_STORAGE_KEY) ?? '[]')
+    // User-editable storage: keep only names this build still has.
+    return Array.isArray(parsed)
+      ? PANEL_SECTIONS.filter((id) => parsed.includes(id))
+      : []
+  } catch {
+    return []
+  }
+}
+
 export interface Viewport {
   /** Screen-space translation of the document origin, in CSS pixels. */
   x: number
@@ -215,6 +242,13 @@ export interface EditorState {
   gradientEditing: { nodeId: NodeId; target: 'fill' | 'stroke' } | null
   /** Gradient stop selected on the canvas widget, so Delete knows which to remove. */
   activeGradientStop: string | null
+  /**
+   * The image being cropped, and the part of its picture that would be kept,
+   * in the image's own units (its box is {0, 0, width, height}; the whole
+   * picture may extend past it). Nothing is written to the document until the
+   * crop is applied, so a whole crop is one undo step. See CropSession.
+   */
+  cropEditing: { nodeId: NodeId; rect: Bounds } | null
   /** Path nodes whose Bezier points are shown for direct editing. */
   nodeEditingId: NodeId | null
   /**
@@ -270,6 +304,8 @@ export interface EditorState {
 
   inspectorWidth: number
   layersHeight: number
+  /** Sections of the right-hand column turned off from the menu. See PANEL_SECTIONS. */
+  hiddenSections: PanelSection[]
   isDragging: boolean
 }
 
@@ -296,6 +332,7 @@ export const editorStore = createStore<EditorState>()(
     penTargetId: null,
     gradientEditing: null,
     activeGradientStop: null,
+    cropEditing: null,
     nodeEditingId: null,
     selectedPoints: [],
     selectedSegments: [],
@@ -317,6 +354,7 @@ export const editorStore = createStore<EditorState>()(
 
     inspectorWidth: 260,
     layersHeight: 300,
+    hiddenSections: readStoredHiddenSections(),
     isDragging: false,
   })),
 )
@@ -383,6 +421,25 @@ export function setShow3dControls(show: boolean): void {
 
 export function toggle3dControls(): void {
   setShow3dControls(!editorStore.getState().show3dControls)
+}
+
+/** Persisted, like the 3D cube: which panels you work with outlives the tab. */
+function setHiddenSections(hidden: PanelSection[]): void {
+  editorStore.setState({ hiddenSections: hidden })
+  try {
+    localStorage.setItem(HIDDEN_SECTIONS_STORAGE_KEY, JSON.stringify(hidden))
+  } catch {
+    // Storage blocked: the choice still applies for this session.
+  }
+}
+
+export function toggleSection(id: PanelSection): void {
+  const hidden = editorStore.getState().hiddenSections
+  setHiddenSections(hidden.includes(id) ? hidden.filter((s) => s !== id) : [...hidden, id])
+}
+
+export function showAllSections(): void {
+  setHiddenSections([])
 }
 
 /**

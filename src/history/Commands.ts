@@ -65,6 +65,7 @@ import {
   worldMatrix,
 } from '../document/SceneGraph'
 import { is3dAffected, Z_DEPTH_MAX, Z_DEPTH_MIN } from '../document/Scene3D'
+import { cropToRect, uncropped } from '../document/ImageCrop'
 import { outlineStroke } from '../geometry/StrokeOutline'
 import { intrinsicTextSize } from '../text/TextLayout'
 import { preloadFontsFor } from '../text/FontRegistry'
@@ -918,6 +919,38 @@ export function setStyleProperty<K extends keyof Style>(
 
 export function setOpacity(value: number, coalesceKey = 'opacity'): boolean {
   return setStyleProperty('opacity', Math.min(1, Math.max(0, value)), coalesceKey)
+}
+
+/**
+ * Keep the part of an image under `rect`, in the image's own units. The whole
+ * picture stays in the asset, so any crop can be widened again later.
+ */
+export function cropImage(id: NodeId, rect: Bounds): boolean {
+  return transaction('Crop image', (draft) => {
+    const node = draft.nodes[id]
+    if (node?.type !== 'image') return false
+    const next = cropToRect(node, rect)
+    const same =
+      JSON.stringify(next.crop ?? null) === JSON.stringify(node.crop ?? null) &&
+      next.transform.width === node.transform.width &&
+      next.transform.height === node.transform.height
+    if (same) return false
+    node.transform = next.transform
+    if (next.crop) node.crop = next.crop
+    else delete node.crop
+    return undefined
+  })
+}
+
+/** Show the whole picture again, with what was kept left where it is. */
+export function resetImageCrop(id: NodeId): boolean {
+  return transaction('Reset crop', (draft) => {
+    const node = draft.nodes[id]
+    if (node?.type !== 'image' || !node.crop) return false
+    node.transform = uncropped(node).transform
+    delete node.crop
+    return undefined
+  })
 }
 
 export function setCornerRadius(radius: number, coalesceKey = 'radius'): boolean {

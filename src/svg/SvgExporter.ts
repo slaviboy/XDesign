@@ -34,6 +34,7 @@ import type { Bounds } from '../geometry/Bounds'
 import { polygonStarPath, rectPath } from '../geometry/ShapeGeometry'
 import { mat3ScaleAt, mat3ToMat2D, projectPathData, type Mat3 } from '../geometry/Perspective'
 import { localMatrix, maskOutlines, nodePathData, worldMatrix } from '../document/SceneGraph'
+import { cropOf, cropViewBox, isCropped, pictureSize } from '../document/ImageCrop'
 import {
   depthSorted,
   is3dAffected,
@@ -60,6 +61,7 @@ import {
   hasStyle,
   isContainer,
   isMaskGroup,
+  NO_PAINT,
   repeatGridOffsets,
   repeatGridSize,
   transform3dOf,
@@ -668,13 +670,39 @@ function emitImage(ctx: EmitContext, node: Extract<DesignNode, { type: 'image' }
     )
   }
 
+  if (isCropped(node)) {
+    // The kept part of the picture, and only that: a nested viewport whose
+    // viewBox is the kept part clips to itself, so every export — SVG, the
+    // rasters drawn from it, the clipboard — shows the crop and nothing else.
+    // The whole picture still travels, as it does in the document, so the
+    // file can be recropped by anything that reads SVG.
+    const size = pictureSize(asset)
+    const nested =
+      `<svg width="${round(width, p)}" height="${round(height, p)}" ` +
+      `viewBox="${cropViewBox(cropOf(node), size)}" preserveAspectRatio="${preserve}" overflow="hidden">` +
+      `<image href="${escapeAttr(href)}" xlink:href="${escapeAttr(href)}" ` +
+      `width="${round(size.width, p)}" height="${round(size.height, p)}" preserveAspectRatio="none"/>` +
+      `</svg>`
+    return (hasRadius ? `<g clip-path="url(#${clipId})">${nested}</g>` : nested) + imageBorder(ctx, node)
+  }
+
   return (
     `<image href="${escapeAttr(href)}" xlink:href="${escapeAttr(href)}" ` +
     `width="${round(width, p)}" height="${round(height, p)}" ` +
     `preserveAspectRatio="${preserve}"` +
     (hasRadius ? ` clip-path="url(#${clipId})"` : '') +
-    `/>`
+    `/>` +
+    imageBorder(ctx, node)
   )
+}
+
+/** An image's Stroke, around its box, written as the canvas draws it. */
+function imageBorder(ctx: EmitContext, node: Extract<DesignNode, { type: 'image' }>): string {
+  const { stroke } = node.style
+  if (stroke.paint.type === 'none' || stroke.width <= 0) return ''
+  const { width, height } = node.transform
+  const style = { ...node.style, fill: NO_PAINT }
+  return `<path d="${rectPath(width, height, node.cornerRadius)}"${styleAttrs(ctx, style, node.id)}/>`
 }
 
 function emitText(ctx: EmitContext, node: Extract<DesignNode, { type: 'text' }>): string {
