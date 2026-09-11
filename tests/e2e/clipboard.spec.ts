@@ -158,6 +158,65 @@ test('right-click Copy then Paste on an artboard pastes the artboard, not a pict
   await expect(page.locator('.artboard-label')).toHaveText(['Artboard 1', 'Artboard 2'])
 })
 
+test.describe('several artboards picked by Shift+clicking their names', () => {
+  const label = (page: import('@playwright/test').Page, name: string) =>
+    page.locator('.artboard-label', { hasText: new RegExp(`^${name}$`) })
+
+  test.beforeEach(async ({ page }) => {
+    // A second artboard to pick, then everything in view.
+    await label(page, 'Artboard 1').click()
+    await press(page, 'c')
+    await press(page, 'v')
+    await expect(page.locator('.artboard-label')).toHaveText(['Artboard 1', 'Artboard 2'])
+    await press(page, '0')
+    await page.waitForTimeout(300)
+  })
+
+  test('Shift+click adds an artboard and takes it out again', async ({ page }) => {
+    await label(page, 'Artboard 1').click()
+    await label(page, 'Artboard 2').click({ modifiers: ['Shift'] })
+    await expect(page.locator('.artboard-label.selected')).toHaveCount(2)
+
+    await label(page, 'Artboard 2').click({ modifiers: ['Shift'] })
+    await expect(page.locator('.artboard-label.selected')).toHaveText(['Artboard 1'])
+
+    // A plain click on one of several narrows to it.
+    await label(page, 'Artboard 2').click({ modifiers: ['Shift'] })
+    await label(page, 'Artboard 2').click()
+    await expect(page.locator('.artboard-label.selected')).toHaveText(['Artboard 2'])
+  })
+
+  test('the keyboard copies and pastes them all', async ({ page }) => {
+    await label(page, 'Artboard 1').click()
+    await label(page, 'Artboard 2').click({ modifiers: ['Shift'] })
+    await press(page, 'c')
+    await press(page, 'v')
+    await page.waitForTimeout(600)
+
+    await expect(nodesOfType(page, 'image')).toHaveCount(0)
+    await expect(page.locator('.artboard-label')).toHaveText(['Artboard 1', 'Artboard 2', 'Artboard 3', 'Artboard 4'])
+    await expect(page.locator('.document-layer [data-node-type="artboard"] [data-node-type="artboard"]')).toHaveCount(0)
+    await expect(page.locator('.artboard-label.selected')).toHaveText(['Artboard 3', 'Artboard 4'])
+  })
+
+  test('right-click Copy and Paste copies them all', async ({ page }) => {
+    await label(page, 'Artboard 1').click()
+    await label(page, 'Artboard 2').click({ modifiers: ['Shift'] })
+    // Right-clicking one of the two keeps both.
+    await label(page, 'Artboard 2').click({ button: 'right' })
+    await page.locator('.menu-item', { hasText: 'Copy' }).first().click()
+
+    const canvas = await page.locator(CANVAS).boundingBox()
+    await page.locator(CANVAS).click({ button: 'right', position: { x: canvas!.width / 2, y: canvas!.height - 20 } })
+    await page.locator('.menu-item', { hasText: 'Paste' }).first().click()
+    await page.waitForTimeout(800)
+
+    await expect(nodesOfType(page, 'image')).toHaveCount(0)
+    await expect(page.locator('.artboard-label')).toHaveText(['Artboard 1', 'Artboard 2', 'Artboard 3', 'Artboard 4'])
+    await expect(page.locator('.document-layer [data-node-type="artboard"] [data-node-type="artboard"]')).toHaveCount(0)
+  })
+})
+
 test('right-click Copy then Paste on a text object pastes the text object', async ({ page }) => {
   // All-text copies put the characters on the clipboard, not the stamped markup,
   // so there is no stamp to find — the paste has to recognise the text itself.

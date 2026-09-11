@@ -42,7 +42,7 @@ import { renameNode } from '../history/Commands'
 import { beginArtboardLabelDrag } from '../tools/ArtboardLabelDrag'
 import { getLiveMatrix } from '../tools/DragSession'
 import { liveGuide } from '../tools/GuideDrag'
-import { setEditor, setSelection } from '../state/EditorStore'
+import { addToSelection, setEditor, setSelection } from '../state/EditorStore'
 import { useDocument, useEditorStore, useLiveTransformTick } from '../state/hooks'
 import type { DesignDocument, DesignNode, NodeId } from '../document/types'
 
@@ -88,9 +88,12 @@ export const ArtboardLabels = memo(function ArtboardLabels() {
               e.stopPropagation()
               // A right-press names the artboard the menu about to open is
               // for — without this, Copy there copied whatever was selected
-              // before. Part of a larger selection, it leaves that alone.
+              // before. Part of a larger selection, it leaves that alone;
+              // with Shift, it joins one.
               if (e.button === 2) {
-                if (!selection.includes(id)) setSelection([id])
+                if (selection.includes(id)) return
+                if (e.shiftKey) addToSelection([id])
+                else setSelection([id])
                 return
               }
               const svg = e.currentTarget.ownerSVGElement

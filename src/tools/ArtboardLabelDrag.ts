@@ -33,7 +33,8 @@ import { beginDrag, cancelDrag, commitDrag, getDragFrame, updateDrag } from './D
 import { buildSnapContext, resolveSnap, type SnapContext } from './snapHelpers'
 import { screenToDoc } from '../canvas/Viewport'
 import { getDoc } from '../state/DocumentStore'
-import { editorStore, setSelection } from '../state/EditorStore'
+import { addToSelection, editorStore, removeFromSelection, setSelection } from '../state/EditorStore'
+import { isEffectivelyLocked } from '../document/SceneGraph'
 import { translateBounds, type Bounds } from '../geometry/Bounds'
 import type { Mat2D, Vec2 } from '../geometry/Matrix'
 import type { NodeId } from '../document/types'
@@ -51,6 +52,14 @@ interface LabelDragSession {
   snap: SnapContext | null
   latest: Map<NodeId, Mat2D> | null
   moved: boolean
+  /**
+   * The selection change a click settles on release, when pressing an
+   * artboard already selected: dropping it out on press would leave nothing
+   * under the cursor to drag, and narrowing to it on press would stop a drag
+   * from moving the rest. Null when the press already decided.
+   */
+  onClick: 'remove' | 'only' | null
+  nodeId: NodeId
 }
 
 let session: LabelDragSession | null = null
@@ -75,10 +84,26 @@ export function beginArtboardLabelDrag(
   const editor = editorStore.getState()
   const start = toDoc(container, native.clientX, native.clientY)
 
-  setSelection([nodeId])
-  // A locked artboard has nothing to drag; beginDrag says so and the press
+  // Shift works as it does on the artwork: it adds an artboard, or takes one
+  // out, and whatever is selected moves together.
+  const already = editor.selection.includes(nodeId)
+  let onClick: LabelDragSession['onClick'] = null
+  if (native.shiftKey) {
+    if (already) onClick = 'remove'
+    else addToSelection([nodeId])
+  } else if (already) {
+    onClick = editor.selection.length > 1 ? 'only' : null
+  } else {
+    setSelection([nodeId])
+  }
+
+  // Locked artboards have nothing to drag; beginDrag says so and the press
   // stays a plain selection.
-  if (!beginDrag(doc, [nodeId], 'move', start)) return
+  const ids = editorStore.getState().selection.filter((id) => !isEffectivelyLocked(doc, id))
+  if (ids.length === 0 || !beginDrag(doc, ids, 'move', start)) {
+    settleClick(onClick, nodeId)
+    return
+  }
 
   session = {
     pointerId: native.pointerId,
@@ -88,13 +113,15 @@ export function beginArtboardLabelDrag(
     startFrame: getDragFrame(),
     snap: buildSnapContext(
       doc,
-      new Set([nodeId]),
+      new Set(ids),
       editor.viewport,
       editor.canvasSize,
       editor.snapEnabled,
     ),
     latest: null,
     moved: false,
+    onClick,
+    nodeId,
   }
 
   try {
@@ -194,4 +221,10 @@ function end(commit: boolean): void {
   // commitDrag says so itself: no movement, no undo entry.
   if (commit) commitDrag(s.latest)
   else cancelDrag()
+  if (commit && !s.moved) settleClick(s.onClick, s.nodeId)
+}
+
+function settleClick(onClick: LabelDragSession['onClick'], nodeId: NodeId): void {
+  if (onClick === 'remove') removeFromSelection([nodeId])
+  else if (onClick === 'only') setSelection([nodeId])
 }
