@@ -34,6 +34,54 @@ function load(path: string): DesignDocument {
   return deserializeDocument(new Uint8Array(readFileSync(join(__dirname, '../..', path))))
 }
 
+/**
+ * Every example, and the least it must be. Each is held to the same promises
+ * a document someone opens has to keep; Aura's own checks below go further.
+ */
+const EXAMPLES = [
+  { file: 'examples/shop-app/Aura Shopping App.xdesign', screens: 5, size: [390, 844] },
+  { file: 'examples/banking/Nova Bank.xdesign', screens: 20, size: [390, 844] },
+  { file: 'examples/music-studio/Riff Studio.xdesign', screens: 20, size: [1194, 834] },
+  { file: 'examples/social/Glimpse.xdesign', screens: 12, size: [390, 844] },
+  { file: 'examples/messaging/Relay Messenger.xdesign', screens: 12, size: [390, 844] },
+] as const
+
+describe.each(EXAMPLES)('$file', ({ file, screens, size }) => {
+  const doc = load(file)
+  const nodes = Object.values(doc.nodes)
+  const root = doc.nodes[doc.rootId]!
+  const boards = 'children' in root ? root.children.map((id) => doc.nodes[id]!) : []
+
+  it(`opens as at least ${screens} screens, each one numbered and full size`, () => {
+    expect(boards.length).toBeGreaterThanOrEqual(screens)
+    for (const [i, board] of boards.entries()) {
+      expect(board.type).toBe('artboard')
+      expect(board.name, board.name).toMatch(new RegExp(`^${String(i + 1).padStart(2, '0')} `))
+      expect([board.transform.width, board.transform.height]).toEqual(size)
+    }
+  })
+
+  it('carries every picture it shows', () => {
+    for (const image of nodes) {
+      if (image.type !== 'image') continue
+      expect(doc.assets[image.assetId]?.dataUrl, image.name).toMatch(/^data:image\/(png|jpeg);base64,/)
+    }
+  })
+
+  it('names only fonts the app ships', () => {
+    for (const n of nodes) {
+      if (n.type === 'text') expect(isBundledFont(n.textStyle.fontFamily), n.textStyle.fontFamily).toBe(true)
+    }
+  })
+
+  it('is built from named components, and carries its palette', () => {
+    const groups = nodes.filter((n) => n.type === 'group')
+    expect(groups.length).toBeGreaterThan(boards.length * 3)
+    expect(groups.every((g) => g.name && g.name !== 'Group')).toBe(true)
+    expect(doc.swatches.length).toBeGreaterThan(2)
+  })
+})
+
 describe('the Aura shopping app example', () => {
   const doc = load('examples/shop-app/Aura Shopping App.xdesign')
   const nodes = Object.values(doc.nodes)

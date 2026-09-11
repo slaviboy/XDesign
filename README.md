@@ -1777,12 +1777,18 @@ to restore the autosaved document.
 
 ## Examples
 
-`examples/` holds ready-made documents. **Aura** is a five-screen shopping app — welcome, home,
-product, cart and order confirmation — with named components, product photographs as image
-layers, icons as paths and the brand palette in the swatches. Open
-`examples/shop-app/Aura Shopping App.xdesign` with **File ▸ Open…**, or import a single screen
-from `examples/shop-app/svg/`. The examples are written in code against the editor's own modules
-and rebuilt with `npm run examples`; see [examples/README.md](examples/README.md).
+`examples/` holds ready-made documents to open with **File ▸ Open…**:
+- **Nova**, a banking app, 24 screens.
+- **Riff Studio**, a tablet music studio with a different instrument on almost every one of its
+  26 screens.
+- **Glimpse**, a photo social network, 18 screens.
+- **Relay**, a messenger, 19 screens.
+- **Aura**, a shopping app, 5 screens.
+
+Every one uses named components, real text in bundled fonts, icons as paths and pictures as
+image layers. Each screen also comes as an SVG to import on its own. The examples are written in
+code against the editor's own modules and rebuilt with `npm run examples`; see
+[examples/README.md](examples/README.md).
 
 ## Architecture
 
