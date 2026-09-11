@@ -472,7 +472,8 @@ export function duplicateNodes(
   return out
 }
 
-function nextCopyName(doc: DesignDocument, base: string): string {
+/** `base` with its trailing number replaced by the lowest one no node already uses. */
+export function nextCopyName(doc: DesignDocument, base: string): string {
   const stem = base.replace(/\s+\d+$/, '')
   let n = 1
   const taken = new Set(Object.values(doc.nodes).map((x) => x.name))

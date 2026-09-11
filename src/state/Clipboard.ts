@@ -34,10 +34,12 @@
  * keep.
  */
 
-import { addNode, cloneSubtree } from '../document/DocumentModel'
+import { addNode, cloneSubtree, nextCopyName } from '../document/DocumentModel'
 import {
-  artboardAtPoint, artboardOf, createMatrixCache, geometryBounds, renderBoundsOfNodes, worldMatrix,
+  artboardAtPoint, artboardIds, artboardOf, createMatrixCache, geometryBounds, renderBoundsOfNodes,
+  worldMatrix,
 } from '../document/SceneGraph'
+import { unionAll, type Bounds } from '../geometry/Bounds'
 import { transaction, getDoc } from '../state/DocumentStore'
 import { containerAtPoint } from '../history/Commands'
 import { editorStore, notify, setSelection } from './EditorStore'
@@ -200,15 +202,30 @@ export function paste(at?: Vec2): NodeId[] {
   const clip = internal
   pasteCount++
 
+  const boardRoots = clip.rootIds.filter((id) => clip.nodes[id]?.type === 'artboard')
+
   // `at` is the centre of where the clip should land — the point under the
   // pointer for a right-click paste. Putting the clip's top-left there instead
-  // would drop it down and to the right of where it was asked for.
+  // would drop it down and to the right of where it was asked for. Artboards
+  // never cascade: they look for open canvas instead, below.
   const offset = at
     ? {
         x: at.x - (clip.origin.x + clip.size.width / 2),
         y: at.y - (clip.origin.y + clip.size.height / 2),
       }
-    : { x: pasteCount * 14, y: pasteCount * 14 }
+    : boardRoots.length > 0
+      ? { x: 0, y: 0 }
+      : { x: pasteCount * 14, y: pasteCount * 14 }
+
+  if (boardRoots.length > 0) {
+    // Artboards may not overlap, so the copy slides right past any in its way.
+    // Everything else in the clip moves with it and keeps its arrangement.
+    const cache = createMatrixCache()
+    const clipDoc = { ...getDoc(), nodes: clip.nodes }
+    const rect = unionAll(boardRoots.map((id) => geometryBounds(clipDoc, id, cache)))
+    const wanted = { ...rect, x: rect.x + offset.x, y: rect.y + offset.y }
+    offset.x += clearOfArtboards(wanted) - wanted.x
+  }
 
   const created: NodeId[] = []
 
@@ -227,6 +244,12 @@ export function paste(at?: Vec2): NodeId[] {
     for (const rootId of clip.rootIds) {
       const newId = cloneSubtree(scratch as typeof draft, rootId, scratch.nodes)
       if (!newId) continue
+      const isBoard = scratch.nodes[newId]!.type === 'artboard'
+
+      // Two artboards sharing a name are two export files fighting over one
+      // filename. Named before moving in, so the copy does not count as its
+      // own rival and push a paste into another document off its number.
+      if (isBoard) scratch.nodes[newId]!.name = nextCopyName(draft, scratch.nodes[newId]!.name)
 
       // Move the whole cloned subtree into the real document.
       const moveIn = (id: NodeId) => {
@@ -246,11 +269,14 @@ export function paste(at?: Vec2): NodeId[] {
 
       // The centre, not the top-left: a copy cascaded past an artboard's right
       // or bottom edge would otherwise be parented to the pasteboard even though
-      // almost all of it is still over the artboard.
-      const parentId = containerAtPoint(draft, {
-        x: node.transform.x + node.transform.width / 2,
-        y: node.transform.y + node.transform.height / 2,
-      })
+      // almost all of it is still over the artboard. An artboard only ever sits
+      // on the root — nested in another it is listed in Layers but never drawn.
+      const parentId = isBoard
+        ? draft.rootId
+        : containerAtPoint(draft, {
+            x: node.transform.x + node.transform.width / 2,
+            y: node.transform.y + node.transform.height / 2,
+          })
       addNode(draft, node, parentId)
 
       if (parentId !== draft.rootId) {
@@ -265,6 +291,33 @@ export function paste(at?: Vec2): NodeId[] {
 
   if (created.length) setSelection(created)
   return created
+}
+
+/** Space kept between a pasted artboard and its neighbours, as New Artboard leaves. */
+const ARTBOARD_GAP = 80
+
+/**
+ * The left edge nearest `rect.x`, moving right, at which `rect` overlaps no
+ * artboard and keeps ARTBOARD_GAP from those beside it. Its own spot when that
+ * is free — a cut artboard pastes back where it was — else past whatever is in
+ * the way, again and again, until the row opens up.
+ */
+function clearOfArtboards(rect: Bounds): number {
+  const doc = getDoc()
+  const cache = createMatrixCache()
+  const boards = artboardIds(doc).map((id) => geometryBounds(doc, id, cache))
+  let x = rect.x
+  for (;;) {
+    const blocking = boards.filter(
+      (b) =>
+        b.x < x + rect.width + ARTBOARD_GAP &&
+        x < b.x + b.width + ARTBOARD_GAP &&
+        b.y < rect.y + rect.height &&
+        rect.y < b.y + b.height,
+    )
+    if (blocking.length === 0) return x
+    x = Math.max(...blocking.map((b) => b.x + b.width)) + ARTBOARD_GAP
+  }
 }
 
 /** Duplicate in place — Cmd+D, independent of the clipboard. */

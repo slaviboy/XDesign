@@ -116,6 +116,30 @@ test('copying inside the app still duplicates rather than re-importing markup', 
   await expect(nodesOfType(page, 'rect')).toHaveCount(2)
 })
 
+test('a copied artboard pastes beside the original, contents and all', async ({ page }) => {
+  // It used to nest inside the artboard it was copied from: listed in Layers,
+  // never drawn, impossible to click.
+  await drawShape(page, 'rect', { x: 120, y: 120 }, { x: 220, y: 200 })
+  await page.locator('.artboard-label').first().click()
+  await press(page, 'c')
+  await press(page, 'v')
+  await page.waitForTimeout(600)
+
+  const boards = nodesOfType(page, 'artboard')
+  await expect(boards).toHaveCount(2)
+  const ids = await boards.evaluateAll((els) => els.map((el) => el.getAttribute('data-node-id')))
+  for (const id of ids) {
+    // Neither draws inside the other, and each carries its own rect.
+    await expect(page.locator(`.document-layer [data-node-id="${id}"] [data-node-type="artboard"]`)).toHaveCount(0)
+    await expect(page.locator(`.document-layer [data-node-id="${id}"] [data-node-type="rect"]`)).toHaveCount(1)
+  }
+
+  const labels = page.locator('.artboard-label')
+  await expect(labels).toHaveText(['Artboard 1', 'Artboard 2'])
+  const [original, copy] = [await labels.nth(0).boundingBox(), await labels.nth(1).boundingBox()]
+  expect(copy!.x).toBeGreaterThan(original!.x + original!.width)
+})
+
 test('copying puts a picture on the clipboard, for applications that want one', async ({ page }) => {
   await drawShape(page, 'rect', { x: 120, y: 120 }, { x: 240, y: 200 })
   await press(page, 'c')

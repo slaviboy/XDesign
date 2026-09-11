@@ -231,3 +231,106 @@ describe('the internal clipboard keeps its own copies', () => {
     expect(editorStore.getState().selection).toEqual([])
   })
 })
+
+describe('pasting a copied artboard', () => {
+  let first: NodeId
+  let content: NodeId
+
+  beforeEach(() => {
+    replaceDocument(createDocument('Boards', false))
+    const one = createArtboard('Artboard 1', { x: 0, y: 0, width: 400, height: 300 })
+    const two = createArtboard('Artboard 2', { x: 480, y: 0, width: 200, height: 200 })
+    const rect = createRect({ x: 10, y: 20, width: 30, height: 40 })
+    transaction('seed', (draft) => {
+      addNode(draft, one, draft.rootId)
+      addNode(draft, two, draft.rootId)
+      addNode(draft, rect, one.id)
+    })
+    first = one.id
+    content = rect.id
+    setEditor({ editingContext: null })
+    clearClipboard()
+    setSelection([first])
+    copySelection()
+  })
+
+  const boardsNamed = (name: string) =>
+    Object.values(getDoc().nodes).filter((n) => n.type === 'artboard' && n.name === name)
+
+  it('lands on the root, never inside the artboard it was copied from', () => {
+    const [id] = paste()
+    const doc = getDoc()
+    expect(doc.nodes[id!]!.parentId).toBe(doc.rootId)
+    const original = doc.nodes[first]!
+    expect(original.type === 'artboard' && original.children).toEqual([content])
+    expect(editorStore.getState().selection).toEqual([id])
+  })
+
+  it('goes right of the original, past every artboard in the way', () => {
+    // Artboard 1 is in the way at its own spot, Artboard 2 at 480 beside it.
+    const [id] = paste()
+    const t = getDoc().nodes[id!]!.transform
+    expect(t.x).toBe(760)
+    expect(t.y).toBe(0)
+    expect([t.width, t.height]).toEqual([400, 300])
+  })
+
+  it('finds the next open spot on each paste', () => {
+    const [a] = paste()
+    const [b] = paste()
+    expect(getDoc().nodes[a!]!.transform.x).toBe(760)
+    expect(getDoc().nodes[b!]!.transform.x).toBe(1240)
+  })
+
+  it('ignores artboards in another row', () => {
+    const below = createArtboard('Below', { x: 480, y: 400, width: 400, height: 300 })
+    transaction('add', (draft) => { addNode(draft, below, draft.rootId) })
+    // Only Artboard 2 is level with the copy; the one underneath is not in its way.
+    const [id] = paste()
+    expect(getDoc().nodes[id!]!.transform.x).toBe(760)
+  })
+
+  it('brings everything inside the artboard with it', () => {
+    const [id] = paste()
+    const doc = getDoc()
+    const board = doc.nodes[id!]!
+    expect(board.type).toBe('artboard')
+    const children = board.type === 'artboard' ? board.children : []
+    expect(children).toHaveLength(1)
+    expect(children[0]).not.toBe(content)
+    const child = doc.nodes[children[0]!]!
+    expect(child.parentId).toBe(id)
+    // Artboard-local, so it sits where it did on the original.
+    expect([child.transform.x, child.transform.y]).toEqual([10, 20])
+  })
+
+  it('takes the first free artboard number', () => {
+    const [a] = paste()
+    const [b] = paste()
+    expect(getDoc().nodes[a!]!.name).toBe('Artboard 3')
+    expect(getDoc().nodes[b!]!.name).toBe('Artboard 4')
+    expect(boardsNamed('Artboard 1')).toHaveLength(1)
+  })
+
+  it('fills a gap in the numbering', () => {
+    transaction('rename', (draft) => { draft.nodes[first]!.name = 'Artboard 3' })
+    setSelection([first])
+    copySelection()
+    // Artboard 2 and 3 exist; 1 is free.
+    const [id] = paste()
+    expect(getDoc().nodes[id!]!.name).toBe('Artboard 1')
+  })
+
+  it('is one undo step', () => {
+    const before = Object.keys(getDoc().nodes).length
+    paste()
+    undo()
+    expect(Object.keys(getDoc().nodes)).toHaveLength(before)
+  })
+
+  it('stays on the root while a group is entered', () => {
+    enterGroup(first)
+    const [id] = paste()
+    expect(getDoc().nodes[id!]!.parentId).toBe(getDoc().rootId)
+  })
+})
