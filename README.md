@@ -347,7 +347,9 @@ rather than by symbol — `Mod+S`, never `⌘S` — so a Mac's shortcuts arrive 
 and read as Ctrl+S there.
 
 **Files** — a self-contained `.xdesign` document you can copy to another machine and open
-with every vector and every pixel intact. Plus autosave and crash recovery.
+with every vector and every pixel intact. Plus autosave and crash recovery. The format is open
+and documented in [docs/xdesign-format.md](docs/xdesign-format.md), with scripts that read and
+write it.
 
 ---
 
@@ -1770,7 +1772,8 @@ A ZIP holding `document.json` plus the raw bytes of every image under `assets/`.
 inside JSON inflates binary by 33% and then compresses badly. The reader sniffs the magic
 bytes — `PK` means unzip, anything else is parsed as flat JSON — so hand-written documents
 still open. Loading is defensive: a dangling parent or a broken reference is repaired rather
-than failing the whole open.
+than failing the whole open. The full specification, for anyone reading or generating these
+files outside the app, is [docs/xdesign-format.md](docs/xdesign-format.md).
 
 ### Autosave uses `pagehide`, not `beforeunload`
 
