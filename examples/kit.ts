@@ -26,7 +26,8 @@
  */
 
 import {
-  createArtboard, createEllipse, createImage, createPath, createPolygon, createRect, createText,
+  createArtboard, createEllipse, createImage, createLine, createLinearGradient, createPath, createPolygon,
+  createRadialGradient, createRect, createStop, createText,
 } from '@/document/NodeFactory'
 import { addNode, groupNodes } from '@/document/DocumentModel'
 import { createAssetId } from '@/document/ids'
@@ -36,8 +37,24 @@ import {
   type RGBA, type ShadowEffect, type Style, type TextAlign, type TextStyle,
 } from '@/document/types'
 import { intrinsicTextSize } from '@/text/TextLayout'
+import { ensureFontLoaded, isBundledFont } from '@/text/FontRegistry'
 import { pathBounds, transformPath } from '@/geometry/PathUtils'
 import { scaling, translation } from '@/geometry/Matrix'
+
+/**
+ * Load every face a document will use, before any text is measured — a face
+ * that has not arrived measures as the fallback, and its boxes come out the
+ * wrong size. Only bundled families: a document that names a font the app
+ * does not ship looks different on every machine that opens it.
+ */
+export async function loadFonts(faces: Record<string, readonly number[]>): Promise<void> {
+  const jobs: Array<Promise<boolean>> = []
+  for (const [family, weights] of Object.entries(faces)) {
+    if (!isBundledFont(family)) throw new Error(`${family} is not a bundled font.`)
+    for (const weight of weights) jobs.push(ensureFontLoaded(family, weight))
+  }
+  await Promise.all(jobs)
+}
 
 export function rgba(hex: string, a = 1): RGBA {
   const n = Number.parseInt(hex.replace('#', ''), 16)
@@ -52,6 +69,52 @@ export function shadow(y: number, blur: number, alpha: number, x = 0, hex = '#1C
   return { x, y, blur, color: rgba(hex, alpha), visible: true }
 }
 
+/** A colour stop: a hex colour, its alpha, and where it sits from 0 to 1. */
+export type Stop = [hex: string, offset: number, alpha?: number]
+
+/**
+ * A linear gradient across a shape's own box, from (x1, y1) to (x2, y2) in
+ * 0..1 of the box — top to bottom by default.
+ */
+export function linear(stops: Stop[], x1 = 0, y1 = 0, x2 = 0, y2 = 1): Paint {
+  const paint = createLinearGradient(stops.map(([hex, offset, a]) => createStop(offset, rgba(hex, a ?? 1))))
+  return Object.assign(paint, { x1, y1, x2, y2 })
+}
+
+/** A radial gradient from the middle of a shape's own box out to its edge. */
+export function radial(stops: Stop[]): Paint {
+  return createRadialGradient(stops.map(([hex, offset, a]) => createStop(offset, rgba(hex, a ?? 1))))
+}
+
+/**
+ * Where the i-th screen of a set goes: rows of `columns`, a gap between
+ * screens and a bigger one between rows, so the artboards' names stay legible
+ * over the row below. Twenty screens in one line would be a canvas nobody can
+ * look at whole.
+ */
+export function gridPosition(
+  index: number,
+  columns: number,
+  width: number,
+  height: number,
+  gapX = 100,
+  gapY = 160,
+): { x: number; y: number } {
+  return { x: (index % columns) * (width + gapX), y: Math.floor(index / columns) * (height + gapY) }
+}
+
+/** Seeded pseudo-random numbers, so a rebuilt example comes out the same. */
+export function random(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
 export interface ShapeOptions {
   fill?: Paint | string
   radius?: number | CornerRadii
@@ -64,7 +127,8 @@ export interface TextOptions {
   size: number
   weight?: number
   color?: string
-  family?: 'Poppins' | 'Inter'
+  /** Any bundled family (see loadFonts); Inter when not given. */
+  family?: string
   /** Wraps to this width (Auto Height); without it the box fits the text (Auto Width). */
   width?: number
   align?: TextAlign
@@ -154,9 +218,11 @@ export class Screen {
     x: number,
     readonly width: number,
     readonly height: number,
-    background: string,
+    background: string | Paint,
+    y = 0,
   ) {
-    const board = createArtboard(name, { x, y: 0, width, height }, solid(background))
+    const fill = typeof background === 'string' ? solid(background) : background
+    const board = createArtboard(name, { x, y, width, height }, fill)
     addNode(doc, board, doc.rootId)
     this.id = board.id
   }
@@ -257,6 +323,41 @@ export class Screen {
           join: 'round',
         },
       },
+    )
+    return this.add(node, name)
+  }
+
+  /**
+   * A free-form path in the artboard's own coordinates — a chart line, a
+   * waveform, a wave under a header. Filled, stroked or both.
+   */
+  path(
+    name: string,
+    d: string,
+    o: { fill?: Paint | string; stroke?: string; width?: number; alpha?: number; closed?: boolean; opacity?: number } = {},
+  ): NodeId {
+    const b = pathBounds(d)
+    const node = createPath(
+      transformPath(d, translation(-b.x, -b.y)),
+      { x: b.x, y: b.y, width: Math.max(b.width, 0.01), height: Math.max(b.height, 0.01) },
+      {
+        fill: o.fill === undefined ? { type: 'none' } : typeof o.fill === 'string' ? solid(o.fill) : o.fill,
+        stroke: o.stroke
+          ? { ...DEFAULT_STROKE, paint: solid(o.stroke, o.alpha ?? 1), width: o.width ?? 2, cap: 'round', join: 'round' }
+          : DEFAULT_STROKE,
+        ...(o.opacity !== undefined ? { opacity: o.opacity } : {}),
+      },
+      o.closed ?? false,
+    )
+    return this.add(node, name)
+  }
+
+  /** A straight line between two points. */
+  line(name: string, x1: number, y1: number, x2: number, y2: number, color: string, width = 1, alpha = 1): NodeId {
+    const node = createLine(
+      { x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) },
+      { stroke: { ...DEFAULT_STROKE, paint: solid(color, alpha), width, cap: 'round' } },
+      { x1: x1 - Math.min(x1, x2), y1: y1 - Math.min(y1, y2), x2: x2 - Math.min(x1, x2), y2: y2 - Math.min(y1, y2) },
     )
     return this.add(node, name)
   }

@@ -33,12 +33,10 @@ import '@/styles/fonts'
 import { createDocument, createLinearGradient, createStop } from '@/document/NodeFactory'
 import { createSwatchId } from '@/document/ids'
 import { ensureFontLoaded } from '@/text/FontRegistry'
-import { serializeDocument } from '@/persistence/FileFormat'
-import { exportNodesToSvg } from '@/svg/SvgExporter'
-import { runExport } from '@/export/ExportPipeline'
 import type { DesignDocument, ImageAsset, NodeId } from '@/document/types'
-import { addAsset, rasterize, rgba, Screen, shadow, solid } from './kit'
+import { addAsset, rasterize, rgba, Screen, shadow, solid } from '../kit'
 import * as art from './illustrations'
+import { exampleFiles } from '../output'
 
 // ---------------------------------------------------------------------------
 // Brand
@@ -532,40 +530,6 @@ export async function buildShopApp(): Promise<DesignDocument> {
 // What the build script writes
 // ---------------------------------------------------------------------------
 
-async function base64(bytes: Uint8Array | Blob): Promise<string> {
-  const buffer = bytes instanceof Blob ? new Uint8Array(await bytes.arrayBuffer()) : bytes
-  let binary = ''
-  for (let i = 0; i < buffer.length; i += 0x8000) {
-    binary += String.fromCharCode(...buffer.subarray(i, i + 0x8000))
-  }
-  return btoa(binary)
-}
-
-/** Every file of the example, as base64 keyed by its path under the example's folder. */
-export async function buildShopAppFiles(): Promise<Record<string, string>> {
-  const doc = await buildShopApp()
-  const files: Record<string, string> = {}
-  files['Aura Shopping App.xdesign'] = await base64(serializeDocument(doc))
-
-  const root = doc.nodes[doc.rootId]
-  const boards = root && 'children' in root ? root.children : []
-  for (const id of boards) {
-    const board = doc.nodes[id]!
-    const slug = board.name.toLowerCase().replace(/\s+/g, '-')
-    const bounds = { x: board.transform.x, y: board.transform.y, width: W, height: H }
-    const { svg } = await exportNodesToSvg(doc, [id], { bounds, textHandling: 'reference' })
-    files[`svg/${slug}.svg`] = btoa(unescape(encodeURIComponent(svg)))
-    const png = await runExport(doc, { format: 'png', area: 'artboard', nodeIds: [id], scale: 1 })
-    files[`preview/${slug}.png`] = await base64(png.blob)
-  }
-  const overview = await runExport(doc, {
-    format: 'png',
-    area: 'document',
-    nodeIds: boards,
-    scale: 0.5,
-    padding: 60,
-    background: rgba('#E9E9F0'),
-  })
-  files['preview/overview.png'] = await base64(overview.blob)
-  return files
+export async function buildFiles(): Promise<Record<string, string>> {
+  return exampleFiles(await buildShopApp(), 'Aura Shopping App')
 }

@@ -4,7 +4,7 @@ Ready-made documents to open, take apart and build on.
 
 ## Aura — a shopping app
 
-![All five screens](shop-app/preview/overview.png)
+![All five screens](shop-app/preview/overview.jpg)
 
 Five iPhone-sized screens (390 × 844): **Welcome**, **Home**, **Product**, **Cart** and
 **Order Confirmed**. The design system is a coral brand colour, Poppins headings and Inter
@@ -29,7 +29,7 @@ Everything in it is ordinary, editable artwork:
 | --- | --- | --- |
 | `shop-app/Aura Shopping App.xdesign` | **File ▸ Open…** | The whole design: five artboards, every layer, the swatches. |
 | `shop-app/svg/*.svg` | **File ▸ Import…**, or drag onto the canvas | One screen, into the document you already have open. |
-| `shop-app/preview/*.png` | Any image viewer | Pictures of the screens, for looking rather than editing. |
+| `shop-app/preview/*.jpg` | Any image viewer | Pictures of the screens, for looking rather than editing. |
 
 The `.xdesign` file is the complete design. The SVGs are for bringing a single screen into
 another document. They import as editable layers too, but an SVG has no artboards or

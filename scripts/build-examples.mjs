@@ -27,7 +27,7 @@
  * opens exactly as if it had been drawn by hand and saved.
  */
 
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
@@ -35,9 +35,18 @@ import { chromium } from '@playwright/test'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-const EXAMPLES = [
-  { folder: 'examples/shop-app', module: '/examples/shop-app/design.ts', build: 'buildShopAppFiles' },
-]
+/**
+ * Every example, by folder under examples/. Each one's design.ts exports
+ * buildFiles(), which returns its files as base64 keyed by path.
+ */
+const EXAMPLES = ['shop-app', 'banking', 'music-studio', 'social', 'messaging']
+
+// `npm run examples -- banking social` builds only those.
+const wanted = process.argv.slice(2)
+const chosen = wanted.length ? EXAMPLES.filter((name) => wanted.includes(name)) : EXAMPLES
+if (wanted.length && chosen.length !== wanted.length) {
+  throw new Error(`Unknown example: ${wanted.filter((w) => !EXAMPLES.includes(w)).join(', ')}`)
+}
 
 const server = await createServer({ root, logLevel: 'error', server: { port: 0 } })
 await server.listen()
@@ -51,18 +60,23 @@ try {
   // A page on the dev server's origin, so the modules and fonts load from it.
   await page.goto(new URL('examples/build.html', url).href)
 
-  for (const example of EXAMPLES) {
-    console.log(`Building ${example.folder}…`)
+  for (const name of chosen) {
+    const folder = join('examples', name)
+    console.log(`Building ${folder}…`)
     const files = await page.evaluate(
-      async ({ module, build }) => (await import(/* @vite-ignore */ module))[build](),
-      example,
+      async (module) => (await import(/* @vite-ignore */ module)).buildFiles(),
+      `/examples/${name}/design.ts`,
     )
-    for (const [name, content] of Object.entries(files)) {
-      const path = join(root, example.folder, name)
+    // What the example wrote before goes first: a screen renamed or removed
+    // would otherwise leave its old SVG and preview behind.
+    await rm(join(root, folder, 'svg'), { recursive: true, force: true })
+    await rm(join(root, folder, 'preview'), { recursive: true, force: true })
+    for (const [file, content] of Object.entries(files)) {
+      const path = join(root, folder, file)
       await mkdir(dirname(path), { recursive: true })
       await writeFile(path, Buffer.from(content, 'base64'))
-      console.log(`  ${join(example.folder, name)}`)
     }
+    console.log(`  ${Object.keys(files).length} files`)
   }
 } finally {
   await browser.close()
