@@ -21,7 +21,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
-    "dictionaries": "node scripts/build-dictionaries.mjs"
+    "dictionaries": "node scripts/build-dictionaries.mjs",
+    "examples": "node scripts/build-examples.mjs"
   },
   "dependencies": {
     "@fontsource/dm-sans": "^5.3.0",

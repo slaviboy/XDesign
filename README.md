@@ -1775,6 +1775,15 @@ to restore the autosaved document.
 
 ---
 
+## Examples
+
+`examples/` holds ready-made documents. **Aura** is a five-screen shopping app — welcome, home,
+product, cart and order confirmation — with named components, product photographs as image
+layers, icons as paths and the brand palette in the swatches. Open
+`examples/shop-app/Aura Shopping App.xdesign` with **File ▸ Open…**, or import a single screen
+from `examples/shop-app/svg/`. The examples are written in code against the editor's own modules
+and rebuilt with `npm run examples`; see [examples/README.md](examples/README.md).
+
 ## Architecture
 
 ```
