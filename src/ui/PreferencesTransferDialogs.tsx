@@ -55,6 +55,7 @@ const SECTION_LABELS: Record<PreferenceSection, MessageKey> = {
   defaultGrid: 'prefs.section.defaultGrid',
   shortcuts: 'shortcuts.title',
   canvas: 'prefs.canvas',
+  panels: 'menu.sections',
 }
 
 /**
@@ -104,6 +105,12 @@ function describeSection(file: PreferencesFile, section: PreferenceSection): str
       return t('prefs.section.canvasCount', {
         count: Object.keys(file.canvas ?? {}).length,
       })
+    case 'panels': {
+      const hidden = file.panels?.hidden?.length ?? 0
+      return hidden === 0
+        ? t('prefs.section.panelsAllShown')
+        : t('prefs.section.panelsHidden', { count: hidden })
+    }
   }
 }
 

@@ -261,9 +261,12 @@ Crop** returns to it in one step. Once applied, the kept part *is* the image —
 Transform fields, its selection frame, its border, what snaps and aligns, what exports and what
 Image Trace traces.
 
-**SVG code** — select a path, line, rectangle, ellipse or polygon and its SVG Code section shows
-the markup an export would write for it, laid out one element per line and coloured the way a
-browser's element inspector colours it. It follows the object as you work, and it can be edited:
+**SVG code** — the SVG Code section shows markup laid out one element per line and coloured the
+way a browser's element inspector colours it, with a **Selection | Scene** switch in its header.
+**Scene** is the whole document as an SVG export of all of it would write it — every artboard,
+group and loose object, with pictures left out — rewritten live as objects are added, grouped,
+moved or restyled; it is also what shows when nothing is selected. **Selection** is the selected
+objects' code, and for a single path, line, rectangle, ellipse or polygon it can be edited:
 change a colour, a radius, a point or the transform in the box and the shape on the canvas
 changes to match as you type, one burst of typing being one undo step. Code that does not
 describe exactly one shape is refused with the reason, and the shape is left alone. The copy
@@ -271,8 +274,10 @@ button puts the code on the clipboard.
 
 **Sections** — the app menu's Sections submenu turns any section of the right-hand column off
 and on, Layers included; the Layers button at the foot of the tool rail does the same for the
-layers panel. Hidden is only hidden: whatever the section controls is untouched, and the choice
-is remembered between sessions.
+layers panel. Drag a section by its title to move it up or down the column — a line shows where
+it will land — and Reset Section Order puts them back. Hidden is only hidden: whatever the section
+controls is untouched. Both the order and what is hidden are remembered between sessions, and
+travel in an exported preferences file.
 
 **Clipboard** — copy an image or some text anywhere on the machine and paste it straight in,
 by `⌘V`, right-click ▸ Paste, or the app menu. It lands in the artboard you are working in:

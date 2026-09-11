@@ -56,22 +56,50 @@ export function canEditSvgCode(doc: DesignDocument, id: NodeId): boolean {
   return supportsSvgCode(doc.nodes[id]) && !is3dAffected(doc, id)
 }
 
+/** One object's SVG, laid out one element per line — the code that can be edited back. */
+export async function svgCodeFor(doc: DesignDocument, id: NodeId): Promise<string> {
+  return codeFor(doc, [id])
+}
+
 /**
- * The object's SVG, laid out one element per line.
+ * Several objects' SVG, as copying them would write it — a group, a
+ * multi-selection. Read-only: there is no one shape to edit it back into.
+ */
+export async function svgCodeForNodes(doc: DesignDocument, ids: readonly NodeId[]): Promise<string> {
+  return codeFor(doc, ids.filter((id) => doc.nodes[id]))
+}
+
+/**
+ * The whole scene's SVG: every artboard and every object on the canvas
+ * around them, in layer order, as an SVG export of all of it would write —
+ * pictures left out.
+ */
+export async function svgCodeForScene(doc: DesignDocument): Promise<string> {
+  const root = doc.nodes[doc.rootId]
+  const ids = root && 'children' in root ? root.children.filter((id) => doc.nodes[id]?.visible) : []
+  return codeFor(doc, ids)
+}
+
+/**
+ * The code for `ids`, framed on them in document coordinates, bitmaps left
+ * out: in a code view a picture is a screenful of base64 that buries the
+ * markup around it.
  *
  * Framed on whole units: the exporter writes width and height rounded, so a
  * fractional frame would read back very slightly scaled — enough to count as
  * an edit nobody made.
  */
-export async function svgCodeFor(doc: DesignDocument, id: NodeId): Promise<string> {
+async function codeFor(doc: DesignDocument, ids: readonly NodeId[]): Promise<string> {
+  if (ids.length === 0) return formatSvg('<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"></svg>')
   // Nudged inward first: a curve's bounds come out a hair past a whole number
   // (199.9999…), and rounding that out would move the frame by a unit for no
   // visible reason.
-  const raw = renderBoundsOfNodes(doc, [id], createMatrixCache())
+  const raw = renderBoundsOfNodes(doc, ids, createMatrixCache())
   const bounds = roundOut({ x: raw.x + 1e-6, y: raw.y + 1e-6, width: raw.width - 2e-6, height: raw.height - 2e-6 })
-  const { svg } = await exportNodesToSvg(doc, [id], {
+  const { svg } = await exportNodesToSvg(doc, ids, {
     bounds: { ...bounds, width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) },
     textHandling: 'reference',
+    imageHandling: 'omit',
   })
   return formatSvg(svg)
 }

@@ -47,6 +47,7 @@
   "menu.view": "视图",
   "menu.sections": "面板",
   "menu.showAllSections": "显示所有面板",
+  "menu.resetSectionOrder": "重置面板顺序",
   "menu.zoomToFit": "适合窗口",
   "menu.zoomTo100": "缩放至 100%",
   "menu.zoomToSelection": "缩放至所选内容",
@@ -164,6 +165,8 @@
   "note.canvasGrid": "覆盖整个画布的绘图辅助。画板自身的方形网格或版面网格在画板上设置。",
   "note.cropHint": "拖动控制点选择要保留的部分，或在内部拖动以移动它。按 Enter 应用，按 Esc 取消。",
   "note.svgCodeReadOnly": "应用了 3D 变换的对象的代码可以复制，但不能编辑。",
+  "note.svgCodeScene": "整个场景的代码，与 SVG 导出一致（不含图像）。选择一个形状即可编辑其代码。",
+  "note.svgCodeSelection": "所选全部内容的代码（不含图像）。只选择一个路径、线条、矩形、椭圆或多边形即可编辑其代码。",
   "document.counts": "{objects} 个对象 · {images} 张图像",
   "label.textResize": "文本大小调整",
   "label.autoWidth": "自动宽度",
@@ -237,6 +240,8 @@
   "prefs.section.shortcutsDefault": "默认",
   "prefs.section.shortcutsChanged": "已更改 {total} 项中的 {count} 项",
   "prefs.section.canvasCount": "{count} 项设置",
+  "prefs.section.panelsAllShown": "全部显示",
+  "prefs.section.panelsHidden": "已隐藏 {count} 个",
   "prefs.transfer.exportTitle": "导出首选项",
   "prefs.transfer.importTitle": "导入首选项",
   "prefs.transfer.exportHint": "选择要写入文件的内容。",
@@ -261,5 +266,7 @@
   "label.resetCrop": "重置裁剪",
   "label.showWholeImage": "显示完整图像",
   "label.copySvgCode": "复制 SVG 代码",
-  "label.copied": "已复制"
+  "label.copied": "已复制",
+  "label.codeSelection": "所选",
+  "label.codeScene": "场景"
 }

@@ -47,7 +47,8 @@ import { stepZoom, zoomTo, zoomToFit, zoomToSelection } from '../shortcuts/Keybo
 import { ZOOM_MENU_STEPS } from '../canvas/Viewport'
 import { canImageTrace, openImageTrace } from '../history/TraceCommands'
 import {
-  PANEL_SECTIONS, openDialog, setEditor, showAllSections, toggle3dControls, toggleSection,
+  openDialog, resetSectionOrder, setEditor, showAllSections, toggle3dControls,
+  toggleSection,
   type WorkspaceTab,
 } from '../state/EditorStore'
 import { useDocumentStore, useEditorStore } from '../state/hooks'
@@ -92,6 +93,7 @@ export const TopBar = memo(function TopBar() {
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const show3d = useEditorStore((s) => s.show3dControls)
   const hiddenSections = useEditorStore((s) => s.hiddenSections)
+  const sectionOrder = useEditorStore((s) => s.sectionOrder)
   // Recomputed from the document, so the menu never offers a reset that
   // would do nothing or refuses one that would.
   const has3d = selection.some((id) => !!doc.nodes[id]?.transform3d)
@@ -229,8 +231,9 @@ export const TopBar = memo(function TopBar() {
         label: t('menu.sections'),
         testId: 'menu-sections',
         items: [
-          // In the order they stand in the column, Layers last as it is there.
-          ...PANEL_SECTIONS.map((id): MenuItemSpec => ({
+          // In the order they stand in the column, as arranged; Layers last,
+          // as its panel is always at the foot of the column.
+          ...[...sectionOrder.filter((id) => id !== 'layers'), 'layers' as const].map((id): MenuItemSpec => ({
             label: t(`section.${id}`),
             checked: !hiddenSections.includes(id),
             testId: `section-toggle-${id}`,
@@ -238,6 +241,7 @@ export const TopBar = memo(function TopBar() {
           })),
           { kind: 'separator' },
           { label: t('menu.showAllSections'), disabled: hiddenSections.length === 0, onSelect: showAllSections },
+          { label: t('menu.resetSectionOrder'), testId: 'reset-section-order', onSelect: resetSectionOrder },
         ],
       },
       { label: t('menu.newArtboard'), onSelect: () => openDialog('artboard-preset') },
@@ -269,7 +273,7 @@ export const TopBar = memo(function TopBar() {
   }, [
     gridVisible, guidesVisible, guideBoards, guidesLocked, languageTick,
     history.canRedo, history.canUndo, selectionCount, snapEnabled, themePreference,
-    show3d, has3d, in3d, hiddenSections,
+    show3d, has3d, in3d, hiddenSections, sectionOrder,
   ])
 
   return (

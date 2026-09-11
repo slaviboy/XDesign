@@ -121,6 +121,9 @@
   --scrollbar-thumb: rgba(0, 0, 0, 0.2);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
 
+  /* The Layers and Extensions buttons at the foot of the tool rail. */
+  --rail-panel-icon: #666666;
+
   /* SVG code, in the colours a browser's element inspector uses — the view
      people already read markup in. */
   --code-bg: #fafafa;
@@ -234,6 +237,9 @@
 
   --scrollbar-thumb: rgba(255, 255, 255, 0.22);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.34);
+
+  /* #666666 all but disappears on the dark rail; the same grey, lifted. */
+  --rail-panel-icon: #a3a3a3;
 
   --code-bg: #1f1f1f;
   --code-tag: #5db0d7;

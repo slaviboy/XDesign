@@ -35,7 +35,8 @@ import {
 import { createDocument } from '@/document/NodeFactory'
 import { getDoc, replaceDocument } from '@/state/DocumentStore'
 import {
-  editorStore, setMarqueeMode, setToolHighlight, readDefaultGrid, saveDefaultGrid,
+  editorStore, moveSection, PANEL_SECTIONS, resetSectionOrder, setHiddenSections, setMarqueeMode,
+  setToolHighlight, readDefaultGrid, saveDefaultGrid, toggleSection,
 } from '@/state/EditorStore'
 import { getThemePreference, setThemePreference } from '@/state/theme'
 import { getLanguage, setLanguage } from '@/i18n'
@@ -319,5 +320,59 @@ describe('choosing which sections to move', () => {
     expect(chordFor('file.save')).toBe('Mod+K')
     // The theme was never in the file, so it was never touched.
     expect(getThemePreference()).toBe('light')
+  })
+})
+
+describe('the right-hand column travels with you', () => {
+  beforeEach(() => {
+    resetSectionOrder()
+    setHiddenSections([])
+  })
+
+  it('writes the section order and which sections are hidden', () => {
+    moveSection('export', 'transform')
+    toggleSection('blur')
+    const file = collectPreferences(NOW)
+    expect(file.panels?.order?.indexOf('export')).toBe(file.panels!.order!.indexOf('transform') - 1)
+    expect(file.panels?.hidden).toEqual(['blur'])
+  })
+
+  it('puts the arrangement back on another machine', () => {
+    moveSection('svgCode', 'transform')
+    toggleSection('layers')
+    toggleSection('fill')
+    const exported = serializePreferences(collectPreferences(NOW))
+
+    localStorage.clear()
+    resetSectionOrder()
+    setHiddenSections([])
+
+    const summary = applyPreferences(parsePreferences(exported))
+    const state = editorStore.getState()
+    expect(state.sectionOrder.indexOf('svgCode')).toBe(state.sectionOrder.indexOf('transform') - 1)
+    expect(state.hiddenSections).toEqual(['fill', 'layers'])
+    expect(summary.applied).toContain('sections')
+    // And it is remembered here from now on, as if arranged by hand.
+    expect(localStorage.getItem('xdesign.hiddenSections')).toContain('fill')
+  })
+
+  it('completes an order from an older build and drops names it does not know', () => {
+    applyPreferences({
+      format: 'xdesign-preferences',
+      version: PREFERENCES_VERSION,
+      panels: { order: ['export', 'fromTheFuture', 'transform', 'export'] as never, hidden: ['nope'] as never },
+    })
+    const order = editorStore.getState().sectionOrder
+    // The file's own order holds; what it did not mention is back in place.
+    expect(order.indexOf('export')).toBeLessThan(order.indexOf('transform'))
+    expect(new Set(order).size).toBe(order.length)
+    expect([...order].sort()).toEqual([...PANEL_SECTIONS].sort())
+    expect(editorStore.getState().hiddenSections).toEqual([])
+  })
+
+  it('is offered for import only when the file has an arrangement', () => {
+    const base = { format: 'xdesign-preferences' as const, version: PREFERENCES_VERSION }
+    expect(sectionsInFile({ ...base, panels: { hidden: ['fill'] } })).toEqual(['panels'])
+    expect(sectionsInFile({ ...base, panels: 'nonsense' as never })).toEqual([])
   })
 })

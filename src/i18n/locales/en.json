@@ -47,6 +47,7 @@
   "menu.view": "View",
   "menu.sections": "Sections",
   "menu.showAllSections": "Show All Sections",
+  "menu.resetSectionOrder": "Reset Section Order",
   "menu.zoomToFit": "Zoom to Fit",
   "menu.zoomTo100": "Zoom to 100%",
   "menu.zoomToSelection": "Zoom to Selection",
@@ -164,6 +165,8 @@
   "note.canvasGrid": "A drawing aid across the whole canvas. An artboard's own Square or Layout grid is set on the artboard.",
   "note.cropHint": "Drag the handles to choose what to keep, or drag inside to move it. Enter applies, Esc cancels.",
   "note.svgCodeReadOnly": "The code of a 3D-transformed object can be copied, but not edited.",
+  "note.svgCodeScene": "The whole scene, as an SVG export writes it, with images left out. Select a shape to edit its code.",
+  "note.svgCodeSelection": "The code of everything selected, with images left out. Select one path, line, rectangle, ellipse or polygon to edit its code.",
   "document.counts": "{objects} objects · {images} images",
   "label.textResize": "Text resize",
   "label.autoWidth": "Auto Width",
@@ -237,6 +240,8 @@
   "prefs.section.shortcutsDefault": "Defaults",
   "prefs.section.shortcutsChanged": "{count} of {total} changed",
   "prefs.section.canvasCount": "{count} settings",
+  "prefs.section.panelsAllShown": "All shown",
+  "prefs.section.panelsHidden": "{count} hidden",
   "prefs.transfer.exportTitle": "Export Preferences",
   "prefs.transfer.importTitle": "Import Preferences",
   "prefs.transfer.exportHint": "Choose what to write to the file.",
@@ -261,5 +266,7 @@
   "label.resetCrop": "Reset Crop",
   "label.showWholeImage": "Show Whole Image",
   "label.copySvgCode": "Copy SVG Code",
-  "label.copied": "Copied"
+  "label.copied": "Copied",
+  "label.codeSelection": "Selection",
+  "label.codeScene": "Scene"
 }

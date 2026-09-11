@@ -128,13 +128,67 @@ export const HIDDEN_SECTIONS_STORAGE_KEY = 'xdesign.hiddenSections'
 
 function readStoredHiddenSections(): PanelSection[] {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(HIDDEN_SECTIONS_STORAGE_KEY) ?? '[]')
-    // User-editable storage: keep only names this build still has.
-    return Array.isArray(parsed)
-      ? PANEL_SECTIONS.filter((id) => parsed.includes(id))
-      : []
+    return cleanHiddenSections(JSON.parse(localStorage.getItem(HIDDEN_SECTIONS_STORAGE_KEY) ?? '[]'))
   } catch {
     return []
+  }
+}
+
+/** Only names this build still has — the value comes from storage or a file. */
+export function cleanHiddenSections(value: unknown): PanelSection[] {
+  return Array.isArray(value) ? PANEL_SECTIONS.filter((id) => value.includes(id)) : []
+}
+
+/**
+ * The order the sections stand in, top to bottom, as arranged by dragging
+ * their titles. It holds every section, shown or not, so dragging one past a
+ * section this selection does not have still means something the next time
+ * that section appears.
+ */
+export const SECTION_ORDER_STORAGE_KEY = 'xdesign.sectionOrder'
+
+function readStoredSectionOrder(): PanelSection[] {
+  try {
+    return cleanSectionOrder(JSON.parse(localStorage.getItem(SECTION_ORDER_STORAGE_KEY) ?? 'null'))
+  } catch {
+    return [...PANEL_SECTIONS]
+  }
+}
+
+/**
+ * A complete order from whatever was stored: unknown and repeated names
+ * dropped, and any section this build has that the value does not mention —
+ * one added since it was saved — put back at its default place, after the
+ * section it follows by default.
+ */
+export function cleanSectionOrder(value: unknown): PanelSection[] {
+  const known = new Set<string>(PANEL_SECTIONS)
+  const order: PanelSection[] = []
+  if (Array.isArray(value)) {
+    for (const id of value) {
+      if (typeof id === 'string' && known.has(id) && !order.includes(id as PanelSection)) {
+        order.push(id as PanelSection)
+      }
+    }
+  }
+  PANEL_SECTIONS.forEach((id, i) => {
+    if (order.includes(id)) return
+    const before = PANEL_SECTIONS.slice(0, i).reverse().find((p) => order.includes(p))
+    order.splice(before ? order.indexOf(before) + 1 : 0, 0, id)
+  })
+  return order
+}
+
+/** What the SVG Code section shows: the selection's code, or the whole scene's. */
+export type SvgCodeScope = 'selection' | 'scene'
+
+export const SVG_CODE_SCOPE_STORAGE_KEY = 'xdesign.svgCodeScope'
+
+function readStoredSvgCodeScope(): SvgCodeScope {
+  try {
+    return localStorage.getItem(SVG_CODE_SCOPE_STORAGE_KEY) === 'scene' ? 'scene' : 'selection'
+  } catch {
+    return 'selection'
   }
 }
 
@@ -306,6 +360,14 @@ export interface EditorState {
   layersHeight: number
   /** Sections of the right-hand column turned off from the menu. See PANEL_SECTIONS. */
   hiddenSections: PanelSection[]
+  /** Every section, in the order the column shows them. See SECTION_ORDER_STORAGE_KEY. */
+  sectionOrder: PanelSection[]
+  /**
+   * A section title being dragged to a new place: which section, and where it
+   * would land — before `over`, or at the end of the column when `over` is null.
+   */
+  sectionDrag: { id: PanelSection; over: PanelSection | null } | null
+  svgCodeScope: SvgCodeScope
   isDragging: boolean
 }
 
@@ -355,6 +417,9 @@ export const editorStore = createStore<EditorState>()(
     inspectorWidth: 260,
     layersHeight: 300,
     hiddenSections: readStoredHiddenSections(),
+    sectionOrder: readStoredSectionOrder(),
+    sectionDrag: null,
+    svgCodeScope: readStoredSvgCodeScope(),
     isDragging: false,
   })),
 )
@@ -424,7 +489,7 @@ export function toggle3dControls(): void {
 }
 
 /** Persisted, like the 3D cube: which panels you work with outlives the tab. */
-function setHiddenSections(hidden: PanelSection[]): void {
+export function setHiddenSections(hidden: PanelSection[]): void {
   editorStore.setState({ hiddenSections: hidden })
   try {
     localStorage.setItem(HIDDEN_SECTIONS_STORAGE_KEY, JSON.stringify(hidden))
@@ -440,6 +505,38 @@ export function toggleSection(id: PanelSection): void {
 
 export function showAllSections(): void {
   setHiddenSections([])
+}
+
+export function setSectionOrder(order: readonly PanelSection[]): void {
+  const clean = cleanSectionOrder(order)
+  editorStore.setState({ sectionOrder: clean })
+  try {
+    localStorage.setItem(SECTION_ORDER_STORAGE_KEY, JSON.stringify(clean))
+  } catch {
+    // Storage blocked: the order still applies for this session.
+  }
+}
+
+/** Move `id` to just before `before`, or to the end when `before` is null. */
+export function moveSection(id: PanelSection, before: PanelSection | null): void {
+  if (id === before) return
+  const order = editorStore.getState().sectionOrder.filter((s) => s !== id)
+  const at = before ? order.indexOf(before) : -1
+  order.splice(at < 0 ? order.length : at, 0, id)
+  setSectionOrder(order)
+}
+
+export function resetSectionOrder(): void {
+  setSectionOrder([...PANEL_SECTIONS])
+}
+
+export function setSvgCodeScope(scope: SvgCodeScope): void {
+  editorStore.setState({ svgCodeScope: scope })
+  try {
+    localStorage.setItem(SVG_CODE_SCOPE_STORAGE_KEY, scope)
+  } catch {
+    // Storage blocked: the choice still applies for this session.
+  }
 }
 
 /**

@@ -193,6 +193,8 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   align-items: center;
   gap: 3px;
 }
+/* Grey rather than the tools' text colour: panels, not tools, and quieter for it. */
+.toolbar .panel-toggle { color: var(--rail-panel-icon); }
 /* An open panel is marked quietly — a tinted chip — so it never reads as a
    second active tool. */
 .toolbar .panel-toggle.on { background: var(--bg-selected); }
@@ -445,7 +447,35 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 }
 .inspector-resizer:hover { background: var(--accent); opacity: 0.25; }
 
-.inspector-scroll { overflow-y: auto; flex: 1; min-height: 0; }
+/* A flex column so each section's saved place is simply its `order` (set on
+   the section itself). Nothing may shrink: the column scrolls instead. The
+   object's name stays on top and the hint at the bottom, wherever the
+   sections have been moved. */
+.inspector-scroll {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.inspector-scroll > * { flex-shrink: 0; }
+.inspector-scroll > .selection-name { order: -1; }
+.inspector-scroll > .empty-state { order: 999; }
+
+/* Rearranging: the title is the handle, the section being moved fades, and
+   an accent line marks where it would land. */
+.section-title.movable { cursor: grab; }
+.section-dragging { opacity: 0.45; }
+.section-drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.inspector-scroll.section-drop-end::after {
+  content: '';
+  order: 998;
+  flex: none;
+  height: 2px;
+  background: var(--accent);
+}
+body.section-reordering,
+body.section-reordering * { cursor: grabbing !important; user-select: none; }
 
 .section {
   border-bottom: 1px solid var(--border-subtle);
@@ -1358,6 +1388,33 @@ body.eyedropping [data-testid="canvas-root"] { cursor: crosshair !important; }
   background: var(--code-bg);
 }
 .code-scroll:focus-within { border-color: var(--accent); }
+/* The header's switch between the selection's code and the scene's, beside
+   the copy button. Small, as everything in a section title is. */
+.code-actions { display: inline-flex; align-items: center; gap: 4px; }
+.code-scope {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: -3px 0;
+}
+.code-scope button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.code-scope button + button { border-left: 1px solid var(--border); }
+.code-scope button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.code-scope button.on,
+.code-scope button.on:hover:not(:disabled) { background: var(--accent); color: var(--accent-contrast); }
+.code-scope button:disabled { opacity: 0.4; cursor: default; }
 .code-editor { position: relative; }
 .code-highlight,
 .code-input {

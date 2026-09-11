@@ -161,8 +161,11 @@ export function PropertyInspector() {
   // The whole panel is text; one subscription at the top re-renders all of it.
   void useLanguage()
   const guide = useEditorStore((s) => s.selectedGuide)
+  // A section dragged below the last one lands at the end, which no section
+  // can mark, so the column marks it.
+  const dropAtEnd = useEditorStore((s) => !!s.sectionDrag && s.sectionDrag.over === null)
   return (
-    <div className="inspector-scroll">
+    <div className={`inspector-scroll${dropAtEnd ? ' section-drop-end' : ''}`}>
       {guide ? (
         <GuideSection selected={guide} />
       ) : selected.length === 0 ? (
@@ -320,6 +323,9 @@ function DocumentSection() {
           {t('label.snappingEnabled')}
         </label>
       </Section>
+
+      {/* With nothing selected, the code is the whole scene's. */}
+      <SvgCodeSection nodes={[]} />
 
       <div className="empty-state">
         Select an object to edit its properties.

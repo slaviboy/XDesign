@@ -47,6 +47,7 @@
   "menu.view": "Изглед",
   "menu.sections": "Секции",
   "menu.showAllSections": "Показване на всички секции",
+  "menu.resetSectionOrder": "Подредба по подразбиране",
   "menu.zoomToFit": "Побиране в прозореца",
   "menu.zoomTo100": "Мащаб 100 %",
   "menu.zoomToSelection": "Мащаб към селекцията",
@@ -164,6 +165,8 @@
   "note.canvasGrid": "Помощно средство за рисуване върху цялото платно. Собствената квадратна мрежа или мрежа за оформление на работната площ се задава от работната площ.",
   "note.cropHint": "Плъзнете дръжките, за да изберете какво да остане, или плъзнете вътре, за да го преместите. Enter прилага, Esc отказва.",
   "note.svgCodeReadOnly": "Кодът на обект с 3D трансформация може да се копира, но не и да се редактира.",
+  "note.svgCodeScene": "Цялата сцена, както я записва експорт в SVG, без изображенията. Изберете фигура, за да редактирате кода ѝ.",
+  "note.svgCodeSelection": "Кодът на всичко избрано, без изображенията. Изберете един път, линия, правоъгълник, елипса или многоъгълник, за да редактирате кода му.",
   "document.counts": "{objects} обекта · {images} изображения",
   "label.textResize": "Оразмеряване на текста",
   "label.autoWidth": "Автоматична ширина",
@@ -237,6 +240,8 @@
   "prefs.section.shortcutsDefault": "По подразбиране",
   "prefs.section.shortcutsChanged": "{count} от {total} променени",
   "prefs.section.canvasCount": "{count} настройки",
+  "prefs.section.panelsAllShown": "Всички са видими",
+  "prefs.section.panelsHidden": "Скрити: {count}",
   "prefs.transfer.exportTitle": "Експортиране на настройки",
   "prefs.transfer.importTitle": "Импортиране на настройки",
   "prefs.transfer.exportHint": "Изберете какво да се запише във файла.",
@@ -261,5 +266,7 @@
   "label.resetCrop": "Без изрязване",
   "label.showWholeImage": "Цялото изображение",
   "label.copySvgCode": "Копиране на SVG кода",
-  "label.copied": "Копирано"
+  "label.copied": "Копирано",
+  "label.codeSelection": "Избрано",
+  "label.codeScene": "Сцена"
 }

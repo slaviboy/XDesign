@@ -47,8 +47,9 @@ import { getThemePreference, setThemePreference, type ThemePreference } from '..
 import { getLanguage, setLanguage, LANGUAGES, type LanguageCode } from '../i18n'
 import { isSpellCheckEnabled, setSpellCheckEnabled } from '../text/spellcheck'
 import {
-  editorStore, readDefaultGrid, saveDefaultGrid, setMarqueeMode, setToolHighlight,
-  type MarqueeMode, type ToolHighlight,
+  cleanHiddenSections, cleanSectionOrder, editorStore, readDefaultGrid, saveDefaultGrid,
+  setHiddenSections, setMarqueeMode, setSectionOrder, setToolHighlight,
+  type MarqueeMode, type PanelSection, type ToolHighlight,
 } from '../state/EditorStore'
 import { applyKeymapOverrides, keymapOverrides, type KeymapOverrides } from '../shortcuts/keymap'
 import { isRememberingExportSettings, setRememberExportSettings } from '../export/ExportSettings'
@@ -86,6 +87,14 @@ export interface PreferencesFile {
   defaultGrid?: ArtboardGrid | null
   shortcuts?: KeymapOverrides
   canvas?: CanvasPreferences
+  /** The right-hand column as arranged: section order, and which are turned off. */
+  panels?: PanelPreferences
+}
+
+export interface PanelPreferences {
+  /** Every section, top to bottom. */
+  order?: PanelSection[]
+  hidden?: PanelSection[]
 }
 
 /**
@@ -107,10 +116,11 @@ export type PreferenceSection =
   | 'defaultGrid'
   | 'shortcuts'
   | 'canvas'
+  | 'panels'
 
 export const PREFERENCE_SECTIONS: readonly PreferenceSection[] = [
   'language', 'theme', 'spellCheck', 'marqueeMode', 'toolHighlight', 'rememberExport',
-  'defaultGrid', 'shortcuts', 'canvas',
+  'defaultGrid', 'shortcuts', 'canvas', 'panels',
 ]
 
 /** Which sections a parsed file has something to say about. */
@@ -127,6 +137,7 @@ export function sectionsInFile(file: PreferencesFile): PreferenceSection[] {
   if (file.defaultGrid === null || isArtboardGrid(file.defaultGrid)) present.push('defaultGrid')
   if (file.shortcuts && typeof file.shortcuts === 'object') present.push('shortcuts')
   if (canvasPatch(file.canvas)) present.push('canvas')
+  if (panelsPatch(file.panels)) present.push('panels')
   return present
 }
 
@@ -175,6 +186,10 @@ export function collectPreferences(
       guideColor: settings.guideColor,
       guideDragMode: settings.guideDragMode,
     }
+  }
+  if (wanted.has('panels')) {
+    const editor = editorStore.getState()
+    file.panels = { order: [...editor.sectionOrder], hidden: [...editor.hiddenSections] }
   }
   return file
 }
@@ -256,6 +271,13 @@ export function applyPreferences(
     applied.push('shortcuts')
   }
 
+  const panels = wanted.has('panels') ? panelsPatch(file.panels) : null
+  if (panels) {
+    if (panels.order) setSectionOrder(panels.order)
+    if (panels.hidden) setHiddenSections(panels.hidden)
+    applied.push('sections')
+  }
+
   const canvas = wanted.has('canvas') ? canvasPatch(file.canvas) : null
   let changedDocument = false
   if (canvas) {
@@ -290,6 +312,22 @@ function isColor(value: unknown): value is RGBA {
   if (!value || typeof value !== 'object') return false
   const c = value as RGBA
   return [c.r, c.g, c.b, c.a].every((n) => typeof n === 'number' && Number.isFinite(n))
+}
+
+/**
+ * The arrangement, with each half kept only when it is well-formed. An order
+ * is completed rather than refused — sections this build has that the file
+ * does not know go back to their default places — and names the build does
+ * not know are dropped, so a file from a newer or older version still applies.
+ */
+function panelsPatch(panels: PanelPreferences | undefined): PanelPreferences | null {
+  if (!panels || typeof panels !== 'object') return null
+  const patch: PanelPreferences = {}
+  if (Array.isArray(panels.order) && cleanHiddenSections(panels.order).length > 0) {
+    patch.order = cleanSectionOrder(panels.order)
+  }
+  if (Array.isArray(panels.hidden)) patch.hidden = cleanHiddenSections(panels.hidden)
+  return patch.order || patch.hidden ? patch : null
 }
 
 /** Only the fields that are present and well-formed. */

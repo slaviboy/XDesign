@@ -47,6 +47,7 @@
   "menu.view": "Ver",
   "menu.sections": "Secções",
   "menu.showAllSections": "Mostrar todas as secções",
+  "menu.resetSectionOrder": "Repor a ordem",
   "menu.zoomToFit": "Ajustar à janela",
   "menu.zoomTo100": "Zoom a 100 %",
   "menu.zoomToSelection": "Zoom à seleção",
@@ -164,6 +165,8 @@
   "note.canvasGrid": "Um auxiliar de desenho para toda a tela. A grelha quadrada ou de esquema da própria prancheta define-se na prancheta.",
   "note.cropHint": "Arraste as pegas para escolher o que manter, ou arraste o interior para o mover. Enter aplica, Esc cancela.",
   "note.svgCodeReadOnly": "O código de um objeto com transformação 3D pode ser copiado, mas não editado.",
+  "note.svgCodeScene": "Toda a cena, tal como uma exportação SVG a escreve, sem as imagens. Selecione uma forma para editar o seu código.",
+  "note.svgCodeSelection": "O código de tudo o que está selecionado, sem as imagens. Selecione um único caminho, linha, retângulo, elipse ou polígono para editar o seu código.",
   "document.counts": "{objects} objetos · {images} imagens",
   "label.textResize": "Redimensionamento do texto",
   "label.autoWidth": "Largura automática",
@@ -237,6 +240,8 @@
   "prefs.section.shortcutsDefault": "Predefinições",
   "prefs.section.shortcutsChanged": "{count} de {total} alterados",
   "prefs.section.canvasCount": "{count} definições",
+  "prefs.section.panelsAllShown": "Todas visíveis",
+  "prefs.section.panelsHidden": "{count} ocultas",
   "prefs.transfer.exportTitle": "Exportar preferências",
   "prefs.transfer.importTitle": "Importar preferências",
   "prefs.transfer.exportHint": "Escolha o que escrever no ficheiro.",
@@ -261,5 +266,7 @@
   "label.resetCrop": "Repor recorte",
   "label.showWholeImage": "Mostrar imagem inteira",
   "label.copySvgCode": "Copiar código SVG",
-  "label.copied": "Copiado"
+  "label.copied": "Copiado",
+  "label.codeSelection": "Seleção",
+  "label.codeScene": "Cena"
 }

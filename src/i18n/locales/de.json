@@ -47,6 +47,7 @@
   "menu.view": "Ansicht",
   "menu.sections": "Bereiche",
   "menu.showAllSections": "Alle Bereiche einblenden",
+  "menu.resetSectionOrder": "Reihenfolge zurücksetzen",
   "menu.zoomToFit": "Einpassen",
   "menu.zoomTo100": "Auf 100 % zoomen",
   "menu.zoomToSelection": "Auf Auswahl zoomen",
@@ -164,6 +165,8 @@
   "note.canvasGrid": "Eine Zeichenhilfe für die gesamte Arbeitsfläche. Das eigene quadratische oder Layout-Raster einer Zeichenfläche wird an der Zeichenfläche eingestellt.",
   "note.cropHint": "Ziehen Sie an den Griffen, um den Ausschnitt zu wählen, oder ziehen Sie ihn von innen an eine andere Stelle. Eingabe übernimmt, Esc bricht ab.",
   "note.svgCodeReadOnly": "Der Code eines 3D-transformierten Objekts kann kopiert, aber nicht bearbeitet werden.",
+  "note.svgCodeScene": "Die ganze Szene, wie ein SVG-Export sie schreibt, ohne Bilder. Wählen Sie eine Form, um ihren Code zu bearbeiten.",
+  "note.svgCodeSelection": "Der Code der gesamten Auswahl, ohne Bilder. Wählen Sie genau einen Pfad, eine Linie, ein Rechteck, eine Ellipse oder ein Polygon, um den Code zu bearbeiten.",
   "document.counts": "{objects} Objekte · {images} Bilder",
   "label.textResize": "Textgröße",
   "label.autoWidth": "Automatische Breite",
@@ -237,6 +240,8 @@
   "prefs.section.shortcutsDefault": "Standard",
   "prefs.section.shortcutsChanged": "{count} von {total} geändert",
   "prefs.section.canvasCount": "{count} Einstellungen",
+  "prefs.section.panelsAllShown": "Alle sichtbar",
+  "prefs.section.panelsHidden": "{count} ausgeblendet",
   "prefs.transfer.exportTitle": "Einstellungen exportieren",
   "prefs.transfer.importTitle": "Einstellungen importieren",
   "prefs.transfer.exportHint": "Wählen Sie, was in die Datei geschrieben wird.",
@@ -261,5 +266,7 @@
   "label.resetCrop": "Zuschnitt zurücksetzen",
   "label.showWholeImage": "Ganzes Bild zeigen",
   "label.copySvgCode": "SVG-Code kopieren",
-  "label.copied": "Kopiert"
+  "label.copied": "Kopiert",
+  "label.codeSelection": "Auswahl",
+  "label.codeScene": "Szene"
 }

@@ -25,7 +25,10 @@ import { drawShape, openApp } from './helpers'
 test.beforeEach(async ({ page }) => {
   await openApp(page)
   // Every test starts with every section showing, whatever an earlier one left.
-  await page.evaluate(() => localStorage.removeItem('xdesign.hiddenSections'))
+  await page.evaluate(() => {
+    localStorage.removeItem('xdesign.hiddenSections')
+    localStorage.removeItem('xdesign.sectionOrder')
+  })
   await page.reload()
   await openApp(page)
 })
@@ -83,4 +86,47 @@ test('a section turned off in the menu is gone until turned back on', async ({ p
   await page.locator('.menu-item', { hasText: 'Show All Sections' }).click()
   await expect(page.locator('[data-section="fill"]')).toBeVisible()
   await expect(page.locator('.layers-panel')).toBeVisible()
+})
+
+test('the panel buttons at the foot of the rail are drawn in grey', async ({ page }) => {
+  for (const id of ['toggle-layers', 'extensions']) {
+    const colour = await page.locator(`[data-testid="${id}"]`).evaluate((el) => getComputedStyle(el).color)
+    expect(colour).toBe('rgb(102, 102, 102)')
+  }
+})
+
+test('a section is moved by dragging its title, and stays where it was put', async ({ page }) => {
+  await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 320, y: 300 })
+  const drawnOrder = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('.inspector-scroll > .section[data-section]'))
+        .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+        .map((el) => el.dataset.section),
+    )
+  expect((await drawnOrder()).slice(0, 3)).toEqual(['transform', 'align', 'fill'])
+
+  // Fill's title, dragged up over Transform's.
+  const from = (await page.locator('[data-section="fill"] .section-title').boundingBox())!
+  const to = (await page.locator('[data-section="transform"] .section-title').boundingBox())!
+  await page.mouse.move(from.x + 40, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(from.x + 40, from.y - 10, { steps: 3 })
+  await page.mouse.move(to.x + 40, to.y + 2, { steps: 8 })
+  await expect(page.locator('[data-section="transform"]')).toHaveClass(/section-drop-before/)
+  await page.mouse.up()
+  expect((await drawnOrder()).slice(0, 3)).toEqual(['fill', 'transform', 'align'])
+
+  // A click on a title is still only a click.
+  await page.locator('[data-section="align"] .section-title').click()
+  expect((await drawnOrder()).slice(0, 3)).toEqual(['fill', 'transform', 'align'])
+
+  await page.reload()
+  await openApp(page)
+  await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 320, y: 300 })
+  expect((await drawnOrder()).slice(0, 3)).toEqual(['fill', 'transform', 'align'])
+
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-sections"]').hover()
+  await page.locator('[data-testid="reset-section-order"]').click()
+  expect((await drawnOrder()).slice(0, 3)).toEqual(['transform', 'align', 'fill'])
 })

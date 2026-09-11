@@ -179,13 +179,19 @@ test('preferences export and import move settings between machines', async ({ pa
   await expect(save).toHaveText('K')
   await page.locator('.dialog-footer .button.primary').click()
 
+  // And the column's arrangement: a section turned off.
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-sections"]').hover()
+  await page.locator('[data-testid="section-toggle-fill"]').click()
+
   await page.locator('[data-testid="app-menu"]').click()
   await page.locator('[data-testid="menu-export-prefs"]').click()
 
   // Every section is offered, ticked, and says what it holds.
   const rows = page.locator('.prefs-transfer-list .prefs-transfer-row')
-  await expect(rows).toHaveCount(9)
+  await expect(rows).toHaveCount(10)
   await expect(rows.filter({ hasText: 'Keyboard Shortcuts' })).toContainText('1 of')
+  await expect(rows.filter({ hasText: 'Sections' })).toContainText('1 hidden')
   await expect(rows.filter({ hasText: 'Remember last export settings' })).toContainText('On')
 
   const download = page.waitForEvent('download')
@@ -203,24 +209,37 @@ test('preferences export and import move settings between machines', async ({ pa
   // Stored platform-neutrally, so the file works on the other kind of machine.
   expect(parsed.shortcuts['file.save']).toBe('K')
   expect(text).not.toContain('⌘')
+  expect(parsed.panels.hidden).toEqual(['fill'])
+  expect(parsed.panels.order).toContain('svgCode')
 
   // Now put it back on a "different machine": reset, then import the file.
   await openShortcuts(page)
   await page.locator('.shortcut-footer-row .button').click()
   await expect(shortcutButton(page, 'Save')).toHaveText(MOD === 'Meta' ? '⌘S' : 'Ctrl+S')
   await page.locator('.dialog-footer .button.primary').click()
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-sections"]').hover()
+  await page.locator('.menu-item', { hasText: 'Show All Sections' }).click()
 
   const chooser = page.waitForEvent('filechooser')
   await page.locator('[data-testid="app-menu"]').click()
   await page.locator('[data-testid="menu-import-prefs"]').click()
   await (await chooser).setFiles({ name: 'prefs.xprefs', mimeType: 'application/json', buffer: Buffer.from(text) })
 
-  await expect(page.locator('.prefs-transfer-list .prefs-transfer-row')).toHaveCount(9)
+  await expect(page.locator('.prefs-transfer-list .prefs-transfer-row')).toHaveCount(10)
   await page.locator('.dialog-footer .button.primary').click()
 
   await expect(page.locator('.notification').last()).toContainText('shortcuts')
+  await expect(page.locator('.notification').last()).toContainText('sections')
   await openShortcuts(page)
   await expect(shortcutButton(page, 'Save')).toHaveText('K')
+  await page.locator('.dialog-footer .button.primary').click()
+
+  // Fill is off again, as the file said.
+  await page.locator('[data-testid="app-menu"]').click()
+  await page.locator('[data-testid="menu-sections"]').hover()
+  await expect(page.locator('[data-testid="section-toggle-fill"]')).not.toContainText('✓')
+  await expect(page.locator('[data-testid="section-toggle-stroke"]')).toContainText('✓')
 })
 
 test('every row is readable, and the button does not promise another dialog', async ({ page }) => {

@@ -81,7 +81,12 @@ import type {
   Style,
 } from '../document/types'
 
-export type ImageHandling = 'embed' | 'link'
+/**
+ * 'embed' writes the picture into the file, 'link' writes it beside the file,
+ * and 'omit' leaves it out — for a code view, where a picture is a screenful of
+ * base64 that hides the markup it sits in.
+ */
+export type ImageHandling = 'embed' | 'link' | 'omit'
 export type TextHandling = 'embed-font' | 'reference'
 
 export interface SvgExportOptions {
@@ -644,6 +649,7 @@ function emitShape(ctx: EmitContext, node: DesignNode): string {
 }
 
 function emitImage(ctx: EmitContext, node: Extract<DesignNode, { type: 'image' }>): string {
+  if (ctx.options.imageHandling === 'omit') return ''
   const asset = ctx.doc.assets[node.assetId]
   if (!asset) {
     ctx.warnings.add(`An image was skipped because its data is missing.`)

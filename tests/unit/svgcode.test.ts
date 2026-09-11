@@ -27,12 +27,12 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
-  createArtboard, createDocument, createPolygon, createRect,
+  createArtboard, createDocument, createImage, createPolygon, createRect,
 } from '@/document/NodeFactory'
 import { addNode } from '@/document/DocumentModel'
 import { worldMatrix } from '@/document/SceneGraph'
 import { formatSvg, tokenizeSvg } from '@/svg/SvgFormat'
-import { svgCodeFor } from '@/svg/SvgCode'
+import { svgCodeFor, svgCodeForScene } from '@/svg/SvgCode'
 import { applySvgCode } from '@/history/SvgCodeCommands'
 import { breakHistoryCoalescing, getDoc, replaceDocument, transaction, undo } from '@/state/DocumentStore'
 import type { NodeId } from '@/document/types'
@@ -182,5 +182,51 @@ describe('editing a shape through its code', () => {
 
     undo()
     expect(getDoc().nodes[rect]).toEqual(original)
+  })
+})
+
+describe('the whole scene as code', () => {
+  beforeEach(() => {
+    replaceDocument(createDocument('Scene', false))
+  })
+
+  it('holds every object, on artboards and off them, and leaves pictures out', async () => {
+    const board = createArtboard('A', { x: 0, y: 0, width: 400, height: 300 })
+    const inside = createRect({ x: 20, y: 20, width: 50, height: 50 })
+    const loose = createPolygon({ x: 600, y: 40, width: 80, height: 80 })
+    const picture = createImage('asset-1', 'Photo', { x: 100, y: 100, width: 40, height: 40 })
+    transaction('seed', (draft) => {
+      draft.assets['asset-1'] = {
+        id: 'asset-1', name: 'Photo', mimeType: 'image/png', width: 1, height: 1, byteSize: 1,
+        dataUrl: 'data:image/png;base64,AAAA',
+      }
+      addNode(draft, board, draft.rootId)
+      addNode(draft, inside, board.id)
+      addNode(draft, picture, board.id)
+      addNode(draft, loose, draft.rootId)
+    })
+
+    const code = await svgCodeForScene(getDoc())
+    expect(code).toContain('<rect')
+    expect(code).toContain(`data-name="${loose.name}"`)
+    expect(code).not.toContain('<image')
+    expect(code).not.toContain('base64')
+    // Framed on all of it: the loose polygon reaches x = 680.
+    expect(code).toMatch(/viewBox="0 0 68\d /)
+  })
+
+  it('follows the scene: a group made of two shapes is a <g> around both', async () => {
+    const a = createRect({ x: 0, y: 0, width: 10, height: 10 })
+    const b = createRect({ x: 20, y: 0, width: 10, height: 10 })
+    transaction('seed', (draft) => {
+      addNode(draft, a, draft.rootId)
+      addNode(draft, b, draft.rootId)
+    })
+    expect(await svgCodeForScene(getDoc())).not.toContain('<g ')
+
+    const { groupNodes } = await import('@/document/DocumentModel')
+    transaction('group', (draft) => { groupNodes(draft, [a.id, b.id]) })
+    const code = await svgCodeForScene(getDoc())
+    expect(code).toMatch(/<g [^>]*data-name="Group"[^>]*>\n\s+<rect[^\n]+\n\s+<rect/)
   })
 })

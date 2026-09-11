@@ -35,6 +35,7 @@ import { MenuHost, useMenuState } from './Menu'
 import { ChevronDownIcon } from './icons'
 import { useEditorStore } from '../state/hooks'
 import type { PanelSection } from '../state/EditorStore'
+import { beginSectionDrag } from './sectionDrag'
 
 // ------------------------------------------------------------------ tooltip
 
@@ -485,11 +486,25 @@ export function Section({
   children: ReactNode
 }) {
   const hidden = useEditorStore((s) => !!id && s.hiddenSections.includes(id))
+  // The column is a flex box and this is the section's place in it, so the
+  // arrangement is applied without any section knowing about any other.
+  const order = useEditorStore((s) => (id ? s.sectionOrder.indexOf(id) : -1))
+  const drag = useEditorStore((s) => (id && s.sectionDrag ? s.sectionDrag : null))
   if (hidden) return null
+  const dragged = !!drag && drag.id === id
+  const landing = !!drag && drag.over === id && drag.id !== id
   return (
-    <div className="section" data-section={id}>
+    <div
+      className={`section${dragged ? ' section-dragging' : ''}${landing ? ' section-drop-before' : ''}`}
+      data-section={id}
+      style={id ? { order } : undefined}
+    >
       {title && (
-        <h3 className="section-title">
+        <h3
+          className={`section-title${id ? ' movable' : ''}`}
+          title={id ? 'Drag to move this section' : undefined}
+          onPointerDown={id ? (e) => beginSectionDrag(e, id) : undefined}
+        >
           {title}
           {actions}
         </h3>

@@ -161,3 +161,39 @@ test.describe('a shape’s SVG code', () => {
     expect(copied).toBe(await page.locator('[data-testid="svg-code"]').inputValue())
   })
 })
+
+test.describe('the whole scene as code', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.evaluate(() => localStorage.removeItem('xdesign.svgCodeScope'))
+  })
+
+  test('with nothing selected it is the scene, and it follows every change', async ({ page }) => {
+    const code = page.locator('[data-testid="svg-code"]')
+    await expect(code).toHaveAttribute('data-scope', 'scene')
+    await expect(code).not.toHaveValue(/<rect [^>]*data-name="Rectangle"/)
+
+    await drawShape(page, 'rect', { x: 200, y: 200 }, { x: 300, y: 280 })
+    await drawShape(page, 'ellipse', { x: 340, y: 200 }, { x: 420, y: 280 })
+    await page.locator('[data-testid="svg-code-scene"]').click()
+    await expect(code).toHaveAttribute('data-scope', 'scene')
+    await expect(code).toHaveValue(/data-name="Rectangle"[\s\S]*data-name="Ellipse"/)
+
+    // Grouping them shows up as a group around both.
+    await page.keyboard.press(`${modifier()}+a`)
+    await page.keyboard.press(`${modifier()}+g`)
+    await expect(code).toHaveValue(/<g [^>]*data-name="Group"[^>]*>\s*<rect[\s\S]*<ellipse/)
+
+    // The selection's view of a group is its code, to read and copy.
+    await page.locator('[data-testid="svg-code-selection"]').click()
+    await expect(code).toHaveAttribute('data-scope', 'selection')
+    await expect(code).toHaveAttribute('readonly', '')
+  })
+
+  test('leaves pictures out of the scene', async ({ page }) => {
+    await pasteQuadrants(page)
+    await page.locator('[data-testid="svg-code-scene"]').click()
+    const code = page.locator('[data-testid="svg-code"]')
+    await expect(code).toHaveAttribute('data-scope', 'scene')
+    await expect(code).not.toHaveValue(/<image|base64/)
+  })
+})

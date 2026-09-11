@@ -47,6 +47,7 @@
   "menu.view": "Affichage",
   "menu.sections": "Panneaux",
   "menu.showAllSections": "Afficher tous les panneaux",
+  "menu.resetSectionOrder": "Rétablir l’ordre des panneaux",
   "menu.zoomToFit": "Ajuster à la fenêtre",
   "menu.zoomTo100": "Zoom à 100 %",
   "menu.zoomToSelection": "Zoom sur la sélection",
@@ -164,6 +165,8 @@
   "note.canvasGrid": "Une aide au dessin sur l'ensemble du canevas. La grille carrée ou de mise en page propre à un plan de travail se règle sur le plan de travail.",
   "note.cropHint": "Faites glisser les poignées pour choisir ce qui reste, ou faites glisser l’intérieur pour le déplacer. Entrée applique, Échap annule.",
   "note.svgCodeReadOnly": "Le code d’un objet transformé en 3D peut être copié, mais pas modifié.",
+  "note.svgCodeScene": "Toute la scène, telle qu’un export SVG l’écrit, sans les images. Sélectionnez une forme pour modifier son code.",
+  "note.svgCodeSelection": "Le code de tout ce qui est sélectionné, sans les images. Sélectionnez un seul tracé, une ligne, un rectangle, une ellipse ou un polygone pour modifier son code.",
   "document.counts": "{objects} objets · {images} images",
   "label.textResize": "Redimensionnement du texte",
   "label.autoWidth": "Largeur automatique",
@@ -237,6 +240,8 @@
   "prefs.section.shortcutsDefault": "Par défaut",
   "prefs.section.shortcutsChanged": "{count} sur {total} modifiés",
   "prefs.section.canvasCount": "{count} réglages",
+  "prefs.section.panelsAllShown": "Tous affichés",
+  "prefs.section.panelsHidden": "{count} masqués",
   "prefs.transfer.exportTitle": "Exporter les préférences",
   "prefs.transfer.importTitle": "Importer les préférences",
   "prefs.transfer.exportHint": "Choisissez ce qui sera écrit dans le fichier.",
@@ -261,5 +266,7 @@
   "label.resetCrop": "Annuler le recadrage",
   "label.showWholeImage": "Afficher toute l’image",
   "label.copySvgCode": "Copier le code SVG",
-  "label.copied": "Copié"
+  "label.copied": "Copié",
+  "label.codeSelection": "Sélection",
+  "label.codeScene": "Scène"
 }
