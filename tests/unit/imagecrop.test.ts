@@ -259,10 +259,12 @@ describe('cropping in the document', () => {
       n.style.stroke = { ...n.style.stroke, paint: { type: 'solid', color: { r: 255, g: 0, b: 0, a: 1 } }, width: 2 }
     })
     const { svg } = await exportNodesToSvg(getDoc(), [id], { bounds: { x: 0, y: 0, width: 800, height: 600 } })
-    // The picture is laid out at its pixel size, 400 × 200; the kept middle
-    // half is 100..300 × 50..150 of that.
-    expect(svg).toContain('viewBox="100 50 200 100"')
-    expect(svg).toContain('width="100" height="50"')
-    expect(svg).toMatch(/<path d="[^"]+" fill="none" stroke="#ff0000" stroke-width="2"\/>/)
+    // The whole picture, placed so its kept middle half lands in the 100 × 50
+    // box — it is twice the box's size, a quarter of it off to the top left —
+    // and clipped to the box, so only the kept part shows.
+    expect(svg).toMatch(/<image [^>]*x="-50" y="-25" width="200" height="100" preserveAspectRatio="none" clip-path="url\(#imgclip-[^)]+\)"/)
+    expect(svg).toContain('<path data-name="Clip" d="M0 0 L100 0 L100 50 L0 50 Z"/>')
+    // The border is inside the same group as the picture, so it moves with it.
+    expect(svg).toMatch(/<g [^>]*transform="matrix\(1 0 0 1 100 65\)"><image [^>]*\/><path data-name="Border" d="[^"]+" fill="none" stroke="#ff0000" stroke-width="2"\/><\/g>/)
   })
 })

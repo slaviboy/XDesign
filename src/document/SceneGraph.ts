@@ -191,7 +191,7 @@ export function maskOutlines(
   doc: DesignDocument,
   maskId: NodeId,
   base: Mat2D = IDENTITY,
-): Array<{ d: string; m: Mat2D }> {
+): Array<{ d: string; m: Mat2D; name: string }> {
   const node = doc.nodes[maskId]
   if (!node || !node.visible) return []
   const m = multiply(base, localMatrix(node.transform))
@@ -200,7 +200,8 @@ export function maskOutlines(
     return node.children.flatMap((child) => maskOutlines(doc, child, m))
   }
   const d = nodePathData(node)
-  return d ? [{ d, m }] : []
+  // The shape's name travels with its outline, so an export can write it.
+  return d ? [{ d, m, name: node.name }] : []
 }
 
 /** The node's own box in local space. */

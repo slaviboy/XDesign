@@ -613,7 +613,9 @@ function materializeClip(clip: ClipSpec, ctx: ImportContext): NodeId | null {
     // Several shapes clip as their union, so they are grouped and the renderer
     // emits every descendant outline into the one clipPath.
     const group = createGroup(parts, { x: 0, y: 0, width: 1, height: 1 })
-    group.name = 'Clip'
+    // The mask's own name when the file carries one, as this app's exports do.
+    // Not the id: a third-party clip's id is an identifier, not a layer name.
+    group.name = clip.el.getAttribute('data-name')?.trim() || 'Clip'
     for (const c of parts) ctx.nodes[c]!.parentId = group.id
     ctx.nodes[group.id] = group
     sizeGroupToChildren(group.id, ctx)

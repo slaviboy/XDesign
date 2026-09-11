@@ -34,7 +34,7 @@ import type { Bounds } from '../geometry/Bounds'
 import { polygonStarPath, rectPath } from '../geometry/ShapeGeometry'
 import { mat3ScaleAt, mat3ToMat2D, projectPathData, type Mat3 } from '../geometry/Perspective'
 import { localMatrix, maskOutlines, nodePathData, worldMatrix } from '../document/SceneGraph'
-import { cropOf, cropViewBox, isCropped, pictureSize } from '../document/ImageCrop'
+import { cropOf, cropViewBox, fullImageFrame, isCropped, pictureSize } from '../document/ImageCrop'
 import {
   depthSorted,
   is3dAffected,
@@ -298,7 +298,7 @@ function emitNode(ctx: EmitContext, id: NodeId, isRoot: boolean): string {
   // opacity, mix-blend-mode and filter are all perfectly legal on a shape,
   // a <text> or an <image>, and mean the same thing there as on a wrapping
   // group — so none of them is a reason to add one.
-  if (!attrs && LEAF_TYPES.has(node.type)) {
+  if (!attrs && LEAF_TYPES.has(node.type) && isSingleElement(body)) {
     return injectAttrs(body, `${name}${transform}${opacity}${blend}${filter}`)
   }
   return `<g${name}${transform}${opacity}${blend}${filter}${attrs}>${body}</g>`
@@ -414,6 +414,22 @@ function emitPlane(ctx: EmitContext, node: DesignNode, h: Mat3, px: number): str
 }
 
 /** Put attributes on the body's own opening tag. */
+/**
+ * Whether markup is one element that can take a transform: `<x …/>`, or
+ * `<x …>…</x>` with nothing after it. An image with a border is two, and a
+ * transform written onto the first alone left the border behind at the
+ * origin. A nested <svg> is one, but a transform on it is not SVG 1.1, and
+ * readers that follow 1.1 would ignore it.
+ */
+function isSingleElement(body: string): boolean {
+  const tag = /^<([a-zA-Z][\w-]*)/.exec(body)?.[1]
+  if (!tag || tag === 'svg') return false
+  const gt = body.indexOf('>')
+  if (body[gt - 1] === '/') return gt === body.length - 1
+  const close = `</${tag}>`
+  return body.endsWith(close) && body.indexOf(close) === body.length - close.length
+}
+
 function injectAttrs(body: string, attrs: string): string {
   const at = body.indexOf(' ')
   const selfClose = body.indexOf('/>')
@@ -550,11 +566,14 @@ function emitBody(ctx: EmitContext, node: DesignNode): { body: string; attrs?: s
 
       // Every outline inside the mask, not its bounding box: an imported
       // <clipPath> may hold several shapes and clips as their union.
+      // Named, each outline for the shape it came from and the clip for the
+      // mask, so an import gives the mask shape its name back.
       const outlines = maskOutlines(ctx.doc, node.maskId)
-        .map((o) => `<path d="${o.d}" transform="${toSvgMatrix(o.m)}"/>`)
+        .map((o) => `<path data-name="${escapeAttr(o.name)}" d="${o.d}" transform="${toSvgMatrix(o.m)}"/>`)
         .join('')
+      const maskName = escapeAttr(ctx.doc.nodes[node.maskId]!.name)
       ctx.defs.push(
-        `<clipPath id="${clipId}" clipPathUnits="userSpaceOnUse">${outlines}</clipPath>`,
+        `<clipPath id="${clipId}" data-name="${maskName}" clipPathUnits="userSpaceOnUse">${outlines}</clipPath>`,
       )
       return { body: kids, attrs: ` clip-path="url(#${clipId})"` }
     }
@@ -668,38 +687,49 @@ function emitImage(ctx: EmitContext, node: Extract<DesignNode, { type: 'image' }
 
   const preserve =
     node.fit === 'fill' ? 'none' : node.fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet'
-  const hasRadius = node.cornerRadius.some((r) => r > 0)
+  const cropped = isCropped(node)
   const clipId = `imgclip-${safeId(node.id)}`
-  if (hasRadius) {
+  const clip = (cropped || node.cornerRadius.some((r) => r > 0))
+    ? ` clip-path="url(#${clipId})"`
+    : ''
+  if (clip) {
     ctx.defs.push(
-      `<clipPath id="${clipId}"><path d="${rectPath(width, height, node.cornerRadius)}"/></clipPath>`,
+      `<clipPath id="${clipId}"><path data-name="Clip" d="${rectPath(width, height, node.cornerRadius)}"/></clipPath>`,
     )
   }
 
-  if (isCropped(node)) {
-    // The kept part of the picture, and only that: a nested viewport whose
-    // viewBox is the kept part clips to itself, so every export — SVG, the
-    // rasters drawn from it, the clipboard — shows the crop and nothing else.
-    // The whole picture still travels, as it does in the document, so the
-    // file can be recropped by anything that reads SVG.
+  let picture: string
+  if (cropped && node.fit === 'fill') {
+    // The whole picture, placed so the kept part lands exactly in the box, and
+    // clipped to the box — one plain <image> that every SVG reader draws the
+    // same, and that still carries the whole picture, so the crop can be
+    // widened again by anything that opens the file.
+    const frame = fullImageFrame(node)
+    picture =
+      `<image href="${escapeAttr(href)}" xlink:href="${escapeAttr(href)}" ` +
+      `x="${round(frame.x, p)}" y="${round(frame.y, p)}" ` +
+      `width="${round(frame.width, p)}" height="${round(frame.height, p)}" preserveAspectRatio="none"${clip}/>`
+  } else if (cropped) {
+    // Fit other than Fill letterboxes the kept part inside the box, which only
+    // a nested viewport can say.
     const size = pictureSize(asset)
-    const nested =
-      `<svg width="${round(width, p)}" height="${round(height, p)}" ` +
+    picture =
+      `<g${clip}><svg width="${round(width, p)}" height="${round(height, p)}" ` +
       `viewBox="${cropViewBox(cropOf(node), size)}" preserveAspectRatio="${preserve}" overflow="hidden">` +
       `<image href="${escapeAttr(href)}" xlink:href="${escapeAttr(href)}" ` +
       `width="${round(size.width, p)}" height="${round(size.height, p)}" preserveAspectRatio="none"/>` +
-      `</svg>`
-    return (hasRadius ? `<g clip-path="url(#${clipId})">${nested}</g>` : nested) + imageBorder(ctx, node)
+      `</svg></g>`
+  } else {
+    picture =
+      `<image href="${escapeAttr(href)}" xlink:href="${escapeAttr(href)}" ` +
+      `width="${round(width, p)}" height="${round(height, p)}" preserveAspectRatio="${preserve}"${clip}/>`
   }
 
-  return (
-    `<image href="${escapeAttr(href)}" xlink:href="${escapeAttr(href)}" ` +
-    `width="${round(width, p)}" height="${round(height, p)}" ` +
-    `preserveAspectRatio="${preserve}"` +
-    (hasRadius ? ` clip-path="url(#${clipId})"` : '') +
-    `/>` +
-    imageBorder(ctx, node)
-  )
+  const border = imageBorder(ctx, node)
+  // A border is a second element, so the image is written inside a group that
+  // carries its name and place — and the picture keeps the name too, so the
+  // layer is still called what it was called when it comes back in.
+  return border ? picture.replace(/^<(\w+)/, `<$1 data-name="${escapeAttr(node.name)}"`) + border : picture
 }
 
 /** An image's Stroke, around its box, written as the canvas draws it. */
@@ -708,7 +738,7 @@ function imageBorder(ctx: EmitContext, node: Extract<DesignNode, { type: 'image'
   if (stroke.paint.type === 'none' || stroke.width <= 0) return ''
   const { width, height } = node.transform
   const style = { ...node.style, fill: NO_PAINT }
-  return `<path d="${rectPath(width, height, node.cornerRadius)}"${styleAttrs(ctx, style, node.id)}/>`
+  return `<path data-name="Border" d="${rectPath(width, height, node.cornerRadius)}"${styleAttrs(ctx, style, node.id)}/>`
 }
 
 function emitText(ctx: EmitContext, node: Extract<DesignNode, { type: 'text' }>): string {
